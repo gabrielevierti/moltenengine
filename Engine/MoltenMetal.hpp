@@ -1,0 +1,28 @@
+// MoltenMetal.hpp
+// Everything a game needs, in one include.
+#pragma once
+
+#include "Assets/Assets.hpp"
+#include "Assets/Font.hpp"
+#include "Assets/MeshData.hpp"
+#include "Audio/Audio.hpp"
+#include "Audio/AudioClip.hpp"
+#include "Audio/Mixer.hpp"
+#include "Core/Engine.hpp"
+#include "Core/Game.hpp"
+#include "Game/Component.hpp"
+#include "Game/GameModule.hpp"
+#include "Core/Log.hpp"
+#include "Core/Time.hpp"
+#include "Input/Input.hpp"
+#include "Math/Math.hpp"
+#include "Physics/Physics.hpp"
+#include "Rendering/Canvas.hpp"
+#include "Rendering/DebugDraw.hpp"
+#include "Rendering/Material.hpp"
+#include "Rendering/Particles.hpp"
+#include "Rendering/Renderer.hpp"
+#include "Scene/Components.hpp"
+#include "Scene/Scene.hpp"
+#include "Scene/SceneFile.hpp"
+#include "UI/Gui.hpp"

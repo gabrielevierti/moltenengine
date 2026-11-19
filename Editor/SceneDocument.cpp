@@ -1,0 +1,598 @@
+#include "SceneDocument.hpp"
+
+#include "Core/TextFile.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <filesystem>
+
+namespace molten::editor {
+
+namespace {
+const size_t kUndoLevels = 200;
+}
+
+// ---------------------------------------------------------------- the file
+
+std::string SceneDocument::snapshot() {
+    return writeScene(engine_.scene, materials, engine_.renderer().settings);
+}
+
+void SceneDocument::resetHistory() {
+    engine_.scene.updateTransforms();
+    current_ = snapshot();
+    saved_ = current_;
+    undo_.clear();
+    redo_.clear();
+    touched_ = false;
+}
+
+std::string SceneDocument::displayName() const {
+    return filePath.empty() ? "Untitled" : std::filesystem::path(filePath).stem().string();
+}
+
+void SceneDocument::createCamera() {
+    camera_ = engine_.scene.create("Editor Camera");
+    Transform transform;
+    transform.position = cameraPosition;
+    transform.rotation = cameraRotation();
+    engine_.scene.add(camera_, transform);
+    Camera camera;
+    camera.farPlane = 2000.0f;
+    engine_.scene.add(camera_, camera);
+    engine_.scene.add(camera_, EditorOnly{});
+    engine_.renderer().cameraOverride = isPlaying_ ? Entity{} : camera_;
+}
+
+void SceneDocument::syncCamera() {
+    if (Transform* transform = engine_.scene.get<Transform>(camera_)) {
+        transform->position = cameraPosition;
+        transform->rotation = cameraRotation();
+    }
+}
+
+/// Replaces the scene with the one `text` describes. The selection is kept by position
+/// in the scene: the entities are new, but the third one is still the third one.
+void SceneDocument::restore(const std::string& text) {
+    std::vector<int> selectedIndices;
+    for (Entity entity : selection_) {
+        auto found = std::find(entities_.begin(), entities_.end(), entity);
+        if (found != entities_.end()) selectedIndices.push_back(int(found - entities_.begin()));
+    }
+    engine_.scene.clear();
+    engine_.physics.reset();
+    createCamera();
+    readScene(text, engine_.scene, materials, engine_.renderer().settings, sceneAssets(engine_.assets()));
+    defaultMaterial();
+    beginFrame();
+    selection_.clear();
+    for (int index : selectedIndices) {
+        if (index < int(entities_.size())) selection_.push_back(entities_[size_t(index)]);
+    }
+    engine_.scene.updateTransforms();
+}
+
+/// A floor, something on it, a sun and a camera: enough to see the lighting.
+void SceneDocument::populateDefaultScene(Scene& scene, Assets& assets, std::vector<NamedMaterial>& materials) {
+    auto ground = std::make_shared<Material>();
+    ground->baseColor = Vec4{0.55f, 0.57f, 0.6f, 1};
+    ground->roughness = 0.9f;
+    materials = {{"Default", std::make_shared<Material>()}, {"Ground", ground}};
+
+    Entity sun = scene.create("Sun");
+    Transform sunTransform;
+    sunTransform.position = Vec3{0, 6, 0};
+    sunTransform.rotation = lookRotation(Vec3{0.5f, -0.8f, -0.35f});
+    scene.add(sun, sunTransform);
+    Light light;
+    light.type = LightType::Directional;
+    light.color = Vec3{1.0f, 0.95f, 0.85f};
+    light.intensity = 3.5f;
+    light.castsShadows = true;
+    scene.add(sun, light);
+
+    Entity floor = scene.create("Floor");
+    Transform floorTransform;
+    floorTransform.scale = Vec3{20, 1, 20};
+    scene.add(floor, floorTransform);
+    scene.add(floor, MeshRenderer{assets.plane(), ground});
+    Collider floorCollider = Collider::box(Vec3{10, 0.5f, 10});
+    floorCollider.offset = Vec3{0, -0.5f, 0};
+    scene.add(floor, floorCollider);
+
+    Entity cube = scene.create("Cube");
+    Transform cubeTransform;
+    cubeTransform.position = Vec3{0, 0.5f, 0};
+    scene.add(cube, cubeTransform);
+    scene.add(cube, MeshRenderer{assets.cube(), materials[0].material});
+    scene.add(cube, Collider::box(Vec3{0.5f, 0.5f, 0.5f}));
+
+    Entity camera = scene.create("Main Camera");
+    Transform cameraTransform;
+    cameraTransform.position = Vec3{0, 2, 7};
+    cameraTransform.rotation = lookRotation(Vec3{0, -0.2f, -1});
+    scene.add(camera, cameraTransform);
+    scene.add(camera, Camera{});
+}
+
+std::string SceneDocument::defaultSceneText() {
+    Scene scene;
+    std::vector<NamedMaterial> sceneMaterials;
+    populateDefaultScene(scene, engine_.assets(), sceneMaterials);
+    scene.updateTransforms();
+    return writeScene(scene, sceneMaterials, RenderSettings{});
+}
+
+void SceneDocument::newScene() {
+    if (isPlaying_) setPlaying(false);
+    filePath.clear();
+    Scene& scene = engine_.scene;
+    scene.clear();
+    engine_.physics.reset();
+    engine_.renderer().settings = RenderSettings{};
+    selection_.clear();
+    createCamera();
+
+    populateDefaultScene(scene, engine_.assets(), materials);
+
+    beginFrame();
+    resetHistory();
+}
+
+bool SceneDocument::open(const std::string& absolutePath, std::string* error) {
+    std::optional<std::string> contents = text::readFile(absolutePath);
+    // Read it into a scratch scene first: a file that cannot be read must not cost the open scene.
+    Scene probe;
+    std::vector<NamedMaterial> probeMaterials;
+    RenderSettings probeSettings;
+    if (!contents || !readScene(*contents, probe, probeMaterials, probeSettings, SceneAssets{})) {
+        if (error) *error = "Cannot open " + absolutePath;
+        return false;
+    }
+    if (isPlaying_) setPlaying(false);
+    filePath = absolutePath;
+    selection_.clear();
+    entities_.clear();
+    engine_.renderer().settings = RenderSettings{};
+    restore(*contents);
+    resetHistory();
+    return true;
+}
+
+bool SceneDocument::save(std::string* error) {
+    if (filePath.empty()) {
+        if (error) *error = "The scene has no file yet";
+        return false;
+    }
+    return saveAs(filePath, error);
+}
+
+bool SceneDocument::saveAs(const std::string& absolutePath, std::string* error) {
+    if (isPlaying_) {
+        if (error) *error = "Stop the game before saving";
+        return false;
+    }
+    std::error_code ignored;
+    std::filesystem::create_directories(std::filesystem::path(absolutePath).parent_path(), ignored);
+    engine_.scene.updateTransforms();
+    std::string contents = snapshot();
+    if (!text::writeFile(absolutePath, contents)) {
+        if (error) *error = "Cannot write " + absolutePath;
+        return false;
+    }
+    filePath = absolutePath;
+    current_ = contents;
+    saved_ = contents;
+    return true;
+}
+
+// ---------------------------------------------------------------- the selection
+
+bool SceneDocument::isSelected(Entity entity) const {
+    return std::find(selection_.begin(), selection_.end(), entity) != selection_.end();
+}
+
+void SceneDocument::select(Entity entity) {
+    selection_.clear();
+    if (engine_.scene.isAlive(entity)) selection_.push_back(entity);
+}
+
+void SceneDocument::addToSelection(Entity entity) {
+    if (!engine_.scene.isAlive(entity)) return;
+    selection_.erase(std::remove(selection_.begin(), selection_.end(), entity), selection_.end());
+    selection_.push_back(entity);       // last: it becomes the primary one
+}
+
+void SceneDocument::toggleSelection(Entity entity) {
+    if (isSelected(entity)) {
+        selection_.erase(std::remove(selection_.begin(), selection_.end(), entity), selection_.end());
+    } else {
+        addToSelection(entity);
+    }
+}
+
+void SceneDocument::selectAll() {
+    selection_ = entities_;
+}
+
+// ---------------------------------------------------------------- entities
+
+std::vector<Entity> SceneDocument::roots() const {
+    std::vector<Entity> result;
+    for (Entity entity : entities_) {
+        const Transform* transform = engine_.scene.get<Transform>(entity);
+        if (transform && !engine_.scene.isAlive(transform->parent)) result.push_back(entity);
+    }
+    return result;
+}
+
+std::vector<Entity> SceneDocument::children(Entity parent) const {
+    std::vector<Entity> result;
+    for (Entity entity : entities_) {
+        const Transform* transform = engine_.scene.get<Transform>(entity);
+        if (transform && transform->parent == parent) result.push_back(entity);
+    }
+    return result;
+}
+
+bool SceneDocument::isDescendant(Entity entity, Entity ancestor) const {
+    Entity up = entity;
+    for (int depth = 0; depth < 256 && engine_.scene.isAlive(up); depth++) {
+        if (up == ancestor) return true;
+        const Transform* transform = engine_.scene.get<Transform>(up);
+        if (!transform) break;
+        up = transform->parent;
+    }
+    return false;
+}
+
+std::string SceneDocument::nameOf(Entity entity) const {
+    const Name* name = engine_.scene.get<Name>(entity);
+    return name && !name->value.empty() ? name->value : std::string("Entity");
+}
+
+std::shared_ptr<Material> SceneDocument::defaultMaterial() {
+    if (materials.empty()) materials.push_back(NamedMaterial{"Default", std::make_shared<Material>()});
+    return materials[0].material;
+}
+
+int SceneDocument::materialIndex(const std::shared_ptr<Material>& material) const {
+    for (size_t i = 0; i < materials.size(); i++) {
+        if (materials[i].material == material) return int(i);
+    }
+    return -1;
+}
+
+Entity SceneDocument::create(Primitive kind, Entity parent) {
+    static const char* const names[] = {"Empty", "Cube", "Sphere", "Plane", "Cylinder", "Directional Light",
+                                        "Point Light", "Spot Light", "Camera", "Particles"};
+    Scene& scene = engine_.scene;
+    Entity entity = scene.create(names[int(kind)]);
+    Transform transform;
+    // In front of the camera, on the ground if the camera looks at it.
+    Vec3 forward = cameraForward();
+    float distance = forward.y < -0.05f ? std::min(-cameraPosition.y / forward.y, 30.0f) : 8.0f;
+    Vec3 point = cameraPosition + forward * distance;
+    transform.position = Vec3{std::round(point.x * 2) / 2, forward.y < -0.05f ? 0.0f : point.y, std::round(point.z * 2) / 2};
+    std::shared_ptr<Material> material = defaultMaterial();
+    Assets& assets = engine_.assets();
+    switch (kind) {
+        case Primitive::Empty:
+            break;
+        case Primitive::Cube:
+            transform.position.y += 0.5f;
+            scene.add(entity, MeshRenderer{assets.cube(), material});
+            scene.add(entity, Collider::box(Vec3{0.5f, 0.5f, 0.5f}));
+            break;
+        case Primitive::Sphere:
+            transform.position.y += 0.5f;
+            scene.add(entity, MeshRenderer{assets.sphere(), material});
+            scene.add(entity, Collider::sphere(0.5f));
+            break;
+        case Primitive::Plane:
+            transform.position.y += 0.01f;
+            scene.add(entity, MeshRenderer{assets.plane(), material});
+            break;
+        case Primitive::Cylinder:
+            transform.position.y += 0.5f;
+            scene.add(entity, MeshRenderer{assets.cylinder(), material});
+            scene.add(entity, Collider::capsule(0.5f, 0.0f));
+            break;
+        case Primitive::DirectionalLight: {
+            transform.position.y += 4.0f;
+            transform.rotation = lookRotation(Vec3{0.4f, -0.8f, -0.3f});
+            Light light;
+            light.type = LightType::Directional;
+            light.intensity = 3.0f;
+            scene.add(entity, light);
+            break;
+        }
+        case Primitive::PointLight: {
+            transform.position.y += 2.0f;
+            Light light;
+            light.intensity = 8;
+            light.range = 8;
+            scene.add(entity, light);
+            break;
+        }
+        case Primitive::SpotLight: {
+            transform.position.y += 3.0f;
+            transform.rotation = lookRotation(Vec3{0, -1, -0.001f});
+            Light light;
+            light.type = LightType::Spot;
+            light.intensity = 20;
+            light.range = 12;
+            scene.add(entity, light);
+            break;
+        }
+        case Primitive::Camera: {
+            transform.position = cameraPosition;
+            transform.rotation = cameraRotation();          // looks where the editor looks now
+            Camera camera;
+            camera.isActive = scene.count<Camera>() <= 1;   // the first one becomes the game's camera
+            scene.add(entity, camera);
+            break;
+        }
+        case Primitive::ParticleEmitter:
+            transform.position.y += 0.2f;
+            scene.add(entity, ParticleEmitter{});
+            break;
+    }
+    scene.add(entity, transform);
+    entities_.push_back(entity);
+    if (scene.isAlive(parent)) {
+        scene.updateTransforms();
+        reparent(entity, parent);
+    }
+    select(entity);
+    markChanged();
+    return entity;
+}
+
+Entity SceneDocument::createFromMesh(const std::string& meshName, Vec3 position) {
+    std::shared_ptr<Mesh> mesh = engine_.assets().mesh(meshName);
+    if (!mesh) return Entity{};
+    Entity entity = engine_.scene.create(std::filesystem::path(meshName).stem().string());
+    Transform transform;
+    transform.position = position;
+    transform.position.y -= mesh->bounds().min.y;          // standing on the point, not sunk into it
+    engine_.scene.add(entity, transform);
+    engine_.scene.add(entity, MeshRenderer{mesh, defaultMaterial()});
+    entities_.push_back(entity);
+    select(entity);
+    markChanged();
+    return entity;
+}
+
+void SceneDocument::copyComponents(Entity from, Entity to) {
+    Scene& scene = engine_.scene;
+    // Components are plain values: copying an entity is copying each one.
+    if (const MeshRenderer* c = scene.get<MeshRenderer>(from)) scene.add(to, *c);
+    if (const Light* c = scene.get<Light>(from)) scene.add(to, *c);
+    if (const Camera* c = scene.get<Camera>(from)) {
+        Camera camera = *c;
+        camera.isActive = false;
+        scene.add(to, camera);
+    }
+    if (const Collider* c = scene.get<Collider>(from)) scene.add(to, *c);
+    if (const RigidBody* c = scene.get<RigidBody>(from)) {
+        RigidBody body = *c;
+        body.isInitialized = false;
+        scene.add(to, body);
+    }
+    if (const ParticleEmitter* c = scene.get<ParticleEmitter>(from)) {
+        ParticleEmitter emitter = *c;
+        emitter.particles.clear();
+        scene.add(to, emitter);
+    }
+    // The game's own components, and the ones kept as text for a module that is not loaded.
+    for (const ComponentType& type : ComponentRegistry::instance().types()) type.copy(scene, from, to);
+    if (const UnknownComponents* c = scene.get<UnknownComponents>(from)) {
+        UnknownComponents kept = *c;
+        scene.add(to, kept);
+    }
+}
+
+Entity SceneDocument::duplicateTree(Entity entity, Entity newParent) {
+    Scene& scene = engine_.scene;
+    const Transform* source = scene.get<Transform>(entity);
+    if (!source) return Entity{};
+    std::vector<Entity> kids = children(entity);            // before the copy joins the list
+    Entity copy = scene.create(nameOf(entity));
+    Transform transform = *source;
+    transform.parent = newParent;
+    scene.add(copy, transform);
+    copyComponents(entity, copy);
+    entities_.push_back(copy);
+    for (Entity child : kids) duplicateTree(child, copy);
+    return copy;
+}
+
+Entity SceneDocument::duplicate(Entity entity) {
+    const Transform* transform = engine_.scene.get<Transform>(entity);
+    if (!transform) return Entity{};
+    Entity copy = duplicateTree(entity, transform->parent);
+    markChanged();
+    return copy;
+}
+
+void SceneDocument::duplicateSelection() {
+    // Only the top of each selected tree: a selected child of a selected parent comes along anyway.
+    std::vector<Entity> tops;
+    for (Entity entity : selection_) {
+        const Transform* transform = engine_.scene.get<Transform>(entity);
+        bool underAnother = false;
+        for (Entity other : selection_) {
+            if (other != entity && transform && isDescendant(transform->parent, other)) underAnother = true;
+        }
+        if (transform && !underAnother) tops.push_back(entity);
+    }
+    std::vector<Entity> copies;
+    for (Entity entity : tops) {
+        Entity copy = duplicate(entity);
+        if (copy.isValid()) copies.push_back(copy);
+    }
+    if (!copies.empty()) selection_ = copies;
+}
+
+void SceneDocument::deleteSelection() {
+    if (selection_.empty()) return;
+    for (Entity entity : selection_) engine_.scene.destroy(entity);    // children go with their parent
+    selection_.clear();
+    markChanged();
+}
+
+void SceneDocument::setWorldMatrix(Entity entity, const Mat4& world) {
+    Scene& scene = engine_.scene;
+    Transform* transform = scene.get<Transform>(entity);
+    if (!transform) return;
+    // Transform holds what is relative to the parent: take the parent out again.
+    Mat4 local = world;
+    if (const Transform* parent = scene.get<Transform>(transform->parent)) local = simd::inverse(parent->world) * world;
+    decompose(local, transform->position, transform->rotation, transform->scale);
+    transform->world = world;
+}
+
+bool SceneDocument::reparent(Entity child, Entity newParent) {
+    Scene& scene = engine_.scene;
+    Transform* transform = scene.get<Transform>(child);
+    if (!transform || child == newParent) return false;
+    if (scene.isAlive(newParent) && isDescendant(newParent, child)) return false;     // a loop
+    if (transform->parent == newParent) return true;
+    Mat4 world = transform->world;
+    transform->parent = scene.isAlive(newParent) ? newParent : Entity{};
+    setWorldMatrix(child, world);       // same place in the world, new numbers relative to the new parent
+    markChanged();
+    return true;
+}
+
+void SceneDocument::frameSelection() {
+    Scene& scene = engine_.scene;
+    AABB bounds;
+    bool any = false;
+    for (Entity entity : selection_) {
+        const Transform* transform = scene.get<Transform>(entity);
+        if (!transform) continue;
+        const MeshRenderer* renderer = scene.get<MeshRenderer>(entity);
+        if (renderer && renderer->mesh) {
+            const AABB& box = renderer->mesh->bounds();
+            for (int i = 0; i < 8; i++) {
+                Vec3 corner{i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z};
+                bounds.expand(transformPoint(transform->world, corner));
+            }
+        } else {
+            bounds.expand(transform->worldPosition() - Vec3{0.5f, 0.5f, 0.5f});
+            bounds.expand(transform->worldPosition() + Vec3{0.5f, 0.5f, 0.5f});
+        }
+        any = true;
+    }
+    if (!any) return;
+    float radius = std::max(simd::length(bounds.halfExtents()), 0.5f);
+    // Far enough for a sphere of that radius to fit the camera's 60 degree view.
+    orbitDistance = radius / std::sin(radians(30.0f)) * 1.1f;
+    cameraPosition = bounds.center() - cameraForward() * orbitDistance;
+    syncCamera();
+}
+
+// ---------------------------------------------------------------- undo
+
+void SceneDocument::undo() {
+    if (!canUndo()) return;
+    redo_.push_back(std::move(current_));
+    current_ = std::move(undo_.back());
+    undo_.pop_back();
+    restore(current_);
+}
+
+void SceneDocument::redo() {
+    if (!canRedo()) return;
+    undo_.push_back(std::move(current_));
+    current_ = std::move(redo_.back());
+    redo_.pop_back();
+    restore(current_);
+}
+
+// ---------------------------------------------------------------- play
+
+/// Play runs the scene: physics starts and the scene's own camera takes over. Stop puts
+/// everything back exactly as it was, from the text the scene was written to in memory.
+void SceneDocument::setPlaying(bool playing) {
+    if (playing == isPlaying_) return;
+    Scene& scene = engine_.scene;
+    if (playing) {
+        scene.updateTransforms();
+        beforePlay_ = snapshot();
+        isPlaying_ = true;
+        engine_.physics.reset();
+        // Without a camera of its own the scene is watched through the editor's.
+        bool hasCamera = false;
+        Entity editorCamera = camera_;
+        scene.each<Camera>([&](Entity entity, Camera& camera) {
+            hasCamera = hasCamera || (entity != editorCamera && camera.isActive);
+        });
+        engine_.renderer().cameraOverride = hasCamera ? Entity{} : camera_;
+        if (Camera* own = scene.get<Camera>(camera_)) own->isActive = !hasCamera;
+        engine_.isSimulationPaused = false;
+        engine_.restartComponents();        // every component's start() runs again
+        engine_.runsComponents = true;
+    } else {
+        isPlaying_ = false;
+        engine_.isSimulationPaused = true;
+        engine_.runsComponents = false;
+        restore(beforePlay_);
+    }
+}
+
+void SceneDocument::setPaused(bool paused) {
+    if (!isPlaying_) return;
+    engine_.isSimulationPaused = paused;
+    engine_.runsComponents = !paused;
+}
+
+/// Replaces the game's code under an open scene. The scene is written to text, emptied
+/// down to its containers (they were made by the old code), `swap` loads the new code,
+/// and the text is read back: components come back by name, with the fields the new
+/// code has. Undo history is text too, so it survives.
+void SceneDocument::reloadGameCode(const std::function<void()>& swap) {
+    if (isPlaying_) setPlaying(false);
+    engine_.scene.updateTransforms();
+    std::string text = snapshot();
+    engine_.scene.clear();
+    engine_.scene.dropStorages();
+    engine_.physics.reset();
+    swap();
+    restore(text);
+    // What a scene says can change with the code (a field added or removed): that is not an edit.
+    std::string after = snapshot();
+    if (current_ == saved_) saved_ = after;
+    current_ = after;
+}
+
+// ---------------------------------------------------------------- once per frame
+
+void SceneDocument::beginFrame() {
+    Scene& scene = engine_.scene;
+    entities_.clear();
+    scene.each<Transform>([&](Entity entity, Transform&) {
+        if (!scene.has<EditorOnly>(entity)) entities_.push_back(entity);
+    });
+    selection_.erase(std::remove_if(selection_.begin(), selection_.end(), [&](Entity entity) { return !scene.isAlive(entity); }),
+                     selection_.end());
+    if (!isPlaying_) syncCamera();
+}
+
+void SceneDocument::endFrame(bool interacting) {
+    // What was created or moved in this frame is drawn in this frame.
+    engine_.scene.flushDestroyed();
+    engine_.scene.updateTransforms();
+    if (!touched_ || isPlaying_ || interacting) return;
+    touched_ = false;
+    std::string state = snapshot();
+    if (state == current_) return;
+    undo_.push_back(std::move(current_));
+    if (undo_.size() > kUndoLevels) undo_.erase(undo_.begin());
+    redo_.clear();
+    current_ = std::move(state);
+}
+
+}  // namespace molten::editor
