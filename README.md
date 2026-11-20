@@ -1,173 +1,147 @@
- <p align="center">
-  <img src="Assets/Branding/logo.png" alt="Molten Engine" width="520">
+<div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="Docs/readme/banner-dark.svg">
+  <img src="Docs/readme/banner-light.svg" width="100%" alt="Molten Engine: a native game engine for Apple silicon, built on Metal. Games in C++ or visual scripts, made in a full editor.">
+</picture>
+
+<p>
+  <a href="#getting-started"><b>Get started</b></a> ·
+  <a href="#the-editor"><b>Editor</b></a> ·
+  <a href="#writing-games"><b>Writing games</b></a> ·
+  <a href="#engine-features"><b>Engine features</b></a> ·
+  <a href="ROADMAP.md"><b>Roadmap</b></a> ·
+  <a href="https://gabrielevierti.github.io/moltenengine/"><b>Website</b></a>
 </p>
 
-<p align="center">
-  <strong>A game engine for Apple silicon, built on Metal.</strong><br>
-  C++ · Open Source · Visual Editor · macOS · iOS · iPadOS
-</p>
+</div>
 
-<p align="center">
-  <img src="screen.png" alt="Molten Engine editor" width="100%">
-</p>
+**Molten Engine** is a native game engine made only for Apple hardware. It is written in C++ on Metal and uses what Apple silicon is good at: tile-based rendering, memoryless render targets, unified memory and hardware-accelerated ray tracing.
 
-Molten Engine is a native game engine designed exclusively for Apple's hardware.
+You write games with C++ components or visual scripts, build scenes in a full editor, and ship to Mac, iPhone and iPad. No Windows, no Linux, no compatibility layers: just Apple hardware and Metal.
 
-Built on Metal and written in C++, it takes advantage of Apple silicon features such as tile-based rendering, memoryless render targets, unified memory and hardware-accelerated ray tracing.
+![The Molten Engine editor: Hierarchy, Game and Scene views side by side, the Inspector showing the car's Vehicle Body, the Explorer along the bottom](screen.png)
 
-Create games using C++ components or visual scripting, build scenes in a fully featured editor, and deploy to Mac, iPhone and iPad.
+> [!NOTE]
+> **Version 1.0, early development.** Everything described here is implemented and available today. Upcoming work and known limitations are in [ROADMAP.md](ROADMAP.md).
 
-No Windows. No Linux. No compatibility layers. Just Apple hardware and Metal.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="Docs/readme/features-dark.svg">
+  <img src="Docs/readme/features-light.svg" width="100%" alt="Features: a complete visual editor; C++ or visual scripting; ray tracing on Apple GPUs; physics down to the parts; Mac, iPhone and iPad; made only for Apple silicon.">
+</picture>
 
-**Status: Version 1.0 — Early development.**
+## Made with Molten: Driving
 
-The features described here are implemented and available today. See [ROADMAP.md](ROADMAP.md) for upcoming work and known limitations.
+The example game is **Driving**: a Fiat 500 on a small circuit, to lap against the clock. It is a separate download (`MoltenProjects.zip`), not part of the engine: unzip it anywhere and open it with **Open a Project…**.
 
-Molten Engine grew out of the engine developed for the [LearnMetal](https://gabrielevierti.github.io/learnmetal/) tutorials.
+![Driving: the Fiat 500 under the start gantry, lap timer and best lap at the top, speed and gear at the bottom](Docs/driving.jpg)
+
+| | |
+| --- | --- |
+| ![The Fiat 500 on the track](Docs/driving-car.jpg) | ![The circuit from above](Docs/driving-circuit.jpg) |
+
+- **The game.** A 566 m circuit with curbs, walls, a pit lane and lamps, in evening light. Lap times and a best lap kept between games, track limits, tyres that wear and a pit stop to change them, sun, clouds or rain, a title screen, a pause menu and settings, a dashboard, and touch controls.
+- **What it shows.** A car simulated from its parts: springs and dampers, tyres that grip and slide, a turbocharged four-cylinder behind a gearbox, stability control that allows a drift, brakes shared by the load on each wheel. Plus a glTF model used in parts with a material each, the game's own scripts in `Assets/Scripts`, and an interface laid out in the Game view.
+
+![Driving on an iPhone, with the touch controls on screen](Docs/driving-iphone.jpg)
+
+A tour of the project and its scripts is in [Making Games](Docs/MakingGames.md).
 
 ## Getting started
 
-### Requirements
-
-- Mac with Apple silicon.
-- macOS 13 or later.
-- Xcode 15 or later, or Xcode Command Line Tools.
-- CMake 3.24 or later.
-
-Install CMake using Homebrew:
+**Requirements:** a Mac with Apple silicon, macOS 13+, Xcode 15+ (or the Xcode Command Line Tools) and CMake 3.24+.
 
 ```sh
 brew install cmake
 ```
 
-### Build
-
-Clone the repository and build the engine:
+Clone the repository and build:
 
 ```sh
+git clone https://github.com/gabrielevierti/moltenengine.git
+cd moltenengine
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ```
 
-Launch the editor:
+Then launch the editor, or run a game without it:
 
 ```sh
-./build/molten
+./build/molten                   # the editor
+./build/molten-player MyGame     # a game, without the editor
 ```
 
-Launch a game without the editor:
+Prefer Finder? Double-click `build.command`: it builds the project and saves the output to `build.log`.
 
-```sh
-./build/molten-player MyGame
-```
-
-Alternatively, double-click `build.command` in Finder. The script builds the project and saves the output to `build.log`.
-
-On the first configuration, CMake downloads the required dependencies:
-
-- GLFW
-- metal-cpp
-- stb
-- miniaudio
-- Dear ImGui
-- ImGuizmo
+The first configuration downloads the dependencies: GLFW, metal-cpp, stb, miniaudio, Dear ImGui and ImGuizmo.
 
 ## The editor
 
-Molten Engine includes a complete visual editor designed to make game development accessible without sacrificing control.
+A complete visual editor that makes game development approachable without taking control away. Its workflows will feel familiar, but it is built for this engine.
 
-Its interface follows familiar workflows while remaining purpose-built for the engine.
+<table>
+<tr>
+<td valign="top" width="50%">
 
-### Workspace
+**Workspace**
 
-- Hierarchy, Scene, Game, Inspector, Explorer and Console panels.
-- Dockable and rearrangeable tabs.
-- Save, export and import editor layouts.
-- Console with categorized messages, search and duplicate collapsing.
-- Independent Scene and Game cameras.
-- Play and Stop controls with scene state restoration.
+- Hierarchy, Scene, Game, Inspector, Explorer and Console panels
+- Dockable, rearrangeable tabs; save, export and import layouts
+- Console with categories, search and collapsed duplicates
+- Independent Scene and Game cameras
+- Play and Stop, with the scene restored afterwards
 
-### Scene editing
+**Scene editing**
 
-- Move, rotate and scale tools.
-- World and local coordinate modes.
-- Transform snapping.
-- Fly camera with WASD and right mouse button.
-- Alt-drag orbit controls.
-- Frame selected objects with F.
-- Collider visualization.
+- Move, rotate and scale tools, in world or local space, with snapping
+- Fly camera (right mouse button + WASD) and Alt-drag orbit
+- **F** frames the selection
+- Collider visualization
 
-### Asset management
+**Asset management**
 
-- Folder and tile-based asset browser.
-- Automatic previews for models, scenes and materials.
-- Drag-and-drop model placement.
-- Material assignment directly onto objects.
-- Asset creation through the context menu.
-- Persistent import settings stored in `.meta` files.
+- Folder and tile asset browser with automatic previews for models, scenes and materials
+- Drag and drop models into the scene, and materials onto objects
+- Create assets from the context menu
+- Import settings kept in `.meta` files
 
-### Asset Viewer
+</td>
+<td valign="top" width="50%">
 
-Preview and inspect assets before using them:
+**Asset Viewer**
 
-- 3D models.
-- Materials and texture maps.
-- Audio files with trimming, fading, looping and normalization.
-- Particle effects with live playback.
+- 3D models, materials and texture maps
+- Audio with trimming, fading, looping and normalization
+- Particle effects with live playback
 
-### Materials and shaders
+**Materials and shaders**
 
-Create and edit materials directly in the editor.
+- Physically based, unlit and water materials
+- Custom shaders in `.shader` files, compiled when you save
 
-Supported material types include:
+**UI editor**
 
-- Physically based materials.
-- Unlit materials.
-- Water materials.
-- Custom shaders written in `.shader` files.
+- Text, panels, images, progress bars, dials and buttons
+- Touch buttons and virtual sticks
+- Anchors and responsive scaling, positioned right in the Game view
+- iPhone and iPad screen presets
 
-Shaders are compiled automatically when saved.
+**Build and export**
 
-### UI editor
+- A dedicated Build window for **macOS, iOS and iPadOS** apps
+- For iOS it generates the Xcode project, builds the app and installs it on a connected device
 
-Build game interfaces using:
+**Workflow:** undo for editor operations, one log for engine and game, persistent layouts, built-in project management.
 
-- Text and panels.
-- Images and progress bars.
-- Dials and buttons.
-- Touch buttons and virtual sticks.
-- Anchors and responsive scaling.
-
-UI elements can be positioned directly in the Game view.
-
-The editor also provides iPhone and iPad screen presets for previewing layouts across devices.
-
-### Undo and workflow
-
-- Undo support for editor operations.
-- Centralized engine and game logging.
-- Persistent workspace layouts.
-- Integrated project management.
-
-### Build and export
-
-Build and deploy games through a dedicated editor window.
-
-Supported targets:
-
-- macOS applications.
-- iOS applications.
-- iPadOS applications.
-
-The iOS build workflow generates the Xcode project, builds the application and installs it on a connected device.
+</td>
+</tr>
+</table>
 
 ## Writing games
 
-Games are written in C++ using components.
+Games are written in C++ with components. Every `.cpp` file in `Assets/Scripts` is compiled into the game automatically, and saving a script rebuilds it.
 
-Every `.cpp` file inside `Assets/Scripts` is automatically compiled into the game. Saving a script triggers a rebuild.
-
-A component is a regular C++ struct with a simple declaration:
+A component is a regular C++ struct with a short declaration:
 
 ```cpp
 #include "MoltenMetal.hpp"
@@ -189,115 +163,72 @@ MOLTEN_COMPONENT(
 )
 ```
 
-Component fields are automatically exposed in the Inspector and serialized with the scene.
+Its fields appear in the Inspector and are saved with the scene, and `update` runs every frame while the game is playing.
 
-The `update` method is called every frame while the game is running.
+**Visual scripting.** Rather build gameplay visually? About 40 nodes cover events and logic, transforms, physics, input, maths and variables. The graph editor zooms, searches and works together with your C++ components.
 
-### Visual scripting
+**Built-in gameplay.** Many common mechanics need no code at all: player movement, follow cameras, pickups and collectibles, health and damage, shooting and spawning, scores, and vehicle controllers.
 
-Prefer building gameplay visually?
-
-Molten Engine also includes a visual scripting system with approximately 40 nodes covering:
-
-- Events and logic.
-- Transform operations.
-- Physics.
-- Input.
-- Mathematics.
-- Variables.
-
-The visual scripting editor supports zooming, searching and interaction with C++ components.
-
-### Built-in gameplay systems
-
-Many common gameplay mechanics are available without writing custom code:
-
-- Player movement.
-- Follow cameras.
-- Pickups and collectibles.
-- Health and damage.
-- Shooting and spawning.
-- Score systems.
-- Vehicle controllers.
-
-### Documentation
-
-- [Making Games](Docs/MakingGames.md)
-- [Game Code](Docs/GameCode.md)
-- [Visual Scripting](Docs/VisualScripting.md)
-- [Editor Plugins](Docs/Plugins.md)
+| Guide | What's in it |
+| --- | --- |
+| [Making Games](Docs/MakingGames.md) | From an empty editor to something you can play, with the Driving example |
+| [Game Code](Docs/GameCode.md) | Writing components in C++ |
+| [Visual Scripting](Docs/VisualScripting.md) | Gameplay without code |
+| [Editor Plugins](Docs/Plugins.md) | Extending the editor |
 
 ## Engine features
 
-### Rendering
+<table>
+<tr>
+<td valign="top" width="50%">
 
-A Metal-based rendering pipeline designed for Apple GPUs.
+**Rendering**, a Metal pipeline designed for Apple GPUs
 
-- Physically based rendering (PBR).
-- HDR rendering and multisampling.
-- Cascaded shadow maps.
-- Directional, point and spot lights.
-- Up to 63 point and spot lights.
-- Hardware ray-traced shadows.
-- Ray-traced ambient occlusion.
-- Ray-traced reflections.
-- Single-bounce ray-traced lighting.
-- Image-based lighting.
-- Normal maps.
-- Transparent and cutout materials.
-- Procedural sky, clouds and fog.
-- Volumetric light shafts.
-- Water rendering.
-- Bloom and tone mapping.
-- Lens effects.
+- Physically based rendering, HDR and multisampling
+- Cascaded shadow maps; directional, point and spot lights (up to 63 point and spot)
+- **Hardware ray tracing:** shadows, ambient occlusion, reflections and single-bounce lighting
+- Image-based lighting and normal maps
+- Transparent and cut-out materials
+- Procedural sky, clouds and fog; volumetric light shafts
+- Water rendering
+- Bloom, tone mapping and lens effects
 
-### Particles and effects
+**Particles and effects**
 
-A flexible particle system with:
+- Shape-based and burst emission
+- Turbulence, wind and collision with floors
+- Nine built-in presets and reusable `.effect` assets
 
-- Shape-based emission.
-- Burst emission.
-- Turbulence.
-- Wind forces.
-- Collision with floors.
-- Nine built-in presets.
-- Reusable `.effect` assets.
+</td>
+<td valign="top" width="50%">
 
-### Physics
+**Physics**
 
-A physics system supporting:
+- Rigid bodies and contacts
+- Sphere, box, capsule and mesh colliders
+- Joints, triggers, raycasts and collision layers
+- Vehicle physics: wheels, suspension, engines and aerodynamic wings
 
-- Rigid bodies and contacts.
-- Spherical, box, capsule and mesh colliders.
-- Physics joints.
-- Triggers and raycasts.
-- Collision layers.
-- Vehicle physics.
-- Wheels, suspensions, engines and aerodynamic wings.
+**Core systems**
 
-### Core systems
-
-- Entity-component architecture.
-- Parent-child transform hierarchy.
-- Keyboard, mouse, gamepad and touch input.
-- Configurable input actions.
-- Audio mixer.
-- glTF and OBJ model importing.
-- Individual glTF mesh access (`car.glb#3`).
-- Human-readable scene files.
-- Headless rendering and frame capture.
-
-For example:
+- Entity-component architecture with a parent-child transform hierarchy
+- Keyboard, mouse, gamepad and touch input, with configurable actions
+- Audio mixer
+- glTF and OBJ import, with access to individual glTF meshes (`car.glb#3`)
+- Human-readable scene files
+- Headless rendering and frame capture:
 
 ```sh
 ./build/molten-player MyGame --capture frame.png
 ```
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for an overview of the engine's internal architecture and design decisions.
+</td>
+</tr>
+</table>
+
+How it all fits together, and why, is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Apple platforms
-
-Molten Engine is designed specifically for Apple's ecosystem.
 
 | Platform | Minimum version |
 |---|---|
@@ -305,11 +236,12 @@ Molten Engine is designed specifically for Apple's ecosystem.
 | iOS | 16+ |
 | iPadOS | 16+ |
 
-The editor runs on Apple silicon Macs.
+The editor runs on Apple silicon Macs. Games are built for iPhone and iPad straight from the editor's **Build** window; installing on a device needs an Apple Developer Team ID.
 
-Games can be built for iPhone and iPad directly through the editor's Build window. An Apple Developer Team ID is required for device deployment.
+<details>
+<summary><b>Building for iOS by hand</b></summary>
 
-### Building for iOS manually
+<br>
 
 ```sh
 cmake -B build-ios -G Xcode \
@@ -320,44 +252,38 @@ cmake -B build-ios -G Xcode \
 open build-ios/MoltenMetalEngine.xcodeproj
 ```
 
-See [Docs/iOS.md](Docs/iOS.md) for platform-specific instructions and current limitations.
+Platform details and current limitations are in [Docs/iOS.md](Docs/iOS.md).
+
+</details>
 
 ## Project structure
 
 ```text
-Engine/       Core engine systems
-Editor/       Visual editor and editor API
-Player/       Standalone game runtime
-Plugins/      Editor plugins
+Engine/       core engine systems: Core, Scene, Rendering, Physics, Audio, Input,
+              Assets, Project, Kit, Platform
+Editor/       visual editor and editor API
+Player/       standalone game runtime
+Plugins/      editor plugins
 Shaders/      Metal shaders and shared GPU definitions
-Assets/       Engine assets, fonts, logos and icons
-Tests/        Automated unit tests
-Templates/    New project templates
-Tools/        Asset and example project tools
+Assets/       engine assets, fonts, logos and icons
+Tests/        automated unit tests
+Templates/    new project templates
+Tools/        asset and example project tools
+Website/      the project website
 ```
 
-The engine is organized into modules covering:
+## Origins
 
-- Core
-- Scene
-- Rendering
-- Physics
-- Audio
-- Input
-- Assets
-- Project
-- Kit
-- Platform
+Molten Engine grew out of the [LearnMetal Engine](https://github.com/gabrielevierti/learnmetal-engine), the engine written for the [LearnMetal](https://gabrielevierti.github.io/learnmetal/) tutorials.
 
 ## License
 
-Molten Engine is released under the **GNU General Public License v3.0 (GPL-3.0)**.
+Molten Engine is released under the **GNU General Public License v3.0**. See [LICENSE](LICENSE).
 
-See [LICENSE](LICENSE) for the full license.
+Third-party dependencies keep their own licenses: MIT, zlib, public domain and Apache 2.0 (metal-cpp). The car in the Driving example is "Fiat 500 x Outlaw" by Subin, under CC BY 4.0.
 
-Third-party dependencies retain their respective licenses, including MIT, zlib, public domain and Apache 2.0 (metal-cpp).
+---
 
-<p align="center">
-  <strong>Molten Engine</strong><br>
-  Built for Apple silicon. Powered by Metal.
-</p>
+<div align="center">
+<sub><b>Molten Engine</b> · Built for Apple silicon. Powered by Metal.<br>Made by <a href="https://github.com/gabrielevierti">Gabriele Vierti</a> in Milan.</sub>
+</div>
