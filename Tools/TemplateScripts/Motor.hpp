@@ -27,6 +27,7 @@ struct Motor {
     float spoolRate = 1.8f;             // how quickly it builds: lower is more lag
     bool tractionControl = true;        // eases off a wheel that spins: without it, the turbo arriving needs a careful foot
     std::string soundFolder = "Audio";
+    bool isPlayers = true;              // the player's: heard from the driver's seat, its boost on the dashboard; others are heard from where they are
 
     void fixedUpdate(molten::World& world, molten::Entity self, float dt);
     void update(molten::World& world, molten::Entity self, float dt);

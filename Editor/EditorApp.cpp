@@ -1126,26 +1126,30 @@ void EditorApp::drawPlayBar() {
         const float layoutWidth = 170;
         auto keyWidth = [](const char* label) { return 34 + ImGui::CalcTextSize(label).x + 12; };
         float keysWidth = keyWidth(isPlaying ? "Stop" : "Run") + keyWidth(isPaused ? "Resume" : "Hold") + keyWidth("Frame") + 12;
-        ImGui::SameLine();
-        ImGui::SetCursorPosX(ImGui::GetWindowWidth() - layoutWidth - keysWidth - 22);
-        ImGui::SetCursorPosY(ImGui::GetStyle().WindowPadding.y);
+        // Each key placed on its own, all at the same height in the middle of the bar: placed
+        // after the text on the same line, the first was put on the text's line, lower than the others.
+        const float barTop = ImGui::GetWindowPos().y, keysTop = barTop + (height - keyHeight) * 0.5f;
+        float keyX = ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - layoutWidth - keysWidth - 22;
+        auto placeKey = [&](const char* label) {
+            ImGui::SetCursorScreenPos(ImVec2(keyX, keysTop));
+            keyX += keyWidth(label) + 6;
+        };
+        placeKey(isPlaying ? "Stop" : "Run");
         if (control("##play", isPlaying ? "Stop" : "Run", isPlaying ? Picture::Stop : Picture::Run, isPlaying, true, IM_COL32(255, 122, 47, 255),
                     isPlaying ? "Stop: back to editing, the scene returns to how it was (Cmd+P)" : "Run the scene (Cmd+P)")) {
             scene.setPlaying(!isPlaying);
         }
-        ImGui::SameLine();
+        placeKey(isPaused ? "Resume" : "Hold");
         if (control("##pause", isPaused ? "Resume" : "Hold", Picture::Hold, isPaused, isPlaying, IM_COL32(120, 190, 255, 255),
                     isPaused ? "Resume (Shift+Cmd+P)" : "Hold: freeze the game where it is; change things, then resume (Shift+Cmd+P)")) {
             scene.setPaused(!isPaused);
         }
-        ImGui::SameLine();
+        placeKey("Frame");
         if (control("##step", "Frame", Picture::Frame, false, isPlaying, 0, "Advance one frame and hold (Alt+Cmd+P)")) scene.stepFrame();
         ImGui::PopStyleVar();
 
         // The layout of the windows, at the right end.
-        ImGui::SameLine(0, 12);
-        ImGui::SetCursorPosY(ImGui::GetStyle().WindowPadding.y + (keyHeight - ImGui::GetFrameHeight()) * 0.5f);
-        ImGui::SetCursorPosX(ImGui::GetWindowWidth() - layoutWidth - 10);
+        ImGui::SetCursorScreenPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - layoutWidth - 10, barTop + (height - ImGui::GetFrameHeight()) * 0.5f));
         ImGui::SetNextItemWidth(layoutWidth);
         if (ImGui::BeginCombo("##layout", ("Layout: " + layoutName_).c_str(), ImGuiComboFlags_HeightLarge)) {
             drawLayoutItems();

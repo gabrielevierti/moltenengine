@@ -4,15 +4,15 @@ This is the shortest way from an empty editor to something you can play: what co
 
 ## Start from a game
 
-The example game is **Driving**: a Fiat 500 on a small circuit, to lap against the clock.
+The example game is **Driving**: a Fiat 500 on a small circuit, to race four rivals or to lap against the clock.
 
 | | |
 | --- | --- |
-| **What it is** | A 566 m circuit with curbs, walls, a pit lane in front of the garages and lamps, in evening light. Lap times and a best lap kept between games, laps that do not count with four wheels on the grass, tyres that wear and a pit stop that changes them, sun, clouds or rain, a title screen, a pause menu and settings, a dashboard (speed, revs, gear, boost), and controls for a touch screen. |
+| **What it is** | A 566 m circuit with curbs, walls, a pit lane in front of the garages and lamps, in evening light. A race against four rivals the computer drives (each its own colour), from a grid of five and five start lights, over 3, 5 or 10 laps, with the places live and the results at the end; or a time trial alone. Lap times and a best lap kept between games, laps that do not count with four wheels on the grass, tyres that wear and a pit stop that changes them, sun, clouds or rain, a title screen, a pause menu and settings, a dashboard (speed, revs, gear, boost), and controls for a touch screen. |
 | **What it shows** | A car simulated from its parts (springs and dampers, tires that grip and slide, a turbocharged four-cylinder behind a gearbox, stability control that allows a drift, brakes shared by the load on each wheel), a glTF model used in parts with a material each, the game's own scripts in `Assets/Scripts`, an interface laid out in the Game view. |
 | **Keys** | W A S D or the arrows to drive, Space for the handbrake, B for ABS, L for the lamps, R to be put back on the wheels, T for the touch controls, Esc to pause; in the pit lane, 1 to 4 choose the next tyres. On a phone: ← and → on the left steer; GAS, BRAKE and HB on the right, II at the top left pauses. |
 
-Its scripts, each a small piece of the game to read and change: `DriveControls` (keys and touch to the car, the pit limiter, putting it back on its wheels), `Motor` (the turbocharged engine and its sounds), `LapTimer` (laps, gates, track limits, the best lap kept), `Tyres` (compounds, wear, the pit stop), `Weather` (sky, mist, rain, a wet road), `GameMenu` (title, pause, settings), and `CarLights`, `Exhaust`, `TyreSmoke`, `SkidMarks`, `Follow`.
+Its scripts, each a small piece of the game to read and change: `DriveControls` (keys and touch to the car, the pit limiter, putting it back on its wheels), `Motor` (the turbocharged engine and its sounds), `LapTimer` (laps, gates, track limits, the best lap kept), `Tyres` (compounds, wear, the pit stop), `Weather` (sky, mist, rain, a wet road), `GameMenu` (title, pause, settings, results), `RacerAI` (a rival: the racing line, corner speeds from each corner's radius and braking for it, passing, rain, getting unstuck), `RaceDirector` (the grid, the lights, the places, the finish), and `CarLights`, `Exhaust`, `TyreSmoke`, `SkidMarks`, `Follow`.
 
 It is not part of the engine: it is a separate download, `MoltenProjects.zip`, to unzip anywhere and open as a project (a new project in the editor starts empty). It is written by `Tools/make_templates.py` (the car by `Tools/import_fiat500.py`), and the unit tests (`Tests/TemplateTests.cpp`) drive it without a screen: a full stop from speed, and three laps by an autopilot that has to stay on the road. The car is "Fiat 500 x Outlaw" by Subin, under CC-BY-4.0: see the project's `CREDITS.txt`.
 
@@ -150,6 +150,8 @@ In the editor, Play runs the scene as it is open, saved or not, and starting ove
 **Project** shows the assets with pictures made from the files: a model as its shape, a material as a lit ball, a sound as its wave, a scene or a prefab as a plan from above, a visual script as its boxes, code as its first lines. **Add Component** in the inspector is sorted as Unity's is (Mesh, Rendering, Physics, Audio, Effects, UI, Vehicles, Gameplay, Scripts) and can be searched; each component's menu has Reset, Copy Values, Paste Values and Remove.
 
 **Layouts.** The default is Unity's: Hierarchy at the left, Inspector at the right with a small Viewer under it, Scene and Game as tabs in the middle, and Explorer, Console, Input and Visual Script as tabs along the bottom. Run, Hold and Frame are at the top right, beside the layout menu, which has four arrangements (Default, 2 by 3, Tall and Wide). Arrange the windows as you like and choose Save Layout: it joins the list, on this Mac, for every project. **Export Layout...** writes it to a file to keep or pass on; **Import Layout...** takes one back. The Scene and Game views never get smaller than 360 by 240.
+
+**What the Scene view shows.** The arrow beside Snap opens its steps and the list of what is drawn over the scene: the grid (1 m squares near the ground, 10 m and 100 m from higher up, so it is there from far away too), the outline of what is selected, the colliders of everything, lights, cameras, particle effects, sounds, and what plugins draw. Each kind can be switched off, and its icons are then not clicked either. **Sound** at the right of the Game view's bar silences the game while you work, without changing its own settings. Pieces of the interface that are switched off (a menu the game opens later) are not chosen or moved by clicks in the Game view; choose them in the Hierarchy and switch them on to lay them out.
 
 **Explorer.** Right-click anywhere in it (the folder tree, a folder, the empty space, inside any folder) for New with every kind of asset, Import and Reveal. The size slider goes down to a list. **Console** is Unity's: errors, warnings, info and debug messages, each kind shown or hidden by its button with its count; Collapse folds repeats into one row with a count; Clear on Play; a search; click a row for the whole message below, to copy.
 
@@ -436,3 +438,11 @@ iPhone and iPad.
 A game wears the engine's icon until it is given its own: in the Build window's first step, "Choose a Picture…" (a square PNG,
 1024 pixels is best) copies it into the project as `Assets/Icon.png`, and "Use the Engine's" goes back. The Mac application gets an
 `.icns` made from it, the iPhone and iPad application the sizes iOS asks for.
+
+## Far away: LOD Groups
+
+A **LOD Group** on a model draws a lighter version of it from far away. Under the group, its child called "Far" (the name is the group's `far` field) holds the light version; everything else under the group is the full one. Within `distance` meters of the camera the full one is drawn, beyond it the far one, for each view. The Driving example's cars have one at 35 m: `Tools/make_far_model.py` made their far model, with 4% of the triangles.
+
+## Sounds that come from somewhere
+
+`world.placeSound(sound, position, fullWithin, silentBeyond)` puts a sound started with `world.startSound` at a place in the world: it is heard from that side of the camera, at full volume within `fullWithin` meters and fading to nothing at `silentBeyond`. Call it again as the thing moves. The rivals' engines in the Driving example are placed this way; the player's own is not, as it is always just there.

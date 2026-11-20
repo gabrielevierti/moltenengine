@@ -139,8 +139,10 @@ def write(path, text):
 
 def project(folder, name, description, scripts=()):
     """`scripts`: files of Tools/TemplateScripts that are this game's own code."""
-    write(folder + "/" + folder + ".molten",
-          "molten-project 1\nname %s\nstartScene \"Scenes/Main.scene\"\nversion \"0.1.0\"\n" % q(name))
+    # A project file already there is kept: its name, version and identifier are the game's own.
+    if not os.path.exists(os.path.join(ROOT, folder, folder + ".molten")):
+        write(folder + "/" + folder + ".molten",
+              "molten-project 1\nname %s\nstartScene \"Scenes/Main.scene\"\nversion \"0.1.0\"\n" % q(name))
     write(folder + "/.gitignore", "Library/\nSettings/\n.DS_Store\n")
     write(folder + "/template.txt", description + "\n")
     os.makedirs(os.path.join(ROOT, folder, "Assets", "Scripts"), exist_ok=True)
@@ -216,25 +218,31 @@ EVENING = ["skyZenith 0.07 0.16 0.42", "skyHorizon 0.86 0.56 0.34", "skyGround 0
            "shadows 1 110", "ambientOcclusion 1 0.7 1", "bloom 1 0.11 0.9", "exposure 1.05", "toneMapper 0", "vignette 0.28", "clouds 0.35 1",
            "fog 0.86 0.62 0.44 0.0016", "fogShape 0.02 6"]
 
-def add_car(s, folder, layout, start, heading, gates=0, far=3000):
+def add_car(s, folder, layout, start, heading, gates=0, far=3000, name="Car", rival=None):
     """The Fiat 500, its camera and its interface, standing at `start` (x, z) and facing `heading` degrees.
-    With `gates`, it times laps through that many "Gate N" entities and shows them."""
+    With `gates`, it times laps through that many "Gate N" entities and shows them.
+    With `rival` (its colour, skill and line), a car the computer drives instead: no camera, no interface."""
     # ---------------- the car
     front, rear, radius = layout["frontAxle"], layout["rearAxle"], layout["wheelRadius"]
     half_track, wheelbase = abs(front[0]), rear[2] - front[2]
     ride = 0.32                                 # how high the car's own middle (and its weight) is above the road when it stands on its springs
-    s.entity("Car", (start[0], ride + 0.03, start[1]), yaw(heading))
+    s.entity(name, (start[0], ride + 0.03, start[1]), yaw(heading))
     car = s.index()
     # Stability control lets it slide up to a drift and catches it there; a sliding tire keeps
     # most of its grip, so that a slide can be held with the throttle and the wheel.
     s.component("VehicleBody", mass=820, size=(1.6, 1.25, 3.05), dragArea=0.62, stability=0.85, driftAngle=16, slideGrip=0.82)
-    s.component("Motor", maxBoost=1.1, spoolRate=1.8, tractionControl=True, soundFolder="Audio")
-    s.component("DriveControls")
-    if gates:
+    s.component("Motor", maxBoost=1.1, spoolRate=1.8, tractionControl=True, soundFolder="Audio", isPlayers=rival is None)
+    if rival:
+        s.component("RacerAI", skill=rival["skill"], topSpeed=160, lineOffset=rival["line"])
+    else:
+        s.component("DriveControls")
+    if gates and not rival:
         s.component("LapTimer", gates=gates, gateRadius=11)
         # Tyres that wear, and the pit stop that changes them.
         s.component("Tyres", compound=1, wearRate=1.0, pitSpeedLimit=60, pitStopSeconds=4)
-    s.component("CarLights")
+    s.component("CarLights", answersKeys=rival is None)
+    # Near the camera, the model in full; from 35 meters, the far one (Models/Fiat500/fiat500_far.glb).
+    s.component("LodGroup", distance=35, far="Far")
     # Its model, part by part: each a piece of Models/Fiat500/fiat500.glb with a material of its own.
     paint = {}
     def texture_names(look):
@@ -252,21 +260,36 @@ def add_car(s, folder, layout, start, heading, gates=0, far=3000):
     for name, look in layout["materials"].items():
         settings = dict(color=look["baseColor"], metallic=look["metallic"], roughness=max(look["roughness"], 0.05))
         settings.update(special.get(name, {}))
-        paint[name] = material_file(folder, "Fiat " + name.replace("_", " "), textures=texture_names(look), **settings)
+        textures = texture_names(look)
+        if rival and name == "Body_Paint":
+            # A rival's own colour: the same paint, wear and decals, another colour (Tools/repaint_fiat.py).
+            textures["baseColorTexture"] = "Models/Fiat500/Textures/Body_Paint_baseColor_%s.jpg" % rival["colour"]
+            paint[name] = material_file(folder, "Fiat Body Paint " + rival["colour"].title(), textures=textures, **settings)
+            continue
+        paint[name] = material_file(folder, "Fiat " + name.replace("_", " "), textures=textures, **settings)
     s.entity("Model", (0, -ride, 0)).under(car)
     model = s.index()
     wheel_parts = []
+    far_parts = []
     for number, part in enumerate(layout["parts"]):
         mesh = "Models/Fiat500/fiat500.glb#%d" % number
+        far_mesh = "Models/Fiat500/fiat500_far.glb#%d" % number
         if part["name"].startswith("Wheel "):
-            wheel_parts.append((part["name"], mesh, paint[part["material"]]))
+            wheel_parts.append((part["name"], mesh, far_mesh, paint[part["material"]]))
             continue
         shown = "Rear Lights" if part["material"] == "RearLight" else part["name"].replace("Body ", "").replace("_", " ")
-        s.entity(shown).mesh(mesh, paint[part["material"]], part["material"] not in ("Glass", "Headlamp_Glass")).under(model)
+        casts = part["material"] not in ("Glass", "Headlamp_Glass")
+        s.entity(shown).mesh(mesh, paint[part["material"]], casts).under(model)
         # The car hits the world with its body's own shape: a convex Mesh Collider of the shell,
         # as in Unity. (The VehicleBody's box is then not used.)
         if part["material"] == "Body_Paint":
             s.mesh_collider(mesh, convex=True)
+        far_parts.append((shown, far_mesh, paint[part["material"]], casts))
+    # The far version, part by part: drawn instead of the parts above from 35 meters.
+    s.entity("Far").under(model)
+    far_model = s.index()
+    for shown, far_mesh, material, casts in far_parts:
+        s.entity(shown).mesh(far_mesh, material, casts).under(far_model)
     # Its lamps: two beams ahead, and two red glows behind that the script brightens under braking.
     lamps, tail, pipe = layout["headlamps"], layout["rearLights"], layout["exhaust"]
     lamp_height = (lamps[0][1] + lamps[1][1]) * 0.5 - ride
@@ -299,8 +322,12 @@ def add_car(s, folder, layout, start, heading, gates=0, far=3000):
         # The model's wheel is a left one: on the right it is turned around.
         s.entity("Rim and Tire", rotation=(0, 0, 0, 1) if x < 0 else half_turn).under(spin)
         holder = s.index()
-        for part_name, mesh, material in wheel_parts:
+        for part_name, mesh, far_mesh, material in wheel_parts:
             s.entity(part_name.replace("Wheel ", "").replace("Wheels", "Rim")).mesh(mesh, material).under(holder)
+        s.entity("Far").under(holder)
+        far_wheel = s.index()
+        for part_name, mesh, far_mesh, material in wheel_parts:
+            s.entity(part_name.replace("Wheel ", "").replace("Wheels", "Rim")).mesh(far_mesh, material).under(far_wheel)
         # Smoke where the tire meets the road, when it slides: it rolls along the ground and spreads.
         s.entity("Tyre Smoke", (0, -radius + 0.08, 0.15)).under(wheel)
         effect(s, rate=0, lifetimeMin=0.9, lifetimeMax=2.0, speedMin=0.3, speedMax=1.2, direction=(0, 0.25, 1), spread=math.radians(60), spawnRadius=0.15,
@@ -311,8 +338,10 @@ def add_car(s, folder, layout, start, heading, gates=0, far=3000):
 
     # The black marks the tires leave where they slide.
     marks = material_file(folder, "Skid Marks", (0.015, 0.015, 0.015, 0.62), 0.0, 0.9, blend=True, double_sided=True)
-    s.entity("Skid Marks").mesh("plane", marks, False)
-    s.component("SkidMarks", car="Car", segmentsPerWheel=400, width=round(layout.get("wheelWidth", 0.19), 3), spacing=0.22)
+    s.entity("Skid Marks" if not rival else "Skid Marks " + name).mesh("plane", marks, False)
+    s.component("SkidMarks", car=name, segmentsPerWheel=400 if not rival else 160, width=round(layout.get("wheelWidth", 0.19), 3), spacing=0.22)
+    if rival:
+        return
 
     s.entity("Camera", (start[0] - 6 * math.sin(math.radians(-heading)), 2.2, start[1] + 6 * math.cos(math.radians(-heading))), yaw(heading)).camera(64, True, far, near=0.25)
     s.component("Follow", target="Car", offset=(0, 1.55, 4.7), smoothness=7, looksAtTarget=True, turnsWithTarget=True)
@@ -380,6 +409,36 @@ def add_car(s, folder, layout, start, heading, gates=0, far=3000):
     piece("Gas", "UIButton", label="GAS", action="gas", isRound=True, radius=86, anchor=(1, 1), offset=(-114, -124), onlyOnTouchScreens=True, color=(0.55, 1.0, 0.6, 0.6))
     piece("Brake", "UIButton", label="BRAKE", action="brake", isRound=True, radius=70, anchor=(1, 1), offset=(-306, -94), onlyOnTouchScreens=True, color=(1.0, 0.45, 0.4, 0.6))
     piece("Handbrake", "UIButton", label="HB", action="jump", isRound=True, radius=46, anchor=(1, 1), offset=(-286, -258), onlyOnTouchScreens=True, color=(1, 1, 1, 0.5))
+    return ui
+
+def add_race_interface(s, ui):
+    """The race's own pieces: the place and the lap, the start lights, and the results (RaceDirector)."""
+    def piece(parent, name, component, **fields):
+        s.entity(name).under(parent)
+        s.component(component, **fields)
+    s.entity("Race Panel").under(ui)
+    panel = s.index()
+    piece(panel, "Position", "HudText", text="P{position}", anchor=(1, 0), offset=(-28, 56), size=40, color=(1, 1, 1, 1))
+    piece(panel, "Cars", "HudText", text="OF {cars}", anchor=(1, 0), offset=(-28, 102), size=12, color=(1, 1, 1, 0.6))
+    piece(panel, "Race Lap", "HudText", text="LAP {raceLap} / {raceLaps}", anchor=(1, 0), offset=(-28, 122), size=15, color=(1.0, 0.6, 0.3, 1))
+    s.entity("Start Lights").under(ui)
+    lights = s.index()
+    piece(lights, "Start Lights Back", "UIPanel", anchor=(0.5, 0), offset=(0, 160), size=(372, 84), color=(0.03, 0.03, 0.035, 0.8))
+    for k in range(5):
+        piece(lights, "Light %d" % (k + 1), "UIPanel", anchor=(0.5, 0), offset=(-144 + k * 72, 160), size=(56, 56), color=(0.12, 0.12, 0.14, 0.85))
+    # The results: off until the player finishes.
+    s.entity("Results").inactive()
+    results = s.index()
+    piece(results, "Results Backdrop", "UIPanel", anchor=(0.5, 0.5), offset=(0, 0), size=(5000, 5000), color=(0.02, 0.022, 0.03, 0.7))
+    piece(results, "Results Title", "HudText", text="RESULTS", anchor=(0.5, 0.5), offset=(0, -250), size=40, color=(1, 1, 1, 1))
+    for k in range(5):
+        y = -160 + k * 52
+        piece(results, "Result %d Place" % (k + 1), "HudText", text="%d" % (k + 1), anchor=(0.3, 0.5), offset=(40, y), size=24, color=(1, 1, 1, 0.5))
+        piece(results, "Result %d" % (k + 1), "HudText", text="", anchor=(0.3, 0.5), offset=(90, y), size=24, color=(1, 1, 1, 0.9))
+        piece(results, "Result %d Time" % (k + 1), "HudText", text="", anchor=(0.7, 0.5), offset=(-40, y), size=24, color=(1, 1, 1, 0.9))
+    orange = (1.0, 0.5, 0.18, 0.95)
+    for name, label, y, colour in (("Race Again", "RACE AGAIN", 140, orange), ("Leave Race", "MAIN MENU", 212, (1, 1, 1, 0.9))):
+        piece(results, name, "UIButton", label=label, anchor=(0.5, 0.5), offset=(0, y), size=(320, 54), color=colour, textColor=(0.05, 0.05, 0.06, 1))
 
 def driving():
     import json, make_models
@@ -389,10 +448,17 @@ def driving():
         print("Driving: its car is not there. Make it first:  python3 Tools/import_fiat500.py <the model's folder> " + fiat)
         return
     layout = json.load(open(os.path.join(fiat, "layout.json")))
+    # The car seen from far away (a few percent of its triangles), and the rivals' colours: made once, from the car itself.
+    import subprocess
+    tools = os.path.dirname(os.path.abspath(__file__))
+    if not os.path.exists(os.path.join(fiat, "fiat500_far.glb")):
+        subprocess.run([sys.executable, os.path.join(tools, "make_far_model.py"), os.path.join(fiat, "fiat500.glb"), os.path.join(fiat, "fiat500_far.glb")], check=True)
+    if not os.path.exists(os.path.join(fiat, "Textures", "Body_Paint_baseColor_red.jpg")):
+        subprocess.run([sys.executable, os.path.join(tools, "repaint_fiat.py"), os.path.join(fiat, "Textures")], check=True)
     project(folder, "Driving", "A little circuit and a Fiat 500 with a rocket where its engine was: springs and dampers, tires that slide and smoke, "
-            "a turbocharged engine, tyres that wear and a pit lane to change them, sun or rain, lap times, a menu, and controls for a touch screen.",
+            "a turbocharged engine, four rivals to race from a grid and five start lights, or a time trial alone, tyres that wear and a pit lane to change them, sun or rain, lap times, a menu, and controls for a touch screen.",
             scripts=("DriveControls.cpp", "Motor.hpp", "Motor.cpp", "Follow.cpp", "LapTimer.cpp", "CarLights.cpp", "Exhaust.cpp", "TyreSmoke.cpp", "SkidMarks.cpp",
-                     "Tyres.cpp", "Weather.cpp", "GameMenu.cpp"))
+                     "Tyres.cpp", "Weather.cpp", "GameMenu.cpp", "RacerAI.cpp", "RaceDirector.cpp"))
     write(folder + "/CREDITS.txt", "The car: " + layout["credit"] + "\nMade smaller and rearranged for this game by Tools/import_fiat500.py.\n")
     sounds(folder, ("i4",))
     # What the older version of this game was made of is not used any more.
@@ -490,7 +556,7 @@ def driving():
         block("Gantry Post", (0, 3.3, side * 10.4), (0.45, 6.6, 0.45), dark)
     block("Gantry Beam", (0, 6.4, 0), (0.6, 0.7, 21.2), dark, False)
     for k in range(5):
-        block("Start Light", (-0.36, 6.4, -3.2 + k * 1.6), (0.12, 0.42, 0.42), signal, False)
+        block("Start Light %d" % (k + 1), (-0.36, 6.4, -3.2 + k * 1.6), (0.12, 0.42, 0.42), signal, False)
     # Lamps along the straight, coming on as the light goes.
     for k, x in enumerate((-48, -16, 16, 48)):
         block("Lamp Post", (x, 3.5, -11.2), (0.22, 7.0, 0.22), dark)
@@ -512,7 +578,21 @@ def driving():
             z = points[k][1] + dx * side * 8.6 + dz * j * 1.15
             block("Tire Stack", (x, 0.5, z), (1.05, 1.0, 1.05), rubber, False)
 
-    add_car(s, folder, layout, track["start"], -90, gates=len(track["gates"]), far=700)
+    # The grid: five places behind the line, from the front. The rivals take the first four, the player the last.
+    s.entity("Grid")
+    grid_index = s.index()
+    for number, (x, z) in enumerate(track["grid"]):
+        s.entity("Grid %d" % (number + 1), (x, 0, z), yaw(-90)).under(grid_index)
+    # The four rivals: each its own colour, a little faster or slower, on its own side of the line.
+    rivals = (("Rival 1", "red", 0.93, -0.6), ("Rival 2", "blue", 0.9, 0.5), ("Rival 3", "white", 0.87, -0.3), ("Rival 4", "yellow", 0.84, 0.4))
+    # The player's car first: what is found by name ("Wheel FL") is its own.
+    ui = add_car(s, folder, layout, track["grid"][4], -90, gates=len(track["gates"]), far=700)
+    for (name, colour, skill, offset), (x, z) in zip(rivals, track["grid"]):
+        add_car(s, folder, layout, (x, z), -90, far=700, name=name, rival=dict(colour=colour, skill=skill, line=offset))
+    # The race: the start lights, the order, the results (RaceDirector); "mode" and "laps" in the settings.
+    # Not called "Race": that is the title screen's button, which GameMenu looks for by name.
+    s.entity("Race Director").component("RaceDirector", lightsEvery=1.0, drivers="ROSSI,BIANCHI,FERRARI,ESPOSITO")
+    add_race_interface(s, ui)
     # The weather: sun, clouds or rain, as the settings say; the rain falls around the camera.
     s.entity("Weather").component("Weather", weather=0, changeEvery=90)
     add_menus(s)
@@ -550,20 +630,24 @@ def add_menus(s):
 
     settings = group("Settings Screen")
     piece(settings, "Settings Backdrop", "UIPanel", anchor=(0.5, 0.5), offset=(0, 0), size=(5000, 5000), color=(0.02, 0.022, 0.03, 0.8))
-    piece(settings, "Settings Title", "HudText", text="SETTINGS", anchor=(0.5, 0.5), offset=(0, -290), size=34, color=(1, 1, 1, 1))
-    rows = (("GRAPHICS", "quality", ("LOW", "MEDIUM", "HIGH")),
+    piece(settings, "Settings Title", "HudText", text="SETTINGS", anchor=(0.5, 0.5), offset=(0, -300), size=34, color=(1, 1, 1, 1))
+    rows = (("RACE", "mode", ("RACE", "TIME TRIAL")),
+            ("LAPS", "laps", ("3", "5", "10")),
+            ("GRAPHICS", "quality", ("LOW", "MEDIUM", "HIGH")),
             ("WEATHER", "weather", ("SUN", "CLOUDS", "RAIN", "CHANGING")),
             ("TYRES AT THE START", "startCompound", ("SOFT", "MEDIUM", "HARD", "WET")),
             ("TOUCH BUTTONS", "controls", ("SMALL", "MEDIUM", "LARGE")),
             ("ABS", "abs", ("OFF", "ON")),
             ("SOUND", "volume", ("OFF", "HALF", "FULL")))
     for r, (label, key, choices) in enumerate(rows):
-        y = -200 + r * 68
+        y = -226 + r * 58
         piece(settings, "Setting %s" % label.title(), "HudText", text=label, anchor=(0.5, 0.5), offset=(-400, y - 9), size=14, color=(1, 1, 1, 0.7))
         for c, choice in enumerate(choices):
-            piece(settings, "Option %s %d" % (key, c), "UIButton", label=choice, anchor=(0.5, 0.5), offset=(-200 + c * 140, y), size=(128, 48),
+            # The value kept is the button's place in the row, or for laps the number itself.
+            value = int(choice) if key == "laps" else c
+            piece(settings, "Option %s %d" % (key, value), "UIButton", label=choice, anchor=(0.5, 0.5), offset=(-200 + c * 140, y), size=(128, 48),
                   color=orange, textColor=(0.05, 0.05, 0.06, 1))
-    button(settings, "Settings Back", "BACK", 230)
+    button(settings, "Settings Back", "BACK", 250)
 
 def then(first, second):
     """Two rotations as one: `second` in the frame `first` makes (quaternions x y z w)."""

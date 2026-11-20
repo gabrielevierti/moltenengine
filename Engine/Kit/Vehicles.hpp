@@ -146,6 +146,7 @@ struct Wheel {
     Vec3 restPosition{0, 0, 0};         // and in its parent's
     Quat restRotation{};
     bool hasMount = false;
+    Entity spinPart;                    // its child "Spin", found once
 };
 
 /// A spring and a damper between a Wheel and the body. On the same entity as the Wheel.

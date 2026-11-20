@@ -131,6 +131,10 @@ public:
     /// playing follow it the next time they are changed.
     float soundVolume = 1.0f;
     void changeSound(uint32_t sound, float volume, float pitch);
+    /// Where a sound started with startSound comes from: from then on it is as loud as it is
+    /// near the camera (full within `fullWithin` meters, gone beyond `silentBeyond`) and comes
+    /// from its side. Call it as the thing making it moves: another car's engine, a waterfall.
+    void placeSound(uint32_t sound, Vec3 position, float fullWithin = 6.0f, float silentBeyond = 150.0f);
     void stopSound(uint32_t sound);
     void stopSounds();
     /// Where a file of the project's Assets is on disk.
@@ -185,7 +189,17 @@ protected:
     // What an engine with sound does for the functions above.
     virtual uint32_t beginSound(const std::string&, float, float, bool) { return 0; }
     virtual void adjustSound(uint32_t, float, float) {}
+    virtual void panSound(uint32_t, float) {}
     virtual void endSound(uint32_t) {}
+    /// Who listens: the camera's world matrix, if there is one.
+    virtual bool listener(Mat4&) { return false; }
+    struct SoundPlace {
+        Vec3 position{0, 0, 0};
+        float fullWithin = 6, silentBeyond = 150;
+        float volume = -1, pitch = 1;               // as last asked for, before the distance
+    };
+    std::unordered_map<uint32_t, SoundPlace> soundPlaces_;
+    void voiceSound(uint32_t sound, float volume, float pitch);
     std::vector<uint32_t> startedSounds_;
 
     std::unordered_map<std::string, std::unordered_set<uint64_t>> startedComponents_;   // by type: the entities whose start() ran

@@ -2,7 +2,9 @@
 // scales the selection (with snapping), and the lines and icons drawn over the scene.
 #include "Editor.hpp"
 #include "Rendering/Particles.hpp"
+#include "Kit/Kit.hpp"
 #include "Kit/Vehicles.hpp"
+#include "Audio/Audio.hpp"
 #include "Panels/Widgets.hpp"
 
 #include <ImGuizmo.h>
@@ -39,7 +41,11 @@ Entity pick(EditorContext& editor, const Ray& ray) {
             // Against its triangles, not its box: a road's box covers the whole circuit, a forest's the whole map.
             hit = renderer->mesh->raycast(local);
         } else if (!renderer) {
-            hit = intersectSphere(ray, transform->worldPosition(), 0.35f);     // lights and cameras: their icon
+            // Lights, cameras, effects and sounds: their icon, when that kind is shown.
+            const GizmoSettings& shown = editor.gizmo;
+            bool isHidden = (scene.has<Light>(entity) && !shown.showLights) || (scene.has<Camera>(entity) && !shown.showCameras) ||
+                            (scene.has<ParticleEmitter>(entity) && !shown.showEffects) || (scene.has<kit::AudioSource>(entity) && !shown.showSounds);
+            if (!isHidden) hit = intersectSphere(ray, transform->worldPosition(), 0.35f);
         }
         if (hit && *hit < bestDistance) {
             bestDistance = *hit;
@@ -76,17 +82,25 @@ Vec3 groundPoint(const Ray& ray) {
 
 void drawGrid(EditorContext& editor) {
     DebugDraw& lines = editor.engine.debug();
-    // The grid follows the camera in whole steps, so it always reaches the horizon of interest.
-    const int half = 40;
-    Vec3 center{std::round(editor.scene.cameraPosition.x), 0, std::round(editor.scene.cameraPosition.z)};
+    // The grid grows with the camera's height: 1 m squares close to the ground, 10 m from higher
+    // up, 100 m from higher still, always reaching well past what is in view. It follows the
+    // camera in whole steps, so it does not swim.
+    Vec3 eye = editor.scene.cameraPosition;
+    float height = std::max(std::abs(eye.y), 1.0f);
+    float step = 1.0f;
+    while (height / step > 25.0f && step < 1000.0f) step *= 10.0f;
+    const int half = 60;                                       // lines each side of the middle
+    float reach = step * float(half);
+    Vec3 center{std::round(eye.x / step) * step, 0, std::round(eye.z / step) * step};
     for (int i = -half; i <= half; i++) {
-        int x = int(center.x) + i, z = int(center.z) + i;
-        auto colorOf = [](int coordinate) {
-            if (coordinate == 0) return Vec4{0.55f, 0.55f, 0.55f, 1};
-            return coordinate % 10 == 0 ? Vec4{0.32f, 0.34f, 0.38f, 1} : Vec4{0.19f, 0.2f, 0.23f, 1};
+        float x = center.x + float(i) * step, z = center.z + float(i) * step;
+        auto colorOf = [&](float coordinate) {
+            long whole = std::lround(coordinate / step);
+            if (std::abs(coordinate) < step * 0.5f) return Vec4{0.6f, 0.6f, 0.62f, 1};      // the axes
+            return whole % 10 == 0 ? Vec4{0.36f, 0.38f, 0.42f, 1} : Vec4{0.22f, 0.23f, 0.26f, 1};
         };
-        lines.line(Vec3{float(x), 0.002f, center.z - half}, Vec3{float(x), 0.002f, center.z + half}, colorOf(x));
-        lines.line(Vec3{center.x - half, 0.002f, float(z)}, Vec3{center.x + half, 0.002f, float(z)}, colorOf(z));
+        lines.line(Vec3{x, 0.002f, center.z - reach}, Vec3{x, 0.002f, center.z + reach}, colorOf(x));
+        lines.line(Vec3{center.x - reach, 0.002f, z}, Vec3{center.x + reach, 0.002f, z}, colorOf(z));
     }
 }
 
@@ -242,10 +256,21 @@ void drawIcons(EditorContext& editor, const ViewportInfo& viewport) {
     Scene& scene = editor.engine.scene;
     for (Entity entity : editor.scene.entities()) {
         if (scene.has<MeshRenderer>(entity)) continue;
-        const Light* light = scene.get<Light>(entity);
-        const char* letter = light ? "L" : scene.has<Camera>(entity) ? "C" : scene.has<ParticleEmitter>(entity) ? "P" : nullptr;
+        const GizmoSettings& shown = editor.gizmo;
+        const Light* light = shown.showLights ? scene.get<Light>(entity) : nullptr;
+        const char* letter = light                                                   ? "L"
+                             : shown.showCameras && scene.has<Camera>(entity)          ? "C"
+                             : shown.showEffects && scene.has<ParticleEmitter>(entity) ? "P"
+                             : shown.showSounds && scene.has<kit::AudioSource>(entity) ? "S"
+                                                                                       : nullptr;
         ImVec2 at;
         if (!letter || !viewport.worldToScreen(scene.get<Transform>(entity)->worldPosition(), at)) continue;
+        // Inside the view, and not on its tool bar: an icon over the buttons hides them and takes their clicks.
+        const float kToolBar = 44;
+        if (at.x < viewport.position.x + 10 || at.x > viewport.position.x + viewport.size.x - 10 || at.y < viewport.position.y + kToolBar ||
+            at.y > viewport.position.y + viewport.size.y - 10) {
+            continue;
+        }
         bool isSelected = editor.scene.isSelected(entity);
         ImU32 fill = light ? IM_COL32(int(saturate(light->color.x) * 255), int(saturate(light->color.y) * 255), int(saturate(light->color.z) * 255), 255)
                            : IM_COL32(141, 150, 163, 255);
@@ -290,7 +315,7 @@ void drawShapes(EditorContext& editor) {
         decompose(transform->world, position, rotation, scale);
         Vec3 forward = rotate(rotation, Vec3{0, 0, -1}), up = rotate(rotation, Vec3{0, 1, 0}), right = rotate(rotation, Vec3{1, 0, 0});
 
-        if (const Camera* camera = scene.get<Camera>(entity)) {
+        if (const Camera* camera = editor.gizmo.showCameras ? scene.get<Camera>(entity) : nullptr) {
             Vec4 color = isSelected ? Vec4{1.0f, 0.48f, 0.18f, 1} : Vec4{0.75f, 0.8f, 0.88f, 0.7f};
             // Drawn to a few meters, not to the far plane: it says where the camera looks, not how far.
             float length = isSelected ? 3.0f : 1.6f;
@@ -315,7 +340,7 @@ void drawShapes(EditorContext& editor) {
             lines.line(farCorners[3] + right * (halfWidth * 0.5f), roof, color);
             lines.line(farCorners[2] - right * (halfWidth * 0.5f), roof, color);
         }
-        if (const Light* light = scene.get<Light>(entity)) {
+        if (const Light* light = editor.gizmo.showLights ? scene.get<Light>(entity) : nullptr) {
             Vec4 color = isSelected ? Vec4{1.0f, 0.48f, 0.18f, 1} : Vec4{1.0f, 0.86f, 0.4f, 0.75f};
             if (light->type == LightType::Directional) {
                 // Parallel rays: the sun shines the same way everywhere.
@@ -399,8 +424,24 @@ void drawToolbar(EditorContext& editor) {
         ImGui::SetNextItemWidth(120);
         ImGui::DragFloat("Scale", &gizmo.scaleSnap, 0.005f, 0.001f, 10.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
         ImGui::Separator();
+        ImGui::TextDisabled("Shown in the view");
         ImGui::Checkbox("Grid", &gizmo.showGrid);
-        ImGui::Checkbox("Icons", &gizmo.showIcons);
+        ImGui::Checkbox("Selection outline", &gizmo.showSelection);
+        ImGui::Checkbox("Colliders of everything", &gShowsAllColliders);
+        ImGui::Checkbox("Lights", &gizmo.showLights);
+        ImGui::Checkbox("Cameras", &gizmo.showCameras);
+        ImGui::Checkbox("Particle effects", &gizmo.showEffects);
+        ImGui::Checkbox("Sounds", &gizmo.showSounds);
+        if (!editor.registry.viewportOverlays.empty()) ImGui::Checkbox("From plugins", &gizmo.showPluginOverlays);
+        if (ImGui::SmallButton("All")) {
+            gizmo.showGrid = gizmo.showSelection = gizmo.showLights = gizmo.showCameras = gizmo.showEffects = gizmo.showSounds = gizmo.showPluginOverlays = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("None")) {
+            gizmo.showGrid = gizmo.showSelection = gizmo.showLights = gizmo.showCameras = gizmo.showEffects = gizmo.showSounds = gizmo.showPluginOverlays = false;
+            gShowsAllColliders = false;
+        }
+        ImGui::Separator();
         ImGui::SetNextItemWidth(120);
         ImGui::DragFloat("Fly Speed", &gizmo.flySpeed, 0.1f, 0.1f, 500.0f, "%.1f m/s", ImGuiSliderFlags_AlwaysClamp);
         ImGui::EndPopup();
@@ -609,6 +650,10 @@ std::vector<InterfacePiece> interfacePieces(EditorContext& editor, Vec2 screen) 
         for (Entity entity : editor.scene.entities()) {
             void* component = type.get(scene, entity);
             if (!component) continue;
+            // Switched off (a menu the game opens later, or something under one): not drawn,
+            // so not chosen or moved by a click where it would be.
+            const Transform* transform = scene.get<Transform>(entity);
+            if (transform && !transform->isActiveInHierarchy) continue;
             InterfacePiece piece;
             piece.entity = entity;
             piece.anchor = static_cast<Vec2*>(anchor->address(component));
@@ -983,6 +1028,39 @@ void drawGameView(EditorContext& editor, bool takesCanvas) {
         ImGui::TextDisabled("interface at %.0f%%", double(scale * 100));
         ui::tooltip("The game's interface is laid out for 1280 x 720 and drawn larger or smaller on other screens, so it looks the same on all of them");
     }
+    // The game's sound, on or off: at the right end of the bar. Only here, in the editor: the
+    // game itself is not changed, and its own volume settings go on working under it.
+    static bool isMuted = false;
+    {
+        const char* label = isMuted ? "Muted" : "Sound";
+        float width = ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2 + 34;
+        ImGui::SetCursorScreenPos(ImVec2(position.x + size.x - width - 8, position.y + 3));
+        const bool wasMuted = isMuted;         // a click changes it in between: push and pop by what it was
+        if (wasMuted) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(1.0f, 0.48f, 0.18f, 0.85f));
+        ImVec2 corner = ImGui::GetCursorScreenPos();
+        ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(1, 0.5f));      // the words at the right, the speaker at the left
+        if (ImGui::Button((std::string(label) + "##mute").c_str(), ImVec2(width, 0))) isMuted = !isMuted;
+        ImGui::PopStyleVar();
+        if (wasMuted) ImGui::PopStyleColor();
+        ui::tooltip(wasMuted ? "The game is silent while you work: click to hear it again" : "Silence the game while you work (its own settings are not changed)");
+        // A little speaker, with its waves or with a cross.
+        ImDrawList* ink = ImGui::GetWindowDrawList();
+        ImU32 color = IM_COL32(230, 233, 240, 255);
+        float cy = corner.y + ImGui::GetFrameHeight() * 0.5f, x = corner.x + 9;
+        ink->AddRectFilled(ImVec2(x, cy - 3), ImVec2(x + 4, cy + 3), color);
+        ink->AddTriangleFilled(ImVec2(x + 3, cy - 3), ImVec2(x + 9, cy - 7), ImVec2(x + 9, cy + 7), color);
+        ink->AddTriangleFilled(ImVec2(x + 3, cy - 3), ImVec2(x + 9, cy + 7), ImVec2(x + 3, cy + 3), color);
+        if (wasMuted) {
+            ink->AddLine(ImVec2(x + 12, cy - 4), ImVec2(x + 18, cy + 4), color, 1.6f);
+            ink->AddLine(ImVec2(x + 18, cy - 4), ImVec2(x + 12, cy + 4), color, 1.6f);
+        } else {
+            ink->PathArcTo(ImVec2(x + 9, cy), 5.5f, -0.9f, 0.9f, 8);
+            ink->PathStroke(color, 0, 1.5f);
+            ink->PathArcTo(ImVec2(x + 9, cy), 9.0f, -0.9f, 0.9f, 10);
+            ink->PathStroke(color, 0, 1.5f);
+        }
+    }
+    if (engine.hasAudio()) engine.audio().mixer().setMasterVolume(isMuted ? 0.0f : 1.0f);
     engine.renderer().canvasView = takesCanvas ? int(kGameView) : -1;
     // The game's pointer is where the mouse is in this picture, in the picture's own points:
     // a click on a button drawn here is a click on that button.
@@ -1068,10 +1146,14 @@ void drawSceneView(EditorContext& editor) {
     viewport.projection = camera ? camera->projection(size.x / size.y) : perspective(radians(60.0f), size.x / size.y, 0.1f, 2000.0f);
 
     if (editor.gizmo.showGrid) drawGrid(editor);
-    for (Entity entity : document.selection()) drawOutline(editor, entity);
-    if (editor.gizmo.showIcons) drawShapes(editor);
-    if (editor.gizmo.showIcons) drawIcons(editor, viewport);
-    for (auto& overlay : editor.registry.viewportOverlays) overlay.value(editor, viewport);
+    if (editor.gizmo.showSelection) {
+        for (Entity entity : document.selection()) drawOutline(editor, entity);
+    }
+    drawShapes(editor);                 // each kind as the Snap menu says
+    drawIcons(editor, viewport);
+    if (editor.gizmo.showPluginOverlays) {
+        for (auto& overlay : editor.registry.viewportOverlays) overlay.value(editor, viewport);
+    }
 
     bool isOnGizmo = updateGizmo(editor, viewport);
 

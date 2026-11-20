@@ -199,11 +199,13 @@ Work goes down this list in the order of the section "Next".
 12. [~] A glTF file's parts by material as meshes of their own (`Models/car.glb#3`), so each takes its own material.
     The Driving project rebuilt on them: a circuit with curbs, walls, a paddock and lamps, a timed lap, headlights and brake lights,
     exhaust and tyre smoke, brakes shared by the load on each wheel, a dashboard and touch controls
+- [x] Races: four rivals the computer drives, a grid and start lights, places and results, a time trial; sounds placed in the world
 
 ### Rendering
 - [~] Ray tracing: sun shadows, ambient occlusion, reflections of objects, one bounce of light. [ ] shadows of point and spot lights, denoiser, textures in reflections
 - [~] Global illumination: one traced bounce. [ ] baked lightmaps, probes, DDGI, path tracer for reference
-- [ ] Many lights (clustered), [ ] GPU-driven rendering, occlusion culling, automatic LOD
+- [~] Level of detail: LOD Groups (a near and a far model, by distance). [ ] more than two levels, made automatically, cross-fading
+- [ ] Many lights (clustered), [ ] GPU-driven rendering, occlusion culling
 - [~] Shadows: cascades. [ ] contact shadows, virtual shadow maps
 - [ ] Temporal upscaling (MetalFX), TAA, dynamic resolution
 - [~] Post: bloom, tone mapping, vignette, ambient occlusion. [ ] motion blur, depth of field, colour grading LUT, auto exposure

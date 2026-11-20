@@ -1,4 +1,5 @@
 #include "Rendering/Renderer.hpp"
+#include "Rendering/LevelOfDetail.hpp"
 
 #include "Core/Log.hpp"
 #include "Scene/Components.hpp"
@@ -183,9 +184,10 @@ Renderer::View Renderer::findView(Scene& scene, float aspect) const {
 }
 
 void Renderer::collectItems(Scene& scene, const View& view, std::vector<DrawItem>& items) const {
+    chooseLevelsOfDetail(scene, view.position);
     scene.each<MeshRenderer, Transform>([&](Entity, MeshRenderer& renderer, Transform& transform) {
         if (!transform.isActiveInHierarchy) return;
-        if (!renderer.isVisible || !renderer.mesh) return;
+        if (!renderer.isVisible || !renderer.mesh || renderer.isBeyondItsDetail) return;
         DrawItem item;
         item.mesh = renderer.mesh.get();
         item.material = renderer.material ? renderer.material.get() : &defaultMaterial_;

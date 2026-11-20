@@ -82,6 +82,16 @@ struct MeshRenderer {
     Vec4 tint{1, 1, 1, 1};              // multiplies the material's base color for this entity only
     bool castsShadows = true;
     bool isVisible = true;
+    bool isBeyondItsDetail = false;     // set each view by a LOD Group above it: not drawn in this one
+};
+
+/// LOD Group, as in Unity: a model drawn in full near the camera and simpler far from it.
+/// Under the entity it is on, the child called `far` (and what is under that) is drawn only
+/// beyond `distance` meters from the camera, and everything else only within it. What is
+/// not drawn still collides, moves and plays as it did: only what is drawn changes.
+struct LodGroup {
+    float distance = 30.0f;
+    std::string far = "Far";
 };
 
 }  // namespace molten

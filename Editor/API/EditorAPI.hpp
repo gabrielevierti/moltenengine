@@ -54,7 +54,13 @@ struct GizmoSettings {
     float rotateSnap = 15.0f;           // degrees
     float scaleSnap = 0.1f;
     bool showGrid = true;
-    bool showIcons = true;
+    // What the scene view draws over the scene, kind by kind (the Snap menu lists them).
+    bool showLights = true;             // their icon, and which way they shine
+    bool showCameras = true;            // their icon, and what they see
+    bool showEffects = true;            // particle emitters' icon
+    bool showSounds = true;             // Audio Sources' icon
+    bool showSelection = true;          // the box around what is selected, and its colliders
+    bool showPluginOverlays = true;     // what plugins draw in the view
     float flySpeed = 6.0f;              // of the camera, world units per second
 };
 

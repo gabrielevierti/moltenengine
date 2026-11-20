@@ -830,7 +830,10 @@ void Wheel::update(World& world, Entity self, float) {
     // Flattened: shorter from road to hub, a little fatter. The wheel's size is the model's own.
     float squash = (radius - state.deflection) / std::max(radius, 0.01f);
     transform->scale = Vec3{2.0f - squash, squash, 1.0f};
-    if (Transform* spin = scene.get<Transform>(childCalled(scene, self, "Spin"))) spin->rotation = Quat(-state.angle, Vec3{1, 0, 0});
+    // The child that turns with the wheel: looked for once (a search of the whole scene), then kept.
+    const Transform* kept = scene.isAlive(spinPart) ? scene.get<Transform>(spinPart) : nullptr;
+    if (!kept || kept->parent != self) spinPart = childCalled(scene, self, "Spin");
+    if (Transform* spin = scene.get<Transform>(spinPart)) spin->rotation = Quat(-state.angle, Vec3{1, 0, 0});
 }
 
 void Motor::update(World& world, Entity, float) {

@@ -498,7 +498,7 @@ def circuit(folder, half_width=5.0, verge=4.6):
             for side in (-1, 1):
                 a, b = side * half_width, side * (half_width + 1.1)
                 stripe.quad(edge(k, a, 0.06), edge(k, b, 0.09), edge(k + 1, b, 0.09), edge(k + 1, a, 0.06), up)
-    # The start: two rows of checkers across the road, and two boxes to line up in behind it.
+    # The start: two rows of checkers across the road, and five boxes to line up in behind it.
     squares = 10
     for row in range(2):
         for column in range(squares):
@@ -507,8 +507,11 @@ def circuit(folder, half_width=5.0, verge=4.6):
             z0 = points[0][1] - half_width + 2 * half_width * column / squares
             z1 = points[0][1] - half_width + 2 * half_width * (column + 1) / squares
             checker.quad((x0, 0.05, z0), (x1, 0.05, z0), (x1, 0.05, z1), (x0, 0.05, z1), up)
-    for slot, side in ((0, -1), (1, 1)):
-        x, z = points[0][0] - 6.0 - slot * 7.0, points[0][1] + side * 2.3
+    grid = []
+    for slot in range(5):
+        side = -1 if slot % 2 == 0 else 1
+        x, z = points[0][0] - 6.0 - slot * 5.0, points[0][1] + side * 2.3
+        grid.append((round(x - 1.9, 3), round(z, 3)))                     # where a car's middle stands in it
         for a, b, c, d in ((x - 0.08, z - 1.3, x + 0.08, z + 1.3), (x - 3.6, z - 1.3, x, z - 1.14), (x - 3.6, z + 1.14, x, z + 1.3)):
             line.quad((a, 0.05, b), (c, 0.05, b), (c, 0.05, d), (a, 0.05, d), up)
     # The pit lane: it leaves the road where the last hairpin opens onto the straight, runs
@@ -574,6 +577,6 @@ def circuit(folder, half_width=5.0, verge=4.6):
             walls.append((mx, mz, math.degrees(math.atan2(-(b[2] - a[2]), b[0] - a[0])), length + 0.15, k % 2))
     tightest = min(1.0 / max(abs(bend(k)), 1e-6) for k in range(count))
     gates = [points[int(count * share)] for share in (0.0, 0.25, 0.5, 0.75)]
-    return dict(points=points, walls=walls, gates=gates, half_width=half_width, length=count * 2.0, tightest=tightest,
+    return dict(points=points, walls=walls, gates=gates, grid=grid, half_width=half_width, length=count * 2.0, tightest=tightest,
                 pit=pit, pit_half=pit_half, pit_box=pit_box,
                 start=(points[0][0] - 9.5, points[0][1] - 2.3))

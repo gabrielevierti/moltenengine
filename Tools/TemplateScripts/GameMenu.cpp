@@ -7,6 +7,7 @@
 //   "Interface"          the race's own interface: hidden on the title
 //   "Pause Button"       pauses (as Escape and P do)
 //   "Pause Screen"       a group: "Resume", "Restart", "Reset Car", "Pause Settings", "Main Menu"
+//   "Results"            after a race: "Race Again" starts over, "Leave Race" goes to the title
 //   "Settings Screen"    a group with "Settings Back", and the options: buttons named
 //                        "Option <preference> <value>". A click keeps that value under that
 //                        name, from one time the game is played to the next; the button of
@@ -15,7 +16,7 @@
 // The preferences it applies itself: "quality" (0 low, 1 medium, 2 high: the lighting, the
 // shadows and how sharp the picture is), "volume" (0 off, 1 half, 2 full), "controls"
 // (the size of the touch buttons: 0 small, 1 medium, 2 large). The others ("weather",
-// "abs", "startCompound") are read by the scripts they belong to.
+// "abs", "startCompound", "mode", "laps") are read by the scripts they belong to.
 #include "MoltenMetal.hpp"
 
 #include <algorithm>
@@ -101,6 +102,13 @@ struct GameMenu {
                 break;
             case Screen::Race:
                 if (clicked(world, "Pause Button") || pausePressed) go(world, Screen::Paused);
+                // The results at the end of a race (RaceDirector shows them).
+                else if (clicked(world, "Race Again")) {
+                    skipsTitleOnce = true;
+                    world.reloadScene();
+                } else if (clicked(world, "Leave Race")) {
+                    world.reloadScene();
+                }
                 break;
             case Screen::Paused:
                 if (clicked(world, "Resume") || pausePressed) go(world, Screen::Race);
@@ -140,6 +148,7 @@ struct GameMenu {
     static float defaultOf(const std::string& key) {
         if (key == "quality" || key == "controls" || key == "startCompound" || key == "abs") return 1;
         if (key == "volume") return 2;
+        if (key == "laps") return 3;
         return 0;
     }
 };

@@ -99,7 +99,7 @@ void Motor::fixedUpdate(World& world, Entity self, float dt) {
     }
 }
 
-void Motor::update(World& world, Entity, float) {
+void Motor::update(World& world, Entity self, float) {
     // The sound: four recordings of the engine at different speeds, blended by how fast it
     // turns (one recording played faster or slower sounds like a toy), the turbo's whistle
     // over it, and the valve's hiss when the pedal comes up.
@@ -122,6 +122,17 @@ void Motor::update(World& world, Entity, float) {
     }
     float spooled = maxBoost > 0 ? saturate(boost / maxBoost) : 0.0f;
     world.changeSound(turboVoice, 0.22f * spooled * spooled, 0.7f + 0.7f * spooled + rpm / 30000.0f);
+    if (!isPlayers) {
+        // Another car: as loud as it is near, from its side.
+        const Transform* place = world.scene.get<Transform>(kit::vehicleOf(world.scene, self));
+        if (!place) place = world.scene.get<Transform>(self);
+        if (place) {
+            for (int layer = 0; layer < 4; layer++) world.placeSound(voices[layer], place->worldPosition(), 4.0f, 90.0f);
+            world.placeSound(turboVoice, place->worldPosition(), 4.0f, 60.0f);
+        }
+        blowsOff = false;
+        return;
+    }
     if (blowsOff) {
         if (!soundFolder.empty()) world.playSound(soundFolder + "/blowoff.wav", 0.45f + 0.5f * spooled);
         blowsOff = false;
@@ -132,4 +143,4 @@ void Motor::update(World& world, Entity, float) {
 
 MOLTEN_COMPONENT(Motor, MOLTEN_FIELD(maxBoost).range(0, 2.5f).help("Bar of pressure the turbo gives with the pedal down"),
                  MOLTEN_FIELD(spoolRate).range(0.2f, 8).help("How quickly the boost builds: lower is more lag"), MOLTEN_FIELD(tractionControl),
-                 MOLTEN_FIELD(soundFolder))
+                 MOLTEN_FIELD(soundFolder), MOLTEN_FIELD(isPlayers).help("The car the player drives: heard from its seat, shown on the dashboard. Off: heard from where it is"))

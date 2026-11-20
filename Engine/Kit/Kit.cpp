@@ -491,6 +491,8 @@ void registerKit() {
         registry.setCategory(name, "Vehicles");
     }
     registry.setCategory("VisualScript", "Scripts");
+    registry.setCategory("LodGroup", "Rendering");
+    ComponentRegistry::setDisplayName("LodGroup", "LOD Group");
 }
 
 
@@ -506,6 +508,8 @@ MOLTEN_COMPONENT(Buoyancy, MOLTEN_FIELD(waterLevel), MOLTEN_FIELD(lift).range(0,
 MOLTEN_COMPONENT(Follow, MOLTEN_FIELD(target).help("The name of the entity to follow"), MOLTEN_FIELD(offset), MOLTEN_FIELD(smoothness).range(0, 20),
                  MOLTEN_FIELD(looksAtTarget), MOLTEN_FIELD(turnsWithTarget))
 MOLTEN_COMPONENT(Spin, MOLTEN_FIELD(axis), MOLTEN_FIELD(degreesPerSecond))
+MOLTEN_COMPONENT(LodGroup, MOLTEN_FIELD(distance).range(1, 2000).help("Meters from the camera: nearer, the model in full; farther, the child named Far"),
+                 MOLTEN_FIELD(far).help("The child that is the simpler version, drawn only from far away"))
 MOLTEN_COMPONENT(Mover, MOLTEN_FIELD(velocity), MOLTEN_FIELD(isLocal), MOLTEN_FIELD(chases).help("If set: move toward the entity with this name"),
                  MOLTEN_FIELD(chaseSpeed))
 MOLTEN_COMPONENT(Lifetime, MOLTEN_FIELD(seconds))

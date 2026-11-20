@@ -1,6 +1,8 @@
 #include "Assets/ImportSettings.hpp"
 #include "Core/World.hpp"
 
+#include "Audio/Mixer.hpp"
+
 #include "Assets/MeshData.hpp"
 
 #include "Assets/Gltf.hpp"
@@ -8,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <map>
 #include <cstdlib>
 #include <cstdio>
 
@@ -215,18 +218,49 @@ uint32_t World::startSound(const std::string& name, float volume, float pitch, b
 }
 
 void World::changeSound(uint32_t sound, float volume, float pitch) {
-    if (sound != 0) adjustSound(sound, volume * soundVolume, pitch);
+    if (sound == 0) return;
+    auto placed = soundPlaces_.find(sound);
+    if (placed == soundPlaces_.end()) {
+        adjustSound(sound, volume * soundVolume, pitch);
+        return;
+    }
+    placed->second.volume = volume;
+    placed->second.pitch = pitch;
+    voiceSound(sound, volume, pitch);
+}
+
+void World::placeSound(uint32_t sound, Vec3 position, float fullWithin, float silentBeyond) {
+    if (sound == 0) return;
+    SoundPlace& place = soundPlaces_[sound];
+    place.position = position;
+    place.fullWithin = fullWithin;
+    place.silentBeyond = std::max(silentBeyond, fullWithin + 0.01f);
+    if (place.volume >= 0) voiceSound(sound, place.volume, place.pitch);
+}
+
+void World::voiceSound(uint32_t sound, float volume, float pitch) {
+    const SoundPlace& place = soundPlaces_[sound];
+    Mat4 ears;
+    if (!listener(ears)) {
+        adjustSound(sound, volume * soundVolume, pitch);
+        return;
+    }
+    SpatialGain gain = spatialize(ears, place.position, place.fullWithin, place.silentBeyond);
+    adjustSound(sound, volume * soundVolume * gain.volume, pitch);
+    panSound(sound, gain.pan);
 }
 
 void World::stopSound(uint32_t sound) {
     if (sound == 0) return;
     endSound(sound);
+    soundPlaces_.erase(sound);
     startedSounds_.erase(std::remove(startedSounds_.begin(), startedSounds_.end(), sound), startedSounds_.end());
 }
 
 void World::stopSounds() {
     for (uint32_t sound : startedSounds_) endSound(sound);
     startedSounds_.clear();
+    soundPlaces_.clear();
 }
 
 void World::loadInputMap() {
@@ -482,25 +516,45 @@ std::optional<MeshData> World::readMeshData(const std::string& name) const {
 }
 
 void World::prepareMeshColliders() {
+    // The same model at the same scale is read and shaped once, however many colliders use it
+    // (five cars of one model: one read, one hull).
+    struct Made {
+        std::shared_ptr<const MeshShape> mesh;
+        std::shared_ptr<const ConvexShape> convex;
+    };
+    std::map<std::string, Made> made;
+    auto keyOf = [](const std::string& name, Vec3 scale) {
+        char text[96];
+        std::snprintf(text, sizeof(text), "|%.6g|%.6g|%.6g", scale.x, scale.y, scale.z);
+        return name + text;
+    };
     scene.each<Collider, Transform>([&](Entity, Collider& collider, Transform& transform) {
         if (collider.shape != ColliderShape::Mesh) return;
         Vec3 scale = transform.scale;
         bool hasWhatItNeeds = collider.isConvex ? collider.convex != nullptr : collider.mesh != nullptr;
         if (hasWhatItNeeds && simd::length_squared(scale - collider.meshScale) < 1e-10f) return;
         if (collider.isConvex && !collider.convex && collider.mesh && simd::length_squared(scale - collider.meshScale) < 1e-10f) {
-            collider.convex = ConvexShape::build(collider.mesh->points, Vec3{1, 1, 1});        // made convex since it was read
+            Made& same = made[keyOf(collider.meshName, scale) + "|convex"];
+            if (!same.convex) same.convex = ConvexShape::build(collider.mesh->points, Vec3{1, 1, 1});   // made convex since it was read
+            collider.convex = same.convex;
             return;
         }
         if (!collider.mesh && simd::length_squared(collider.meshScale) > 0 && simd::length_squared(scale - collider.meshScale) < 1e-10f) return;   // tried, and there is no such model
         collider.meshScale = scale;
         collider.mesh = nullptr;
-        std::optional<MeshData> data = readMeshData(collider.meshName);
-        if (!data) {
-            logError("mesh collider: cannot read the model \"%s\"", collider.meshName.c_str());
-            return;
+        Made& same = made[keyOf(collider.meshName, scale)];
+        if (!same.mesh) {
+            std::optional<MeshData> data = readMeshData(collider.meshName);
+            if (!data) {
+                logError("mesh collider: cannot read the model \"%s\"", collider.meshName.c_str());
+                return;
+            }
+            same.mesh = MeshShape::build(data->positions, data->indices, scale);
+            if (collider.isConvex) same.convex = ConvexShape::build(data->positions, scale);
         }
-        collider.mesh = MeshShape::build(data->positions, data->indices, scale);
-        collider.convex = collider.isConvex ? ConvexShape::build(data->positions, scale) : nullptr;
+        if (collider.isConvex && !same.convex) same.convex = ConvexShape::build(same.mesh->points, Vec3{1, 1, 1});
+        collider.mesh = same.mesh;
+        collider.convex = collider.isConvex ? same.convex : nullptr;
     });
 }
 

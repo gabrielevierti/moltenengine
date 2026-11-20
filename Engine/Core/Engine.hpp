@@ -86,6 +86,7 @@ public:
     Renderer& renderer() { return *renderer_; }
     Assets& assets() { return *assets_; }
     Audio& audio() { return *audio_; }
+    bool hasAudio() const { return audio_ != nullptr; }        // false where there is no sound device
     /// Writes pixels (four bytes each: red, green, blue, alpha; rows from the top) as a PNG file.
     bool writeImage(const std::string& path, const std::vector<uint8_t>& pixels, int width, int height);
     /// Lines in 3D for the next frame: engine.debug().line(a, b, color).
@@ -101,6 +102,8 @@ public:
     void showMesh(Entity entity, const MeshData& data) override;
     uint32_t beginSound(const std::string& name, float volume, float pitch, bool loops) override;
     void adjustSound(uint32_t sound, float volume, float pitch) override;
+    void panSound(uint32_t sound, float pan) override;
+    bool listener(Mat4& world) override;
     void endSound(uint32_t sound) override;
     std::shared_ptr<Texture> loadTexture(const std::string& name, TextureFormat format) override;
     Engine* asEngine() override { return this; }

@@ -272,6 +272,17 @@ void Engine::adjustSound(uint32_t sound, float volume, float pitch) {
     audio_->mixer().setPitch(sound, pitch);
 }
 
+void Engine::panSound(uint32_t sound, float pan) {
+    audio_->mixer().setPan(sound, pan);
+}
+
+bool Engine::listener(Mat4& world) {
+    const Transform* ears = scene.get<Transform>(activeCamera());
+    if (!ears) return false;
+    world = ears->world;
+    return true;
+}
+
 void Engine::endSound(uint32_t sound) {
     audio_->stop(sound);
 }
@@ -385,7 +396,8 @@ void Engine::drawColliders() {
         Vec3 center = transform.position + rotate(transform.rotation, collider.offset);
         switch (collider.shape) {
             case ColliderShape::Mesh:
-                break;                  // its triangles are the model's own: nothing more to outline
+            case ColliderShape::Convex:
+                break;                  // shaped as the model is: its triangles or its hull, nothing more to outline here
             case ColliderShape::Sphere:
                 lines.sphere(center, collider.radius, color);
                 break;
