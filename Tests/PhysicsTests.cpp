@@ -375,3 +375,116 @@ TEST(the_simulation_is_deterministic) {
     }
     CHECK(simd::all(results[0] == results[1]));
 }
+
+// ---------------------------------------------------------------- convex mesh colliders
+#include "Assets/MeshData.hpp"
+
+namespace {
+std::shared_ptr<const ConvexShape> cubeHull(float half) {
+    MeshData cube = MeshData::cube();
+    return ConvexShape::build(cube.positions, Vec3{half * 2, half * 2, half * 2});
+}
+ShapeInstance convexAt(const std::shared_ptr<const ConvexShape>& hull, Vec3 center, Quat rotation = Quat{}) {
+    ShapeInstance shape;
+    shape.shape = ColliderShape::Convex;
+    shape.convex = hull.get();
+    shape.center = center;
+    shape.rotation = rotation;
+    return shape;
+}
+}  // namespace
+
+TEST(a_convex_hull_of_a_cube_has_its_corners_and_faces) {
+    auto hull = cubeHull(0.5f);
+    CHECK(hull->points.size() == 8);
+    CHECK(hull->planes.size() == 6);
+    CHECK_NEAR(hull->bounds.max.x, 0.5, 1e-5);
+    Vec3 corner = hull->support(Vec3{1, 1, 1});
+    CHECK_NEAR(corner.x, 0.5, 1e-5);
+    CHECK_NEAR(corner.y, 0.5, 1e-5);
+    // A sphere's hull: many corners, all near its surface.
+    MeshData ball = MeshData::sphere();
+    auto round = ConvexShape::build(ball.positions, Vec3{2, 2, 2});
+    CHECK(round->points.size() > 30 && round->planes.size() > 20);
+}
+
+TEST(convex_shapes_collide_with_every_other_shape) {
+    auto hull = cubeHull(0.5f);
+    ContactInfo info;
+    // On top of a sphere: pushed apart up and down, as deep as they overlap.
+    CHECK(collide(convexAt(hull, Vec3{0, 1.4f, 0}), sphereAt(Vec3{0, 0, 0}, 1), info));
+    CHECK_NEAR(info.normal.y, -1, 0.02);
+    CHECK_NEAR(info.depth, 0.1, 0.01);
+    CHECK(!collide(convexAt(hull, Vec3{0, 1.6f, 0}), sphereAt(Vec3{0, 0, 0}, 1), info));
+    // Resting on a box: on its four lower corners.
+    CHECK(collide(convexAt(hull, Vec3{0, 0.45f, 0}), boxAt(Vec3{0, -0.5f, 0}, Vec3{5, 0.5f, 5}), info));
+    CHECK(info.pointCount >= 4);
+    CHECK_NEAR(info.normal.y, -1, 1e-3);
+    CHECK_NEAR(info.depth, 0.05, 1e-3);
+    // Two hulls, turned against each other.
+    Quat turned = axisAngle(Vec3{0, 1, 0}, radians(45));
+    CHECK(collide(convexAt(hull, Vec3{0, 0, 0}), convexAt(hull, Vec3{1.15f, 0, 0}, turned), info));
+    CHECK(info.normal.x > 0.9f);
+    CHECK_NEAR(info.depth, 0.5 + 0.5 * std::sqrt(2.0) - 1.15, 0.01);
+    CHECK(!collide(convexAt(hull, Vec3{0, 0, 0}), convexAt(hull, Vec3{1.3f, 0, 0}, turned), info));
+    // A capsule across it.
+    ShapeInstance capsule;
+    capsule.shape = ColliderShape::Capsule;
+    capsule.center = Vec3{0, 0.8f, 0};
+    capsule.rotation = axisAngle(Vec3{0, 0, 1}, radians(90));
+    capsule.radius = 0.4f;
+    capsule.halfHeight = 1;
+    CHECK(collide(convexAt(hull, Vec3{0, 0, 0}), capsule, info));
+    CHECK(info.normal.y > 0.9f);
+    CHECK_NEAR(info.depth, 0.1, 0.01);
+}
+
+TEST(a_ray_hits_a_convex_shape_on_its_face) {
+    auto hull = cubeHull(0.5f);
+    auto hit = raycastShape(Ray{Vec3{0, 5, 0}, Vec3{0, -1, 0}}, convexAt(hull, Vec3{0, 0, 0}));
+    CHECK(hit.has_value());
+    if (hit) {
+        CHECK_NEAR(hit->distance, 4.5, 1e-4);
+        CHECK_NEAR(hit->normal.y, 1, 1e-4);
+    }
+    CHECK(!raycastShape(Ray{Vec3{2, 5, 0}, Vec3{0, -1, 0}}, convexAt(hull, Vec3{0, 0, 0})).has_value());
+    CHECK(!raycastShape(Ray{Vec3{0, 0, 0}, Vec3{0, -1, 0}}, convexAt(hull, Vec3{0, 0, 0})).has_value());   // from inside: nothing
+}
+
+TEST(a_convex_body_falls_and_rests_on_a_box_and_on_a_mesh) {
+    for (int ground = 0; ground < 2; ground++) {
+        Scene scene;
+        Physics physics;
+        if (ground == 0) {
+            addStaticBox(scene, Vec3{0, -0.5f, 0}, Vec3{10, 0.5f, 10});
+        } else {
+            // A flat floor of two triangles, as a mesh collider.
+            Entity floor = scene.create("Floor");
+            scene.add(floor, Transform{});
+            Collider mesh;
+            mesh.shape = ColliderShape::Mesh;
+            mesh.mesh = MeshShape::build({Vec3{-10, 0, -10}, Vec3{10, 0, -10}, Vec3{10, 0, 10}, Vec3{-10, 0, 10}}, {0, 2, 1, 0, 3, 2}, Vec3{1, 1, 1});
+            scene.add(floor, mesh);
+        }
+        Entity crate = scene.create("Crate");
+        Transform place;
+        place.position = Vec3{0, 2, 0};
+        place.rotation = axisAngle(Vec3{1, 0, 1}, radians(20));
+        scene.add(crate, place);
+        Collider shape;
+        shape.shape = ColliderShape::Mesh;
+        shape.isConvex = true;
+        shape.convex = cubeHull(0.5f);
+        scene.add(crate, shape);
+        RigidBody body;
+        body.type = BodyType::Dynamic;
+        body.mass = 10;
+        body.rotates = true;
+        scene.add(crate, body);
+        scene.updateTransforms();
+        run(physics, scene, 4.0f);
+        const RigidBody& rest = *scene.get<RigidBody>(crate);
+        CHECK_NEAR(rest.position.y, 0.5, 0.05);                       // on a face, not sunk, not floating
+        CHECK(simd::length(rest.velocity) < 0.2f);
+    }
+}

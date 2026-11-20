@@ -28,7 +28,7 @@ TEST(gpu_structs_have_the_sizes_the_shaders_expect) {
     CHECK(offsetof(gpu::MaterialUniforms, water) == 64);
     CHECK(sizeof(gpu::CanvasVertex) == 32);
     CHECK(sizeof(gpu::LineVertex) == 32);
-    CHECK(sizeof(gpu::ParticleInstance) == 32);
+    CHECK(sizeof(gpu::ParticleInstance) == 48);
     CHECK(offsetof(gpu::PassUniforms, cameraPosition) == 320);
     CHECK(offsetof(gpu::PassUniforms, time) == 336);
     CHECK(offsetof(gpu::LightData, type) == 48);

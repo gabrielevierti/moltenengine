@@ -11,6 +11,7 @@ namespace molten {
 
 struct Splash {
     static constexpr float kDuration = 2.4f;        // seconds on screen, the fade at the end included
+    static constexpr float kFade = 0.5f;            // the fade at the end: the game shows through it
 
     /// Draws the splash over the whole canvas. `seconds` is the time since it appeared.
     /// It fades in, stays, and fades out to show what is behind it.

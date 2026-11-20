@@ -239,6 +239,7 @@ typedef struct {
 typedef struct {
     simd_float4 positionAndSize;     // xyz: world position of the center, w: edge length
     simd_float4 color;
+    simd_float4 velocityAndStretch;  // xyz: its velocity, w: seconds of it drawn as a streak (0: a round dot)
 } ParticleInstance;
 
 #endif

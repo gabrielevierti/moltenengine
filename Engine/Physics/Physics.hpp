@@ -90,9 +90,13 @@ struct Collider {
     float halfHeight = 0.5f;
     Vec3 offset{0, 0, 0};           // from the entity's position, in its local space
     /// Mesh: the model whose triangles it is ("Models/hills.obj", "cube"...). The entity's
-    /// scale is its size. For things that stand still: ground, tracks, buildings.
+    /// scale is its size. As it is, for things that stand still: ground, tracks, buildings.
     std::string meshName;
+    /// Mesh: wrapped as a convex shape instead (no hollows, no holes), which can move with a
+    /// Rigidbody, fall, roll and be hit: a car's body, a rock, a crate of an odd shape.
+    bool isConvex = false;
     std::shared_ptr<const MeshShape> mesh;      // read from that file when the game runs
+    std::shared_ptr<const ConvexShape> convex;  // the same, wrapped, when it is convex
     Vec3 meshScale{0, 0, 0};                    // the scale it was read at
     bool isTrigger = false;         // detects overlaps but does not block
     uint32_t layer = 1;             // the group this collider belongs to, as a bit
@@ -192,7 +196,40 @@ public:
         triggering_.clear();
     }
 
+    /// Every solid shape whose box overlaps `box`, except the one ignored and everything under
+    /// it: `visit(entity, shape)`. What a body that moves by itself (a vehicle) collides with.
+    template <typename Visit>
+    void forEachShapeNear(Scene& scene, const AABB& box, Entity ignore, Visit&& visit) {
+        prepareRayShapes(scene);
+        for (const RayShape& cached : rayShapes_) {
+            if (cached.entity == ignore || !scene.isAlive(cached.entity)) continue;
+            if (cached.high.x < box.min.x || cached.low.x > box.max.x || cached.high.y < box.min.y || cached.low.y > box.max.y ||
+                cached.high.z < box.min.z || cached.low.z > box.max.z) continue;
+            if (ignore.isValid() && isUnder(scene, cached.entity, ignore)) continue;
+            visit(cached.entity, cached.shape);
+        }
+    }
+    static bool isUnder(Scene& scene, Entity entity, Entity ancestor);
+
+    /// Forgets the shapes raycasts are tested against: after moving colliders by hand without
+    /// a step or an update of the transforms in between.
+    void forgetShapes() { rayShapesReady_ = false; }
+
 private:
+    // What raycasts test against, worked out once and kept until something may have moved
+    // (a step, an update of the transforms, a collider more or less): a ray first meets each
+    // shape's box, which is cheap, and only then the shape itself.
+    struct RayShape {
+        Entity entity;
+        ShapeInstance shape;
+        Vec3 low, high;
+        uint32_t layer = 0;
+    };
+    std::vector<RayShape> rayShapes_;
+    bool rayShapesReady_ = false;
+    uint32_t rayShapesStamp_ = 0;
+    size_t rayShapesColliders_ = 0;
+    void prepareRayShapes(Scene& scene);
     struct Proxy {
         Entity entity;
         Collider* collider = nullptr;

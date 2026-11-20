@@ -37,6 +37,9 @@ public:
     /// Once per frame, after update(): draw the interface, in points from the top left.
     virtual void draw(Engine& engine, Canvas& canvas) {}
 
+    /// The same, over everything else, the scene's interface included: a splash, a fade.
+    virtual void drawOver(Engine& engine, Canvas& canvas) {}
+
     /// Once, when the game is closing.
     virtual void shutdown(Engine& engine) {}
 };

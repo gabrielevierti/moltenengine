@@ -315,3 +315,43 @@ TEST(aeroplane_takes_off_climbs_and_stalls) {
     CHECK(ground.world.value("stall") == 1);
     CHECK(std::isfinite(plane.body().position.y));
 }
+
+TEST(a_car_hits_with_its_own_colliders_and_its_wheels_see_through_them) {
+    // A box over the whole car, from its middle up, around its wheels' mounts: the wheels'
+    // rays start inside it and still find the road; the box stops it at the wall.
+    Ground ground;
+    Entity wall = ground.world.scene.create("Wall");
+    Transform transform;
+    transform.position = Vec3{0, 1, -40};
+    ground.world.scene.add(wall, transform);
+    Collider collider;
+    collider.halfExtents = Vec3{10, 1, 0.5f};
+    ground.world.scene.add(wall, collider);
+
+    TestCar car = ground.car("v8");
+    Entity root = ground.world.find("Car");
+    if (!root.isValid()) root = kit::vehicleOf(ground.world.scene, ground.world.find("Wheel FL"));
+    Entity shell = ground.world.scene.create("Shell");
+    Transform under;
+    under.parent = root;
+    ground.world.scene.add(shell, under);
+    Collider box;
+    box.halfExtents = Vec3{0.95f, 0.45f, 2.4f};             // longer than the car: it hits first
+    box.offset = Vec3{0, 0.4f, 0};
+    ground.world.scene.add(shell, box);
+    ground.world.scene.updateTransforms();
+    car.vehicle->hitsWithItsBox = false;
+
+    car.setControls(0, 0, 0);
+    for (int frame = 0; frame < 120; frame++) ground.world.advance(1.0 / 60.0);
+    CHECK(car.wheels[0]->isOnGround && car.wheels[3]->isOnGround);  // through its own box to the road
+    CHECK(car.body().position.y > 0.3f && car.body().position.y < 1.0f);
+    for (int frame = 0; frame < 60 * 6; frame++) {
+        car.setControls(1, 0, 0);
+        ground.world.advance(1.0 / 60.0);
+    }
+    // Its box's front is 2.4 m ahead of its middle: stopped with that at the wall, not the car's own nose.
+    CHECK(car.body().position.z > -40.0f + 0.5f + 2.4f - 0.3f);
+    CHECK(car.body().position.z < -30.0f);
+    CHECK(std::isfinite(car.body().position.x));
+}

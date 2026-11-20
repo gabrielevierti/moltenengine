@@ -26,9 +26,11 @@ Molten targets one family of machines (Apple GPUs) so that it can use what they 
 
 A little Fiat 500 on a small circuit, to lap against the clock, on a Mac with the keyboard or on an iPhone with your thumbs. It is a complete project made with the editor, and the best way to see what the engine does:
 
-- **A car simulated from its parts.** Four wheels with springs, dampers and anti-roll bars; tires that grip, slide and smoke; seven engines to choose from (1 to 7) behind a gearbox, each with its own sound; ABS, brakes shared by the load on each wheel, a handbrake for the hairpin.
-- **A circuit to learn.** 566 meters of corners with curbs and walls, a paddock with pits, a stand and a start gantry, lamps along the straight, in evening light.
-- **Lap times.** Your lap, your last and your best, on a dashboard with speed, gear and revs.
+- **A car simulated from its parts.** Four wheels with springs, dampers and anti-roll bars; tires that grip, slide, smoke and leave marks; a turbocharged four-cylinder behind a gearbox, with the whistle and the blow-off; stability control that lets it drift and catches it; ABS and a handbrake for the hairpin. Upside down, it is put back on its wheels.
+- **A circuit to learn.** 566 meters of corners with curbs and walls, a stand, a start gantry and a pit lane in front of the garages, in evening light. Four wheels on the grass and the lap does not count.
+- **Tyres and pit stops.** Soft, medium, hard and wet tyres that wear as you drive, more when they slide. Stop in your box in the pit lane, behind the limiter, and the crew changes them for the ones you choose.
+- **Weather.** Sun, clouds, rain, or a sky that changes as you race: the rain falls, the road darkens, shines and loses its grip, and dries again when it stops.
+- **Lap times and menus.** Your lap, your last and your best (kept from one game to the next) on a dashboard with speed, revs, gear and boost; a title screen, a pause menu, and settings for the graphics, the weather, the tyres, the size of the touch buttons, ABS and the sound.
 - **Lights and smoke.** Headlights (L), brake lights that glow when you brake, particle smoke from the exhaust that follows the throttle, and from the rear tires when they let go.
 - **Touch controls.** Two steering buttons on the left; gas, brake and handbrake on the right. On a phone they are there from the start. On the Mac, T shows them and the mouse plays the finger.
 

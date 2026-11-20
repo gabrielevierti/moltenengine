@@ -26,4 +26,14 @@ std::string findRootDirectory(const std::string& executablePath) {
     return MOLTEN_SOURCE_ROOT;
 }
 
+std::string userDataDirectory(const std::string& name) {
+    const char* home = std::getenv("HOME");
+    std::string safe;
+    for (char c : name) safe += (c == '/' || c == ':') ? '-' : c;
+    std::filesystem::path folder = std::filesystem::path(home && *home ? home : "/tmp") / "Library" / "Application Support" / (safe.empty() ? "Molten Game" : safe);
+    std::error_code code;
+    std::filesystem::create_directories(folder, code);
+    return folder.string();
+}
+
 }  // namespace molten

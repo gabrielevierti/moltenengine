@@ -62,6 +62,13 @@ public:
     void setValue(const std::string& name, float value) { values_[name] = value; }
     float addValue(const std::string& name, float amount) { return values_[name] += amount; }
     const std::unordered_map<std::string, float>& values() const { return values_; }
+
+    // ---- preferences: numbers kept from one time the game is played to the next (settings,
+    // records). Read from and written to `preferencesFile` at once; with no file, kept for this run.
+    float preference(const std::string& name, float fallback = 0.0f) const;
+    bool hasPreference(const std::string& name) const;
+    void setPreference(const std::string& name, float value);
+    std::string preferencesFile;
     void clearValues() { values_.clear(); }
 
     // ---- entities
@@ -120,6 +127,9 @@ public:
     /// pitch can follow what happens. Returns 0 where there is no sound to make. It stops
     /// by itself when the scene is replaced.
     uint32_t startSound(const std::string& name, float volume = 1.0f, float pitch = 1.0f, bool loops = true);
+    /// Every sound the game makes, from 0 (silent) to 1: a volume setting, a pause. Sounds already
+    /// playing follow it the next time they are changed.
+    float soundVolume = 1.0f;
     void changeSound(uint32_t sound, float volume, float pitch);
     void stopSound(uint32_t sound);
     void stopSounds();
@@ -185,6 +195,9 @@ protected:
     bool pendingReload_ = false;
     bool pendingClearsValues_ = false;
     std::vector<Entity> scratchEntities_;
+    mutable std::unordered_map<std::string, float> preferences_;
+    mutable std::string preferencesReadFrom_;           // which file `preferences_` holds, once read
+    void readPreferences() const;
 
 private:
     struct Materials;

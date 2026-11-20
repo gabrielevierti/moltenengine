@@ -219,6 +219,7 @@ void Engine::simulate(Game& game, double realDelta) {
     canvas_.begin(canvasSize, pixelsPerPoint);
     game.draw(*this, canvas_);
     drawComponents(canvas_);                // the interface components draw: score, health, messages
+    game.drawOver(*this, canvas_);
     if (showsColliders) drawColliders();
     if (showsStatistics) drawStatistics();
 }
@@ -242,7 +243,7 @@ void Engine::playSound(const std::string& name, float volume) {
     if (!audio_) return;
     if (std::shared_ptr<AudioClip> clip = assets_->sound(name)) {
         PlayOptions options;
-        options.volume = volume;
+        options.volume = volume * soundVolume;
         audio_->play(clip, options);
     }
 }

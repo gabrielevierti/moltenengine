@@ -71,8 +71,8 @@ class Scene:
         self.lines.append("  collider capsule " + n(radius, half_height, *offset) + (" 1" if trigger else " 0"))
         return self
 
-    def mesh_collider(self, mesh):
-        self.lines.append("  collider mesh %s 0 0 0 0" % q(mesh))
+    def mesh_collider(self, mesh, convex=False):
+        self.lines.append("  collider mesh %s 0 0 0 0 %d" % (q(mesh), 1 if convex else 0))
         return self
 
     def light(self, kind, color, intensity, range_=10, shadows=False):
@@ -211,7 +211,7 @@ EVENING = ["skyZenith 0.07 0.16 0.42", "skyHorizon 0.86 0.56 0.34", "skyGround 0
            "shadows 1 110", "ambientOcclusion 1 0.7 1", "bloom 1 0.11 0.9", "exposure 1.05", "toneMapper 0", "vignette 0.28", "clouds 0.35 1",
            "fog 0.86 0.62 0.44 0.0016", "fogShape 0.02 6"]
 
-def add_car(s, folder, layout, start, heading, gates=0):
+def add_car(s, folder, layout, start, heading, gates=0, far=3000):
     """The Fiat 500, its camera and its interface, standing at `start` (x, z) and facing `heading` degrees.
     With `gates`, it times laps through that many "Gate N" entities and shows them."""
     # ---------------- the car
@@ -227,6 +227,8 @@ def add_car(s, folder, layout, start, heading, gates=0):
     s.component("DriveControls")
     if gates:
         s.component("LapTimer", gates=gates, gateRadius=11)
+        # Tyres that wear, and the pit stop that changes them.
+        s.component("Tyres", compound=1, wearRate=1.0, pitSpeedLimit=60, pitStopSeconds=4)
     s.component("CarLights")
     # Its model, part by part: each a piece of Models/Fiat500/fiat500.glb with a material of its own.
     paint = {}
@@ -256,6 +258,10 @@ def add_car(s, folder, layout, start, heading, gates=0):
             continue
         shown = "Rear Lights" if part["material"] == "RearLight" else part["name"].replace("Body ", "").replace("_", " ")
         s.entity(shown).mesh(mesh, paint[part["material"]], part["material"] not in ("Glass", "Headlamp_Glass")).under(model)
+        # The car hits the world with its body's own shape: a convex Mesh Collider of the shell,
+        # as in Unity. (The VehicleBody's box is then not used.)
+        if part["material"] == "Body_Paint":
+            s.mesh_collider(mesh, convex=True)
     # Its lamps: two beams ahead, and two red glows behind that the script brightens under braking.
     lamps, tail, pipe = layout["headlamps"], layout["rearLights"], layout["exhaust"]
     lamp_height = (lamps[0][1] + lamps[1][1]) * 0.5 - ride
@@ -264,7 +270,7 @@ def add_car(s, folder, layout, start, heading, gates=0):
     tail_height = (tail[0][1] + tail[1][1]) * 0.5 - ride
     for name, x in (("Brake Light L", tail[0][0] + 0.1), ("Brake Light R", tail[1][0] - 0.1)):
         s.entity(name, (x, tail_height, tail[1][2] + 0.25)).light("point", (1.0, 0.06, 0.03), 0.4, 5).under(car)
-    # What comes out of the rocket where the engine was: smoke always, fire with the throttle down.
+    # What comes out of the rocket where the engine was: a little smoke, more with the throttle down.
     pipe_at = ((pipe[0][0] + pipe[1][0]) * 0.5, (pipe[0][1] + pipe[1][1]) * 0.5 - ride, pipe[1][2] + 0.22)
     s.entity("Exhaust Smoke", pipe_at).under(car)
     effect(s, rate=10, lifetimeMin=0.9, lifetimeMax=1.9, speedMin=0.8, speedMax=1.6, direction=(0, 0.18, 1), spread=math.radians(14), spawnRadius=0.07,
@@ -272,12 +278,6 @@ def add_car(s, folder, layout, start, heading, gates=0):
            colorStart=(0.5, 0.5, 0.52, 0.0), colorMiddle=(0.46, 0.46, 0.48, 0.34), colorEnd=(0.6, 0.6, 0.62, 0.0),
            sizeStart=0.12, sizeMiddle=0.5, sizeEnd=1.3, maxParticles=260)
     s.component("Exhaust", idleRate=9, fullRate=85)
-    s.entity("Exhaust Flame", (pipe_at[0], pipe_at[1], pipe_at[2] - 0.08)).under(car)
-    effect(s, rate=120, lifetimeMin=0.09, lifetimeMax=0.2, speedMin=5, speedMax=10, direction=(0, 0, 1), spread=math.radians(7), spawnRadius=0.09,
-           gravity=(0, 0.6, 0), drag=3.0, isAdditive=True, isEmitting=False, hasMiddle=True, middleAt=0.3,
-           colorStart=(2.4, 3.2, 6.0, 0.9), colorMiddle=(6.0, 2.6, 0.5, 0.85), colorEnd=(1.6, 0.25, 0.03, 0.0),
-           sizeStart=0.2, sizeMiddle=0.26, sizeEnd=0.06, maxParticles=160)
-    s.component("Exhaust", fullRate=160, isFlame=True)
 
     half_turn = yaw(180)
     for name, x, z in (("Wheel FL", -half_track, front[2]), ("Wheel FR", half_track, front[2]), ("Wheel RL", -half_track, rear[2]), ("Wheel RR", half_track, rear[2])):
@@ -309,8 +309,15 @@ def add_car(s, folder, layout, start, heading, gates=0):
     s.entity("Skid Marks").mesh("plane", marks, False)
     s.component("SkidMarks", car="Car", segmentsPerWheel=400, width=round(layout.get("wheelWidth", 0.19), 3), spacing=0.22)
 
-    s.entity("Camera", (start[0] - 6 * math.sin(math.radians(-heading)), 2.2, start[1] + 6 * math.cos(math.radians(-heading))), yaw(heading)).camera(64, True, 3000, near=0.25)
+    s.entity("Camera", (start[0] - 6 * math.sin(math.radians(-heading)), 2.2, start[1] + 6 * math.cos(math.radians(-heading))), yaw(heading)).camera(64, True, far, near=0.25)
     s.component("Follow", target="Car", offset=(0, 1.55, 4.7), smoothness=7, looksAtTarget=True, turnsWithTarget=True)
+    camera = s.index()
+    if gates:
+        # The rain: streaks falling in a box around the camera, as many as Weather says.
+        s.entity("Rain", (0, 6, -9)).under(camera)
+        effect(s, rate=0, isEmitting=False, lifetimeMin=0.75, lifetimeMax=0.95, speedMin=15, speedMax=18, direction=(0, -1, 0), spread=math.radians(4),
+               gravity=(0, -4, 0), drag=0.0, windInfluence=0.35, isAdditive=True, colorStart=(0.55, 0.58, 0.64, 0.42), colorEnd=(0.55, 0.58, 0.64, 0.3),
+               sizeStart=0.022, sizeEnd=0.022, maxParticles=2600, shape=1, boxSize=(30, 2, 30), stretch=0.045)
 
     # ---------------- the interface: each piece an entity, laid out in the Game view
     s.entity("Interface")
@@ -335,16 +342,39 @@ def add_car(s, folder, layout, start, heading, gates=0):
         piece("Lap Time", "HudText", text="{lapTime:time}", anchor=(0.5, 0), offset=(0, 25), size=32, color=(1, 1, 1, 1))
         piece("Best", "HudText", text="BEST", anchor=(0.5, 0), offset=(112, 24), size=10, color=(1, 1, 1, 0.5))
         piece("Best Time", "HudText", text="{bestLap:time}", anchor=(0.5, 0), offset=(112, 37), size=17, color=(0.6, 0.9, 0.65, 1))
+        # All four wheels on the grass: the lap still runs, but it does not count.
+        piece("Lap Invalid", "HudText", text="{lapValid:LAP INVALID  -  TRACK LIMITS|}", anchor=(0.5, 0), offset=(0, 82), size=15, color=(1.0, 0.35, 0.3, 1))
+        # The tyres, top left beside the pause button; the weather, top right.
+        piece("Tyre Panel", "UIPanel", anchor=(0, 0), offset=(186, 44), size=(170, 60), color=glass_dark, border=1.5, borderColor=rim)
+        piece("Tyre Compound", "HudText", text="{tyreCompound:SOFT|MEDIUM|HARD|WET}", anchor=(0, 0), offset=(112, 22), size=17,
+              color=(1.0, 0.85, 0.35, 1))
+        piece("Tyre Wear", "HudText", text="{tyreWear}% WORN", anchor=(0, 0), offset=(112, 46), size=12, color=(1, 1, 1, 0.7))
+        piece("Weather Now", "HudText", text="{weather:SUN|CLOUDS|RAIN}", anchor=(1, 0), offset=(-28, 30), size=14, color=(1, 1, 1, 0.7))
+        piece("Pause Button", "UIButton", label="II", isRound=True, radius=26, anchor=(0, 0), offset=(46, 44), color=(1, 1, 1, 0.45))
+        # In the pit lane: the limiter, the stop, and the tyres for it.
+        s.entity("Pit Panel").under(ui)
+        pit_panel = s.index()
+        def pit_piece(name, component, **fields):
+            s.entity(name).under(pit_panel)
+            s.component(component, **fields)
+        pit_piece("Pit Backdrop", "UIPanel", anchor=(0.5, 0), offset=(0, 168), size=(470, 112), color=glass_dark, border=1.5, borderColor=rim)
+        pit_piece("Pit Limiter", "HudText", text="PIT LANE   60 KM/H", anchor=(0.5, 0), offset=(0, 120), size=15, color=(1.0, 0.85, 0.35, 1))
+        pit_piece("Pit Status", "HudText", text="{pitStop:STOP IN YOUR BOX FOR NEW TYRES|CHANGING TYRES  1|CHANGING TYRES  2|CHANGING TYRES  3|CHANGING TYRES  4}",
+                  anchor=(0.5, 0), offset=(0, 142), size=12, color=(1, 1, 1, 0.8))
+        for k, (name, label, color) in enumerate((("Tyre Soft", "SOFT", (0.95, 0.3, 0.3, 0.9)), ("Tyre Medium", "MEDIUM", (0.95, 0.8, 0.25, 0.9)),
+                                                  ("Tyre Hard", "HARD", (0.85, 0.85, 0.88, 0.9)), ("Tyre Wet", "WET", (0.3, 0.6, 1.0, 0.9)))):
+            pit_piece(name, "UIButton", label=label, anchor=(0.5, 0), offset=(-165 + k * 110, 194), size=(100, 40), color=color, textColor=(0.05, 0.05, 0.06, 1))
     # What the keys do: for a keyboard. DriveControls hides it once the screen is touched.
     piece("Help", "HudText", text="W A S D  drive      Space  handbrake: drift", anchor=(0, 1), offset=(18, -40), size=11, color=(1, 1, 1, 0.55))
-    piece("Help 2", "HudText", text="B  ABS      L  lamps      T  touch controls", anchor=(0, 1), offset=(18, -24), size=11, color=(1, 1, 1, 0.55))
+    piece("Help 2", "HudText", text="B  ABS      L  lamps      R  back on the wheels      T  touch controls      Esc  pause", anchor=(0, 1), offset=(18, -24), size=11, color=(1, 1, 1, 0.55))
     # For a touch screen: a stick to steer with on the left, the pedals and the handbrake on the right.
     # Steering: two buttons under the left thumb, as the pedals are under the right one.
-    piece("Steer Left", "UIButton", label="\u2190", action="steerLeft", isRound=True, radius=52, anchor=(0, 1), offset=(84, -104), onlyOnTouchScreens=True, color=(1, 1, 1, 0.55))
-    piece("Steer Right", "UIButton", label="\u2192", action="steerRight", isRound=True, radius=52, anchor=(0, 1), offset=(214, -104), onlyOnTouchScreens=True, color=(1, 1, 1, 0.55))
-    piece("Gas", "UIButton", label="GAS", action="gas", isRound=True, radius=58, anchor=(1, 1), offset=(-96, -118), onlyOnTouchScreens=True, color=(0.55, 1.0, 0.6, 0.6))
-    piece("Brake", "UIButton", label="BRAKE", action="brake", isRound=True, radius=46, anchor=(1, 1), offset=(-226, -84), onlyOnTouchScreens=True, color=(1.0, 0.45, 0.4, 0.6))
-    piece("Handbrake", "UIButton", label="HB", action="jump", isRound=True, radius=30, anchor=(1, 1), offset=(-212, -196), onlyOnTouchScreens=True, color=(1, 1, 1, 0.5))
+    # Thumb-sized: on a phone the interface is drawn at about 60%, so these are larger than they look here.
+    piece("Steer Left", "UIButton", label="\u2190", action="steerLeft", isRound=True, radius=78, anchor=(0, 1), offset=(104, -112), onlyOnTouchScreens=True, color=(1, 1, 1, 0.55))
+    piece("Steer Right", "UIButton", label="\u2192", action="steerRight", isRound=True, radius=78, anchor=(0, 1), offset=(296, -112), onlyOnTouchScreens=True, color=(1, 1, 1, 0.55))
+    piece("Gas", "UIButton", label="GAS", action="gas", isRound=True, radius=86, anchor=(1, 1), offset=(-114, -124), onlyOnTouchScreens=True, color=(0.55, 1.0, 0.6, 0.6))
+    piece("Brake", "UIButton", label="BRAKE", action="brake", isRound=True, radius=70, anchor=(1, 1), offset=(-306, -94), onlyOnTouchScreens=True, color=(1.0, 0.45, 0.4, 0.6))
+    piece("Handbrake", "UIButton", label="HB", action="jump", isRound=True, radius=46, anchor=(1, 1), offset=(-286, -258), onlyOnTouchScreens=True, color=(1, 1, 1, 0.5))
 
 def driving():
     import json, make_models
@@ -355,8 +385,9 @@ def driving():
         return
     layout = json.load(open(os.path.join(fiat, "layout.json")))
     project(folder, "Driving", "A little circuit and a Fiat 500 with a rocket where its engine was: springs and dampers, tires that slide and smoke, "
-            "seven engines behind a gearbox, lamps, lap times, and controls for a touch screen.",
-            scripts=("DriveControls.cpp", "Motor.hpp", "Motor.cpp", "Follow.cpp", "LapTimer.cpp", "CarLights.cpp", "Exhaust.cpp", "TyreSmoke.cpp", "SkidMarks.cpp"))
+            "a turbocharged engine, tyres that wear and a pit lane to change them, sun or rain, lap times, a menu, and controls for a touch screen.",
+            scripts=("DriveControls.cpp", "Motor.hpp", "Motor.cpp", "Follow.cpp", "LapTimer.cpp", "CarLights.cpp", "Exhaust.cpp", "TyreSmoke.cpp", "SkidMarks.cpp",
+                     "Tyres.cpp", "Weather.cpp", "GameMenu.cpp"))
     write(folder + "/CREDITS.txt", "The car: " + layout["credit"] + "\nMade smaller and rearranged for this game by Tools/import_fiat500.py.\n")
     sounds(folder, ("i4",))
     # What the older version of this game was made of is not used any more.
@@ -366,10 +397,12 @@ def driving():
         if os.path.exists(stale): os.remove(stale)
     track = make_models.circuit(models(folder))
     points = track["points"]
+    pit = track["pit"]
     def near_road(x, z):
-        return any((x - px) ** 2 + (z - pz) ** 2 < 17 ** 2 for px, pz in points[::3]) or (-75 < x < 75 and -40 < z < -12) or (-34 < x < 34 and 14 < z < 34)
-    # A small place: the circuit and what is beside it, a few trees around, nothing beyond.
-    make_models.trees(models(folder) + "/trees.obj", 60, 0, 150, near_road)
+        return (any((x - px) ** 2 + (z - pz) ** 2 < 17 ** 2 for px, pz in points[::3]) or any((x - px) ** 2 + (z - pz) ** 2 < 12 ** 2 for px, pz in pit[::3])
+                or (-75 < x < 75 and -40 < z < -12) or (-34 < x < 34 and 14 < z < 34) or not (-150 < x < 150 and -60 < z < 130))
+    # A small place: the circuit and what is beside it, a few trees around it, nothing beyond.
+    make_models.trees(models(folder) + "/trees.obj", 26, 0, 150, near_road)
     if os.path.exists(models(folder) + "/hills.obj"): os.remove(models(folder) + "/hills.obj")
 
     s = Scene(folder, EVENING)
@@ -394,7 +427,8 @@ def driving():
     s.entity("Sun", (0, 40, 0), then(yaw(118), pitch(-19))).light("directional", (1.0, 0.78, 0.55), 4.6, 10, True)
     # The grass is drawn a little below where it is solid, and the road exactly there: surfaces that
     # lie on one another flicker, and wheels should stand on the road they are seen on.
-    s.entity("Ground", (0, -0.08, 40), scale=(2000, 1, 2000)).mesh("plane", grass).box((1000, 0.5, 1000), (0, -0.42, 0))
+    # Only as much ground as there is circuit: the mist hides where it ends.
+    s.entity("Ground", (0, -0.08, 35), scale=(340, 1, 230)).mesh("plane", grass).box((170, 0.5, 115), (0, -0.42, 0))
     s.entity("Circuit", (0, -0.03, 0))
     circuit_index = s.index()
     for name, mesh, material in (("Road", "circuit_road", asphalt), ("Edge Lines", "circuit_lines", line), ("Curbs Red", "circuit_curb_red", red),
@@ -416,6 +450,16 @@ def driving():
     racing_index = s.index()
     for number, (x, z) in enumerate(points[::3]):
         s.entity("Waypoint %d" % (number + 1), (x, 0, z)).under(racing_index)
+    # The pit lane: where it is (for the limiter), the box where tyres are changed, the line
+    # through it (for the track limits) and its gate (it crosses the finish line too).
+    s.entity("Pit Lane", (0, 0, track["pit"][len(pit) // 2][1]), scale=(132, 1, track["pit_half"] * 2 + 0.8))
+    bx, bz = track["pit_box"]
+    s.entity("Pit Box", (bx, 0, bz), scale=(5.2, 1, 2.8))
+    s.entity("Pit Gate", (0, 0, pit[len(pit) // 2][1]))
+    s.entity("Pit Line")
+    pit_index = s.index()
+    for number, (x, z) in enumerate(pit[::2]):
+        s.entity("Pit Point %d" % (number + 1), (x, 0, z)).under(pit_index)
     s.entity("Trees")
     trees_index = s.index()
     s.entity("Trunks").mesh("Models/trees_trunks.obj", bark).under(trees_index)
@@ -463,8 +507,56 @@ def driving():
             z = points[k][1] + dx * side * 8.6 + dz * j * 1.15
             block("Tire Stack", (x, 0.5, z), (1.05, 1.0, 1.05), rubber, False)
 
-    add_car(s, folder, layout, track["start"], -90, gates=len(track["gates"]))
+    add_car(s, folder, layout, track["start"], -90, gates=len(track["gates"]), far=700)
+    # The weather: sun, clouds or rain, as the settings say; the rain falls around the camera.
+    s.entity("Weather").component("Weather", weather=0, changeEvery=90)
+    add_menus(s)
     write(folder + "/Assets/Scenes/Main.scene", s.text())
+
+def add_menus(s):
+    """The title, the pause and the settings, as interface pieces in groups that GameMenu shows and hides."""
+    s.entity("Game").component("GameMenu", showsTitle=True)
+    dim, orange = (0.02, 0.022, 0.03, 0.62), (1.0, 0.5, 0.18, 0.95)
+    def group(name):
+        s.entity(name)
+        return s.index()
+    def piece(parent, name, component, **fields):
+        s.entity(name).under(parent)
+        s.component(component, **fields)
+    def button(parent, name, label, y, color=(1, 1, 1, 0.9), width=320):
+        piece(parent, name, "UIButton", label=label, anchor=(0.5, 0.5), offset=(0, y), size=(width, 54), color=color, textColor=(0.05, 0.05, 0.06, 1))
+
+    title = group("Title Screen")
+    piece(title, "Title Backdrop", "UIPanel", anchor=(0.5, 0.5), offset=(0, 0), size=(5000, 5000), color=(0.02, 0.022, 0.03, 0.45))
+    piece(title, "Title", "HudText", text="DRIVING", anchor=(0.5, 0.5), offset=(0, -230), size=76, color=(1, 1, 1, 1))
+    piece(title, "Title Line", "HudText", text="A FIAT 500 ON A LITTLE CIRCUIT", anchor=(0.5, 0.5), offset=(0, -130), size=16, color=(1.0, 0.6, 0.3, 1))
+    piece(title, "Title Best", "HudText", text="BEST LAP   {bestLap:time}", anchor=(0.5, 0.5), offset=(0, -92), size=16, color=(1, 1, 1, 0.75))
+    button(title, "Race", "RACE", 0, orange)
+    button(title, "Title Settings", "SETTINGS", 72)
+
+    pause = group("Pause Screen")
+    piece(pause, "Pause Backdrop", "UIPanel", anchor=(0.5, 0.5), offset=(0, 0), size=(5000, 5000), color=dim)
+    piece(pause, "Paused", "HudText", text="PAUSED", anchor=(0.5, 0.5), offset=(0, -230), size=44, color=(1, 1, 1, 1))
+    for k, (name, label) in enumerate((("Resume", "RESUME"), ("Restart", "START OVER"), ("Reset Car", "BACK ON THE WHEELS"),
+                                       ("Pause Settings", "SETTINGS"), ("Main Menu", "MAIN MENU"))):
+        button(pause, name, label, -130 + k * 70, orange if k == 0 else (1, 1, 1, 0.9))
+
+    settings = group("Settings Screen")
+    piece(settings, "Settings Backdrop", "UIPanel", anchor=(0.5, 0.5), offset=(0, 0), size=(5000, 5000), color=(0.02, 0.022, 0.03, 0.8))
+    piece(settings, "Settings Title", "HudText", text="SETTINGS", anchor=(0.5, 0.5), offset=(0, -290), size=34, color=(1, 1, 1, 1))
+    rows = (("GRAPHICS", "quality", ("LOW", "MEDIUM", "HIGH")),
+            ("WEATHER", "weather", ("SUN", "CLOUDS", "RAIN", "CHANGING")),
+            ("TYRES AT THE START", "startCompound", ("SOFT", "MEDIUM", "HARD", "WET")),
+            ("TOUCH BUTTONS", "controls", ("SMALL", "MEDIUM", "LARGE")),
+            ("ABS", "abs", ("OFF", "ON")),
+            ("SOUND", "volume", ("OFF", "HALF", "FULL")))
+    for r, (label, key, choices) in enumerate(rows):
+        y = -200 + r * 68
+        piece(settings, "Setting %s" % label.title(), "HudText", text=label, anchor=(0.5, 0.5), offset=(-400, y - 9), size=14, color=(1, 1, 1, 0.7))
+        for c, choice in enumerate(choices):
+            piece(settings, "Option %s %d" % (key, c), "UIButton", label=choice, anchor=(0.5, 0.5), offset=(-200 + c * 140, y), size=(128, 48),
+                  color=orange, textColor=(0.05, 0.05, 0.06, 1))
+    button(settings, "Settings Back", "BACK", 230)
 
 def then(first, second):
     """Two rotations as one: `second` in the frame `first` makes (quaternions x y z w)."""

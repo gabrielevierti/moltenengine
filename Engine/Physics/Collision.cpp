@@ -1,6 +1,10 @@
 #include "Physics/Collision.hpp"
 
 #include <algorithm>
+#include <optional>
+#include <vector>
+#include <memory>
+#include <cmath>
 
 namespace molten {
 
@@ -243,6 +247,16 @@ void flip(ContactInfo& contact) { contact.normal = -contact.normal; }
 }  // namespace
 
 AABB ShapeInstance::bounds() const {
+    if (shape == ColliderShape::Convex) {
+        AABB box;
+        if (!convex) return AABB::fromCenter(center, Vec3{0, 0, 0});
+        for (int corner = 0; corner < 8; corner++) {
+            Vec3 local{corner & 1 ? convex->bounds.max.x : convex->bounds.min.x, corner & 2 ? convex->bounds.max.y : convex->bounds.min.y,
+                       corner & 4 ? convex->bounds.max.z : convex->bounds.min.z};
+            box.expand(center + rotate(rotation, local));
+        }
+        return box;
+    }
     if (shape == ColliderShape::Mesh) {
         AABB box;
         if (!mesh) return AABB::fromCenter(center, Vec3{0, 0, 0});
@@ -254,6 +268,7 @@ AABB ShapeInstance::bounds() const {
     }
     switch (shape) {
     case ColliderShape::Mesh:
+    case ColliderShape::Convex:
         break;
     case ColliderShape::Sphere:
         return AABB::fromCenter(center, Vec3{radius, radius, radius});
@@ -536,8 +551,382 @@ std::optional<ShapeRayHit> raycastMesh(const Ray& ray, const ShapeInstance& mesh
 
 }  // namespace
 
+// ---------------------------------------------------------------- convex shapes
+
+std::shared_ptr<const ConvexShape> ConvexShape::build(const std::vector<Vec3>& positions, Vec3 scale) {
+    auto shape = std::make_shared<ConvexShape>();
+    if (positions.empty()) return shape;
+    std::vector<Vec3> scaled;
+    scaled.reserve(positions.size());
+    for (Vec3 p : positions) scaled.push_back(p * scale);
+    // The corners: the farthest point in each of many directions spread over a sphere. The
+    // shape they wrap is the model's convex hull, a little rounded off where it has many corners.
+    const int directions = 120;
+    const float golden = 2.39996323f;
+    std::vector<Vec3> corners;
+    for (int i = 0; i < directions; i++) {
+        float y = 1.0f - 2.0f * (float(i) + 0.5f) / float(directions);
+        float ring = std::sqrt(std::max(0.0f, 1.0f - y * y));
+        Vec3 direction{std::cos(golden * float(i)) * ring, y, std::sin(golden * float(i)) * ring};
+        size_t best = 0;
+        float farthest = -1e30f;
+        for (size_t k = 0; k < scaled.size(); k++) {
+            float along = simd::dot(scaled[k], direction);
+            if (along > farthest) farthest = along, best = k;
+        }
+        bool known = false;
+        for (Vec3 corner : corners) known = known || simd::length_squared(corner - scaled[best]) < 1e-10f;
+        if (!known) corners.push_back(scaled[best]);
+    }
+    shape->points = corners;
+    for (Vec3 p : corners) shape->bounds.expand(p);
+    // The faces: every plane through three corners with all the others behind it.
+    float size = simd::length(shape->bounds.max - shape->bounds.min);
+    float tolerance = std::max(size * 1e-4f, 1e-6f);
+    size_t n = corners.size();
+    for (size_t a = 0; a < n; a++) {
+        for (size_t b = a + 1; b < n; b++) {
+            for (size_t c = b + 1; c < n; c++) {
+                Vec3 normal = simd::cross(corners[b] - corners[a], corners[c] - corners[a]);
+                float length = simd::length(normal);
+                if (length < tolerance * tolerance) continue;
+                normal /= length;
+                float offset = simd::dot(normal, corners[a]);
+                bool front = false, back = false;
+                for (size_t k = 0; k < n && !(front && back); k++) {
+                    float d = simd::dot(normal, corners[k]) - offset;
+                    if (d > tolerance) front = true;
+                    else if (d < -tolerance) back = true;
+                }
+                if (front && back) continue;
+                if (front) normal = -normal, offset = -offset;          // everything behind: it faces outward
+                bool same = false;
+                for (Vec4 plane : shape->planes) same = same || (simd::dot(xyz(plane), normal) > 0.9999f && std::abs(plane.w - offset) < tolerance * 4);
+                if (!same) shape->planes.push_back(Vec4{normal.x, normal.y, normal.z, offset});
+            }
+        }
+    }
+    return shape;
+}
+
+Vec3 ConvexShape::support(Vec3 direction) const {
+    Vec3 best{0, 0, 0};
+    float farthest = -1e30f;
+    for (Vec3 p : points) {
+        float along = simd::dot(p, direction);
+        if (along > farthest) farthest = along, best = p;
+    }
+    return best;
+}
+
+namespace {
+
+/// The point of a convex shape farthest along a direction, in the world: what GJK and EPA ask of a shape.
+Vec3 supportOf(const ShapeInstance& shape, Vec3 direction) {
+    switch (shape.shape) {
+    case ColliderShape::Sphere:
+        return shape.center + safeNormalize(direction, Vec3{0, 1, 0}) * shape.radius;
+    case ColliderShape::Capsule: {
+        Vec3 a = shape.capsuleA(), b = shape.capsuleB();
+        Vec3 end = simd::dot(a, direction) > simd::dot(b, direction) ? a : b;
+        return end + safeNormalize(direction, Vec3{0, 1, 0}) * shape.radius;
+    }
+    case ColliderShape::Box: {
+        Vec3 local = rotate(simd::conjugate(shape.rotation), direction);
+        Vec3 corner{local.x >= 0 ? shape.halfExtents.x : -shape.halfExtents.x, local.y >= 0 ? shape.halfExtents.y : -shape.halfExtents.y,
+                    local.z >= 0 ? shape.halfExtents.z : -shape.halfExtents.z};
+        return shape.center + rotate(shape.rotation, corner);
+    }
+    case ColliderShape::Convex: {
+        if (!shape.convex) return shape.center;
+        return shape.center + rotate(shape.rotation, shape.convex->support(rotate(simd::conjugate(shape.rotation), direction)));
+    }
+    default:
+        return shape.center;
+    }
+}
+
+struct SupportPoint {
+    Vec3 p, onA;                         // the difference of the two shapes' points, and A's own
+};
+
+SupportPoint supportPair(const ShapeInstance& a, const ShapeInstance& b, Vec3 direction) {
+    Vec3 onA = supportOf(a, direction), onB = supportOf(b, -direction);
+    return SupportPoint{onA - onB, onA};
+}
+
+/// GJK: whether two convex shapes overlap, by whether their difference holds the origin. On
+/// overlap, `simplex` ends as a tetrahedron around it, for EPA to start from.
+bool gjk(const ShapeInstance& a, const ShapeInstance& b, std::vector<SupportPoint>& simplex) {
+    Vec3 direction = b.center - a.center;
+    if (simd::length_squared(direction) < 1e-12f) direction = Vec3{1, 0, 0};
+    simplex.clear();
+    simplex.push_back(supportPair(a, b, direction));
+    direction = -simplex[0].p;
+    for (int iteration = 0; iteration < 48; iteration++) {
+        if (simd::length_squared(direction) < 1e-14f) direction = Vec3{0, 1, 0};
+        SupportPoint next = supportPair(a, b, direction);
+        if (simd::dot(next.p, direction) < 0) return false;       // it did not get past the origin: apart
+        simplex.insert(simplex.begin(), next);
+        // The simplex nearest the origin, and the way from it toward the origin.
+        Vec3 A = simplex[0].p, AO = -A;
+        if (simplex.size() == 2) {
+            Vec3 AB = simplex[1].p - A;
+            if (simd::dot(AB, AO) > 0) direction = simd::cross(simd::cross(AB, AO), AB);
+            else simplex = {simplex[0]}, direction = AO;
+        } else if (simplex.size() == 3) {
+            Vec3 B = simplex[1].p, C = simplex[2].p;
+            Vec3 AB = B - A, AC = C - A, ABC = simd::cross(AB, AC);
+            if (simd::dot(simd::cross(ABC, AC), AO) > 0) {
+                if (simd::dot(AC, AO) > 0) simplex = {simplex[0], simplex[2]}, direction = simd::cross(simd::cross(AC, AO), AC);
+                else if (simd::dot(AB, AO) > 0) simplex = {simplex[0], simplex[1]}, direction = simd::cross(simd::cross(AB, AO), AB);
+                else simplex = {simplex[0]}, direction = AO;
+            } else if (simd::dot(simd::cross(AB, ABC), AO) > 0) {
+                if (simd::dot(AB, AO) > 0) simplex = {simplex[0], simplex[1]}, direction = simd::cross(simd::cross(AB, AO), AB);
+                else simplex = {simplex[0]}, direction = AO;
+            } else if (simd::dot(ABC, AO) > 0) {
+                direction = ABC;
+            } else {
+                std::swap(simplex[1], simplex[2]);
+                direction = -ABC;
+            }
+        } else {
+            Vec3 B = simplex[1].p, C = simplex[2].p, D = simplex[3].p;
+            Vec3 ABC = simd::cross(B - A, C - A), ACD = simd::cross(C - A, D - A), ADB = simd::cross(D - A, B - A);
+            if (simd::dot(ABC, AO) > 0) simplex = {simplex[0], simplex[1], simplex[2]}, direction = ABC;
+            else if (simd::dot(ACD, AO) > 0) simplex = {simplex[0], simplex[2], simplex[3]}, direction = ACD;
+            else if (simd::dot(ADB, AO) > 0) simplex = {simplex[0], simplex[3], simplex[1]}, direction = ADB;
+            else return true;                                       // the origin is inside: they overlap
+        }
+    }
+    return false;
+}
+
+/// EPA: from GJK's tetrahedron, the shortest way out of the overlap: its direction and depth.
+bool epa(const ShapeInstance& a, const ShapeInstance& b, std::vector<SupportPoint> points, ContactInfo& out) {
+    if (points.size() < 4) return false;
+    struct Face {
+        int i, j, k;
+        Vec3 normal;
+        float distance;
+    };
+    std::vector<Face> faces;
+    auto addFace = [&](int i, int j, int k) {
+        Vec3 normal = simd::cross(points[size_t(j)].p - points[size_t(i)].p, points[size_t(k)].p - points[size_t(i)].p);
+        float length = simd::length(normal);
+        if (length < 1e-12f) return;
+        normal /= length;
+        float distance = simd::dot(normal, points[size_t(i)].p);
+        if (distance < 0) {
+            normal = -normal, distance = -distance;
+            std::swap(j, k);
+        }
+        faces.push_back(Face{i, j, k, normal, distance});
+    };
+    addFace(0, 1, 2), addFace(0, 2, 3), addFace(0, 3, 1), addFace(1, 3, 2);
+    for (int iteration = 0; iteration < 64 && !faces.empty(); iteration++) {
+        size_t nearest = 0;
+        for (size_t f = 1; f < faces.size(); f++) {
+            if (faces[f].distance < faces[nearest].distance) nearest = f;
+        }
+        Face face = faces[nearest];
+        SupportPoint next = supportPair(a, b, face.normal);
+        float reach = simd::dot(next.p, face.normal);
+        if (reach - face.distance < 1e-4f || iteration == 63) {
+            out.normal = face.normal;
+            out.depth = face.distance;
+            // Where on A: the nearest face's corners, weighed by where the origin falls on it.
+            Vec3 p0 = points[size_t(face.i)].p, p1 = points[size_t(face.j)].p, p2 = points[size_t(face.k)].p;
+            Vec3 at = face.normal * face.distance;
+            Vec3 v0 = p1 - p0, v1 = p2 - p0, v2 = at - p0;
+            float d00 = simd::dot(v0, v0), d01 = simd::dot(v0, v1), d11 = simd::dot(v1, v1), d20 = simd::dot(v2, v0), d21 = simd::dot(v2, v1);
+            float denominator = d00 * d11 - d01 * d01;
+            float v = denominator != 0 ? (d11 * d20 - d01 * d21) / denominator : 0.33f, w = denominator != 0 ? (d00 * d21 - d01 * d20) / denominator : 0.33f;
+            float u = 1 - v - w;
+            out.point = points[size_t(face.i)].onA * u + points[size_t(face.j)].onA * v + points[size_t(face.k)].onA * w;
+            out.points[0] = out.point;
+            out.depths[0] = out.depth;
+            out.pointCount = 1;
+            return true;
+        }
+        // Grow the hull to the new point: every face it can see goes, and the hole is closed to it.
+        int added = int(points.size());
+        points.push_back(next);
+        std::vector<std::pair<int, int>> edges;
+        auto edge = [&](int from, int to) {
+            for (size_t e = 0; e < edges.size(); e++) {
+                if (edges[e].first == to && edges[e].second == from) {
+                    edges.erase(edges.begin() + long(e));
+                    return;
+                }
+            }
+            edges.push_back({from, to});
+        };
+        for (size_t f = 0; f < faces.size();) {
+            if (simd::dot(faces[f].normal, next.p - points[size_t(faces[f].i)].p) > 0) {
+                edge(faces[f].i, faces[f].j), edge(faces[f].j, faces[f].k), edge(faces[f].k, faces[f].i);
+                faces.erase(faces.begin() + long(f));
+            } else {
+                f++;
+            }
+        }
+        for (auto [from, to] : edges) addFace(from, to, added);
+    }
+    return false;
+}
+
+bool convexGeneral(const ShapeInstance& a, const ShapeInstance& b, ContactInfo& out) {
+    std::vector<SupportPoint> simplex;
+    if (!gjk(a, b, simplex)) return false;
+    if (simplex.size() < 4) return false;
+    if (!epa(a, b, simplex, out)) return false;
+    // The face of A - B nearest the origin lies the way B is from A: the normal goes from A to B.
+    return out.depth > 0;
+}
+
+/// The corners of a convex shape, in the world.
+int convexCorners(const ShapeInstance& shape, Vec3* corners, int most) {
+    if (!shape.convex) return 0;
+    int count = 0;
+    for (Vec3 p : shape.convex->points) {
+        if (count >= most) break;
+        corners[count++] = shape.center + rotate(shape.rotation, p);
+    }
+    return count;
+}
+
+/// Keeps the deepest points of contact (eight at most), and the normal of the deepest.
+void notePoint(ContactInfo& out, Vec3 point, float depth, Vec3 normal) {
+    if (out.pointCount < 8) {
+        out.points[out.pointCount] = point;
+        out.depths[out.pointCount++] = depth;
+    } else {
+        int shallowest = 0;
+        for (int k = 1; k < 8; k++) if (out.depths[k] < out.depths[shallowest]) shallowest = k;
+        if (depth <= out.depths[shallowest]) return;
+        out.points[shallowest] = point;
+        out.depths[shallowest] = depth;
+    }
+    if (depth > out.depth) {
+        out.depth = depth;
+        out.normal = normal;
+        out.point = point;
+    }
+}
+
+/// A convex shape (A) against a box (B): the corners of each inside the other, as points of
+/// contact, so that one resting on the other stands on several; where no corner is in (an
+/// edge across a face), the general way.
+bool convexBox(const ShapeInstance& a, const ShapeInstance& box, ContactInfo& out) {
+    out = ContactInfo{};
+    out.depth = 0;
+    bool found = false;
+    static thread_local std::vector<Vec3> corners(256);
+    int count = convexCorners(a, corners.data(), 256);
+    Quat toBox = simd::conjugate(box.rotation);
+    for (int k = 0; k < count; k++) {
+        Vec3 local = rotate(toBox, corners[size_t(k)] - box.center);
+        Vec3 room = box.halfExtents - simd::abs(local);
+        if (room.x < 0 || room.y < 0 || room.z < 0) continue;
+        int axis = room.x < room.y ? (room.x < room.z ? 0 : 2) : (room.y < room.z ? 1 : 2);
+        Vec3 outward{0, 0, 0};
+        outward[axis] = local[axis] >= 0 ? 1.0f : -1.0f;
+        notePoint(out, corners[size_t(k)], room[axis], -rotate(box.rotation, outward));
+        found = true;
+    }
+    if (a.convex) {
+        Quat toA = simd::conjugate(a.rotation);
+        for (int corner = 0; corner < 8; corner++) {
+            Vec3 local{corner & 1 ? box.halfExtents.x : -box.halfExtents.x, corner & 2 ? box.halfExtents.y : -box.halfExtents.y,
+                       corner & 4 ? box.halfExtents.z : -box.halfExtents.z};
+            Vec3 world = box.center + rotate(box.rotation, local);
+            Vec3 inA = rotate(toA, world - a.center);
+            float depth = 1e30f;
+            Vec3 normal{0, 1, 0};
+            for (Vec4 plane : a.convex->planes) {
+                float room = plane.w - simd::dot(xyz(plane), inA);
+                if (room < 0) {
+                    depth = -1;
+                    break;
+                }
+                if (room < depth) depth = room, normal = xyz(plane);
+            }
+            if (depth < 0 || a.convex->planes.empty()) continue;
+            notePoint(out, world, depth, rotate(a.rotation, normal));
+            found = true;
+        }
+    }
+    if (found) return true;
+    return convexGeneral(a, box, out);
+}
+
+/// A convex shape (A) against a mesh that stands still: its corners in the mesh, as a box's are.
+bool convexMesh(const ShapeInstance& a, const ShapeInstance& mesh, ContactInfo& out) {
+    out = ContactInfo{};
+    bool found = false;
+    static thread_local std::vector<Vec3> corners(256);
+    int count = convexCorners(a, corners.data(), 256);
+    float depth = 0;
+    Vec3 outward, point;
+    for (int k = 0; k < count; k++) {
+        if (!ballInMesh(mesh, corners[size_t(k)], 0.0f, depth, outward, point)) continue;
+        notePoint(out, point, depth, -outward);
+        found = true;
+    }
+    return found;
+}
+
+std::optional<ShapeRayHit> raycastConvex(const Ray& ray, const ShapeInstance& shape) {
+    if (!shape.convex || shape.convex->planes.empty()) return std::nullopt;
+    Quat toShape = simd::conjugate(shape.rotation);
+    Vec3 origin = rotate(toShape, ray.origin - shape.center), direction = rotate(toShape, ray.direction);
+    float enter = 0, leave = 1e30f;
+    Vec3 normal{0, 0, 0};
+    bool entered = false;
+    for (Vec4 plane : shape.convex->planes) {
+        Vec3 n = xyz(plane);
+        float toward = simd::dot(n, direction), room = plane.w - simd::dot(n, origin);
+        if (std::abs(toward) < 1e-9f) {
+            if (room < 0) return std::nullopt;                       // beside this face, outside it, going along it
+            continue;
+        }
+        float t = room / toward;
+        if (toward < 0) {
+            if (t > enter || !entered) {
+                if (t >= enter) enter = t, normal = n;
+                entered = entered || t >= 0;
+            }
+        } else {
+            leave = std::min(leave, t);
+        }
+        if (enter > leave) return std::nullopt;
+    }
+    if (!entered) return std::nullopt;                              // it starts inside: nothing to hit on the way out
+    return ShapeRayHit{enter, rotate(shape.rotation, normal)};
+}
+
+}  // namespace
+
 bool collide(const ShapeInstance& a, const ShapeInstance& b, ContactInfo& out) {
     using S = ColliderShape;
+    if (a.shape == S::Convex || b.shape == S::Convex) {
+        if ((a.shape == S::Convex && !a.convex) || (b.shape == S::Convex && !b.convex)) return false;
+        if (a.shape == S::Convex && b.shape == S::Mesh) return convexMesh(a, b, out);
+        if (b.shape == S::Convex && a.shape == S::Mesh) {
+            if (!convexMesh(b, a, out)) return false;
+            flip(out);
+            return true;
+        }
+        if (a.shape == S::Convex && b.shape == S::Box) return convexBox(a, b, out);
+        if (b.shape == S::Convex && a.shape == S::Box) {
+            if (!convexBox(b, a, out)) return false;
+            flip(out);
+            return true;
+        }
+        if (a.shape == S::Mesh || b.shape == S::Mesh) return false;
+        out = ContactInfo{};
+        return convexGeneral(a, b, out);
+    }
     if (a.shape == S::Mesh && b.shape == S::Mesh) return false;         // two meshes are two things that stand still
     if (b.shape == S::Mesh) return shapeMesh(a, b, out);
     if (a.shape == S::Mesh) {
@@ -567,8 +956,10 @@ bool collide(const ShapeInstance& a, const ShapeInstance& b, ContactInfo& out) {
 
 std::optional<ShapeRayHit> raycastShape(const Ray& ray, const ShapeInstance& shape) {
     if (shape.shape == ColliderShape::Mesh) return raycastMesh(ray, shape);
+    if (shape.shape == ColliderShape::Convex) return raycastConvex(ray, shape);
     switch (shape.shape) {
     case ColliderShape::Mesh:
+    case ColliderShape::Convex:
         break;
     case ColliderShape::Sphere: {
         auto t = intersectSphere(ray, shape.center, shape.radius);

@@ -130,6 +130,8 @@ bool EditorApp::openProject(const std::string& path) {
     }
     closeProject();
     editor.project = *project;
+    // While the game is tried here, what it keeps for the player is kept with the project.
+    editor.engine.preferencesFile = project->libraryDirectory() + "/Preferences.txt";
     editor.hasProject = true;
     editor.engine.assets().setProjectDirectory(editor.project.assetsDirectory());
     editor.assets.open(editor.project.assetsDirectory());

@@ -213,6 +213,14 @@ struct Parts {
     std::vector<Propeller*> propellers;
     std::vector<Bumper*> bumpers;
     std::vector<Hinge*> hinges;
+    // Its body's own colliders (on it or under it): what it hits the world with.
+    struct BodyShape {
+        Entity entity;
+        const Collider* collider;
+        Vec3 position;                  // where it sits on the vehicle, in its axes
+        Quat rotation;
+    };
+    std::vector<BodyShape> shapes;
     Motor* motor = nullptr;
     DriveControls* drive = nullptr;
     FlightControls* flight = nullptr;
@@ -288,9 +296,49 @@ Parts gather(Scene& scene, Entity self, const Controls& controls) {
     scene.each<Motor, Transform>([&](Entity entity, Motor& motor, Transform& transform) {
         if (!parts.motor && isOurs(entity, transform)) parts.motor = &motor;
     });
+    scene.each<Collider, Transform>([&](Entity entity, Collider& collider, Transform& transform) {
+        if (collider.isTrigger || !isOurs(entity, transform) || scene.get<Wheel>(entity)) return;
+        if (collider.shape == ColliderShape::Mesh && !collider.isConvex) return;      // only what can move can be a moving body
+        Parts::BodyShape shape{entity, &collider, Vec3{0, 0, 0}, Quat{}};
+        if (entity != self) placeIn(scene, entity, self, shape.position, shape.rotation);
+        parts.shapes.push_back(shape);
+    });
     parts.drive = scene.get<DriveControls>(self);
     parts.flight = scene.get<FlightControls>(self);
     return parts;
+}
+
+/// The body's own colliders against everything solid around it: each point where one is in
+/// something is a stiff spring out of it, with friction along it, as the box's corners are.
+/// What it hits is pushed back, if it can move.
+void collideBody(World& world, Entity self, Body6& body, const std::vector<Parts::BodyShape>& shapes, float dt) {
+    for (const Parts::BodyShape& part : shapes) {
+        ShapeInstance shape = Physics::makeShape(*part.collider, body.worldPoint(part.position), simd::normalize(body.orientation * part.rotation));
+        if ((shape.shape == ColliderShape::Convex && !shape.convex)) continue;
+        AABB box = shape.bounds();
+        world.physics.forEachShapeNear(world.scene, box, self, [&](Entity other, const ShapeInstance& against) {
+            ContactInfo contact;
+            if (!collide(shape, against, contact)) return;
+            Vec3 outward = -contact.normal;                         // out of what it hit, toward the body
+            int count = std::max(contact.pointCount, 1);
+            RigidBody* moved = world.scene.get<RigidBody>(other);
+            bool canMove = moved && moved->type == BodyType::Dynamic;
+            Vec3 otherVelocity = moved && moved->type != BodyType::Static ? moved->velocity : Vec3{0, 0, 0};
+            for (int k = 0; k < count; k++) {
+                Vec3 point = contact.pointCount > 0 ? contact.points[k] : contact.point;
+                float depth = contact.pointCount > 0 ? contact.depths[k] : contact.depth;
+                Vec3 velocity = body.velocityAt(point) - otherVelocity;
+                float approach = -simd::dot(velocity, outward);
+                float push = std::max(0.0f, depth * body.mass * 160.0f + approach * body.mass * 9.0f);
+                Vec3 along = velocity + outward * approach;
+                float slide = simd::length(along);
+                Vec3 friction = slide > 0.05f ? along * (-std::min(0.6f * push, slide * body.mass * 4.0f) / slide) : Vec3{0, 0, 0};
+                Vec3 force = outward * push + friction;
+                body.addForceAt(force, point);
+                if (canMove) moved->applyImpulse(force * -dt, point);
+            }
+        });
+    }
 }
 
 /// The force on a wing, in world axes; its angle of attack is left in the wing.
@@ -717,7 +765,9 @@ void VehicleBody::fixedUpdate(World& world, Entity self, float dt) {
         }
 
         // ---- what the body itself runs into
-        if (hitsWithItsBox) {
+        if (!parts.shapes.empty()) {
+            collideBody(world, self, body, parts.shapes, h);
+        } else if (hitsWithItsBox) {
             for (int corner = 0; corner < 8; corner++) {
                 Vec3 local{(corner & 1 ? 0.5f : -0.5f) * size.x, (corner & 2 ? 0.62f : -0.18f) * size.y, (corner & 4 ? 0.5f : -0.5f) * size.z};
                 pressAgainstScene(world, self, body, local, body.mass * 160.0f, body.mass * 9.0f, h);
@@ -998,7 +1048,8 @@ namespace molten::kit {
 
 MOLTEN_COMPONENT(VehicleBody, MOLTEN_FIELD(mass).range(50, 20000), MOLTEN_FIELD(size).help("Width, height, length: how hard it is to turn, and the box that hits walls (orange in the Scene view when it is selected)"),
                  MOLTEN_FIELD(inertia).help("Per kilogram about x, y, z. Zero works it out from the size"), MOLTEN_FIELD(dragArea),
-                 MOLTEN_FIELD(hitsWithItsBox).help("The corners of a box of its size stop at walls. Off: only its Bumpers do"),
+                 MOLTEN_FIELD(hitsWithItsBox).help("With no colliders of its own: the corners of a box of its size stop at walls (off: only its Bumpers do). "
+                                                       "Give it colliders (a Box Collider, a convex Mesh Collider of its body, on it or under it) and it hits with those"),
                  MOLTEN_FIELD(stability).range(0, 1).help("Stability control: catches a slide past Drift Angle, and eases the engine. 0 is off"),
                  MOLTEN_FIELD(driftAngle).range(2, 45).help("Degrees the car may slide off its line before stability control steps in: a drift"),
                  MOLTEN_FIELD(slideGrip).range(0, 1).help("Grip a sliding tire keeps, as a share of its best: low is ice, 0.8 a car that can be held in a slide"),

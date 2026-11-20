@@ -14,7 +14,23 @@
 
 namespace molten {
 
-enum class ColliderShape : uint8_t { Sphere, Box, Capsule, Mesh };
+/// Convex: a Mesh collider made convex, as a placed shape (see ConvexShape). A Collider keeps
+/// the shape Mesh and says it is convex; only what is placed in the world is Convex.
+enum class ColliderShape : uint8_t { Sphere, Box, Capsule, Mesh, Convex };
+
+/// A model wrapped as tightly as a convex shape can be: no hollows, no holes. It can move,
+/// fall, roll and be hit, as any other shape can, where a mesh's triangles can only stand still.
+/// Its corners are kept (at most a few dozen, the model's farthest points in every direction)
+/// with the faces between them, as planes.
+struct ConvexShape {
+    std::vector<Vec3> points;           // in its own space, at its size
+    std::vector<Vec4> planes;           // xyz the outward normal, w how far out: inside, dot(normal, p) <= w
+    AABB bounds;
+
+    static std::shared_ptr<const ConvexShape> build(const std::vector<Vec3>& positions, Vec3 scale);
+    /// Its point farthest along a direction, both in its own space.
+    Vec3 support(Vec3 direction) const;
+};
 
 /// The triangles of a mesh collider: ground that is not flat, a track, a building as it
 /// is shaped. In the collider's own space, already at its size, and sorted into a grid
@@ -55,6 +71,7 @@ struct ShapeInstance {
     float radius = 0.5f;                   // sphere and capsule
     float halfHeight = 0.5f;               // capsule: half the distance between the centers of its two caps
     const MeshShape* mesh = nullptr;       // mesh: its triangles; without them it is nothing
+    const ConvexShape* convex = nullptr;   // convex: its corners and faces; without them it is nothing
 
     AABB bounds() const;
     /// The ends of a capsule's inner segment.

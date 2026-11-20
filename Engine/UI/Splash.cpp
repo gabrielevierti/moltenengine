@@ -13,7 +13,7 @@ void Splash::draw(Canvas& canvas, float seconds, std::string_view subtitle, cons
     // Everything on it arrives over the first third of a second; the whole screen, the
     // dark background included, leaves over the last half.
     float arrive = easeOutCubic(saturate(seconds / 0.35f));
-    float leave = saturate((kDuration - seconds) / 0.5f);
+    float leave = saturate((kDuration - seconds) / kFade);
     float alpha = arrive * leave;
     canvas.rect(Vec2{0, 0}, size, rgb(0x000000, leave));
 

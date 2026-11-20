@@ -332,7 +332,9 @@ std::string writeScene(Scene& scene, const std::vector<NamedMaterial>& materials
             else if (c->shape == ColliderShape::Mesh) line.string(c->meshName);
             else if (c->shape == ColliderShape::Sphere) line.number(c->radius);
             else line.number(c->radius).number(c->halfHeight);
-            line.vec(c->offset).flag(c->isTrigger).to(out);
+            line.vec(c->offset).flag(c->isTrigger);
+            if (c->shape == ColliderShape::Mesh) line.flag(c->isConvex);
+            line.to(out);
         }
         if (const RigidBody* b = scene.get<RigidBody>(entity)) {
             Line("body").word(kBodyTypes[int(b->type)]).number(b->mass).number(b->restitution).number(b->friction)
@@ -563,6 +565,7 @@ bool readScene(const std::string& text, Scene& scene, std::vector<NamedMaterial>
                 }
                 c.offset = words.vec3();
                 c.isTrigger = words.flag();
+                if (c.shape == ColliderShape::Mesh) c.isConvex = words.flag();
                 scene.add(entity, c);
             } else if (key == "body") {
                 RigidBody b;

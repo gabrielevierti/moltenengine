@@ -100,7 +100,7 @@ void drawColliderOf(EditorContext& editor, Entity entity, Vec4 color, int depth)
     DebugDraw& lines = editor.engine.debug();
     const Transform* transform = scene.get<Transform>(entity);
     if (!transform) return;
-    if (const Collider* collider = scene.get<Collider>(entity)) {
+    if (Collider* collider = scene.get<Collider>(entity)) {
         Quat rotation;
         Vec3 worldPosition, worldScale;
         decompose(transform->world, worldPosition, rotation, worldScale);
@@ -122,6 +122,42 @@ void drawColliderOf(EditorContext& editor, Entity entity, Vec4 color, int depth)
             lines.sphere(center - axis, r, color, 20);
             for (Vec3 side : {Vec3{r, 0, 0}, Vec3{-r, 0, 0}, Vec3{0, 0, r}, Vec3{0, 0, -r}}) {
                 lines.line(center + axis + rotate(rotation, side), center - axis + rotate(rotation, side), color);
+            }
+        } else if (collider->shape == ColliderShape::Mesh && collider->isConvex) {
+            // Wrapped here, the first time it is drawn: the same shape the game will use.
+            if (!collider->convex && !collider->meshName.empty() && simd::length_squared(collider->meshScale - transform->scale) > 1e-10f) {
+                collider->meshScale = transform->scale;
+                if (std::optional<MeshData> data = editor.engine.readMeshData(collider->meshName)) {
+                    collider->convex = ConvexShape::build(data->positions, transform->scale);
+                }
+            }
+            if (const ConvexShape* hull = collider->convex.get()) {
+                // Each face's edges: its corners, in order around its middle.
+                float size = simd::length(hull->bounds.max - hull->bounds.min);
+                for (Vec4 plane : hull->planes) {
+                    Vec3 normal = xyz(plane);
+                    std::vector<Vec3> onFace;
+                    for (Vec3 p : hull->points) {
+                        if (std::abs(simd::dot(normal, p) - plane.w) < size * 2e-3f) onFace.push_back(p);
+                    }
+                    if (onFace.size() < 3) continue;
+                    Vec3 middle{0, 0, 0};
+                    for (Vec3 p : onFace) middle += p;
+                    middle /= float(onFace.size());
+                    Vec3 across = safeNormalize(onFace[0] - middle, Vec3{1, 0, 0});
+                    Vec3 other = simd::cross(normal, across);
+                    std::sort(onFace.begin(), onFace.end(), [&](Vec3 a, Vec3 b) {
+                        return std::atan2(simd::dot(a - middle, other), simd::dot(a - middle, across)) <
+                               std::atan2(simd::dot(b - middle, other), simd::dot(b - middle, across));
+                    });
+                    for (size_t k = 0; k < onFace.size(); k++) {
+                        Vec3 a = onFace[k] * larger, b = onFace[(k + 1) % onFace.size()] * larger;
+                        lines.line(center + rotate(rotation, a), center + rotate(rotation, b), color);
+                    }
+                }
+            } else if (const MeshRenderer* renderer = scene.get<MeshRenderer>(entity); renderer && renderer->mesh) {
+                const AABB& box = renderer->mesh->bounds();
+                lines.box(worldPosition + rotate(rotation, box.center() * worldScale), box.halfExtents() * worldScale * larger, rotation, color);
             }
         } else if (collider->shape == ColliderShape::Mesh) {
             if (collider->mesh && collider->mesh->triangleCount() <= 6000) {
@@ -147,7 +183,12 @@ void drawColliderOf(EditorContext& editor, Entity entity, Vec4 color, int depth)
         Vec3 worldPosition, worldScale;
         decompose(transform->world, worldPosition, rotation, worldScale);
         const Vec4 orange{1.0f, 0.55f, 0.15f, color.w};
-        if (vehicle->hitsWithItsBox) {
+        // With colliders of its own it hits with those (drawn as colliders): the box is not used.
+        bool hasColliders = false;
+        scene.each<Collider, Transform>([&](Entity part, Collider& collider, Transform&) {
+            if (!collider.isTrigger && kit::vehicleOf(scene, part) == entity) hasColliders = true;
+        });
+        if (vehicle->hitsWithItsBox && !hasColliders) {
             Vec3 low{-0.5f * vehicle->size.x, -0.18f * vehicle->size.y, -0.5f * vehicle->size.z};
             Vec3 high{0.5f * vehicle->size.x, 0.62f * vehicle->size.y, 0.5f * vehicle->size.z};
             lines.box(worldPosition + rotate(rotation, (low + high) * 0.5f), (high - low) * 0.5f, rotation, orange);

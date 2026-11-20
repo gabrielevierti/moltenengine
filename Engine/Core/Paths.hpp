@@ -16,4 +16,8 @@ namespace molten {
 /// The directory that contains Shaders/ and Assets/.
 std::string findRootDirectory(const std::string& executablePath = {});
 
+/// Where a game keeps what it saves for the player (settings, records): Library/Application
+/// Support/<name> in the home folder, which on a phone is the application's own. Made if missing.
+std::string userDataDirectory(const std::string& name);
+
 }  // namespace molten

@@ -8,9 +8,11 @@ The example game is **Driving**: a Fiat 500 on a small circuit, to lap against t
 
 | | |
 | --- | --- |
-| **What it is** | A 566 m circuit with curbs, walls, a paddock and lamps, in evening light. Lap times and a best lap, a dashboard (speed, gear, revs), headlights and brake lights, smoke from the exhaust and from tires that slide, and controls for a touch screen. |
+| **What it is** | A 566 m circuit with curbs, walls, a pit lane in front of the garages and lamps, in evening light. Lap times and a best lap kept between games, laps that do not count with four wheels on the grass, tyres that wear and a pit stop that changes them, sun, clouds or rain, a title screen, a pause menu and settings, a dashboard (speed, revs, gear, boost), and controls for a touch screen. |
 | **What it shows** | A car simulated from its parts (springs and dampers, tires that grip and slide, a turbocharged four-cylinder behind a gearbox, stability control that allows a drift, brakes shared by the load on each wheel), a glTF model used in parts with a material each, the game's own scripts in `Assets/Scripts`, an interface laid out in the Game view. |
-| **Keys** | W A S D or the arrows to drive, Space for the handbrake, B for ABS, L for the lamps, T for the touch controls. On a phone: ← and → on the left steer; GAS, BRAKE and HB on the right. |
+| **Keys** | W A S D or the arrows to drive, Space for the handbrake, B for ABS, L for the lamps, R to be put back on the wheels, T for the touch controls, Esc to pause; in the pit lane, 1 to 4 choose the next tyres. On a phone: ← and → on the left steer; GAS, BRAKE and HB on the right, II at the top left pauses. |
+
+Its scripts, each a small piece of the game to read and change: `DriveControls` (keys and touch to the car, the pit limiter, putting it back on its wheels), `Motor` (the turbocharged engine and its sounds), `LapTimer` (laps, gates, track limits, the best lap kept), `Tyres` (compounds, wear, the pit stop), `Weather` (sky, mist, rain, a wet road), `GameMenu` (title, pause, settings), and `CarLights`, `Exhaust`, `TyreSmoke`, `SkidMarks`, `Follow`.
 
 It is not part of the engine: it is a separate download, `MoltenProjects.zip`, to unzip anywhere and open as a project (a new project in the editor starts empty). It is written by `Tools/make_templates.py` (the car by `Tools/import_fiat500.py`), and the unit tests (`Tests/TemplateTests.cpp`) drive it without a screen: a full stop from speed, and three laps by an autopilot that has to stay on the road. The car is "Fiat 500 x Outlaw" by Subin, under CC-BY-4.0: see the project's `CREDITS.txt`.
 
@@ -61,6 +63,8 @@ Their code is `Engine/Kit/Kit.cpp`, about three hundred lines, written against t
 ### Shared values
 
 A score, the lives left, how many keys were found: numbers with a name that anything can read and change. `Collectible`, `Health` and `Breakable` change them, `HudText` shows them, `Goal` waits for them; visual scripts have **Add Value**, **Set Value** and **Get Value**; code has `world.value("score")`, `world.setValue`, `world.addValue`. Loading the next scene keeps them. Starting the scene over clears them.
+
+**Preferences** are numbers kept from one time the game is played to the next: settings, records. `world.preference("volume", 2)` reads one (2 if it was never set), `world.setPreference("volume", 1)` keeps one at once. A game keeps them in its own folder (Library/Application Support/<the game's name>, inside the application's own on a phone); while it is tried in the editor, in the project's Library folder. The Driving example keeps its best lap and its settings there. `world.soundVolume` (0 to 1) turns every sound of the game up or down: a volume setting, a pause.
 
 ### Names
 
@@ -124,6 +128,8 @@ A prefab is read when it is used: change the file and the next one spawned is th
 ## Effects
 
 **Create > Effects** has fire, smoke, sparks, an explosion, rain and snow. Each is an entity with a particle emitter you can then change in the inspector (fire also carries a light with `Flicker`; an explosion a light, `Explosion` and `Lifetime`). Save one as a prefab and it can be the `effect` of a `Health` or a `Collectible`.
+
+A particle can be drawn as a streak along the way it goes instead of a round dot: **Streak** in the inspector, in seconds of its movement (rain falls in streaks of about 0.05).
 
 **Wind** is a setting of the scene (the Rendering panel): a direction and speed, and how gusty it is. Each emitter says how much it is carried (`Wind Influence`): 0 for sparks, 1 for smoke.
 
@@ -272,8 +278,23 @@ thousand drops are comfortable on the processor; it is not a sea.
 
 ## Colliders
 
-**Box Collider**, **Sphere Collider** and **Capsule Collider** are under Add Component > Physics; each takes the size of the object's
-mesh when added. An object has one collider. A collider shaped like the mesh itself is not there yet.
+As in Unity: **Rigidbody** makes an object move (falls, is pushed, bounces); the colliders give it its shape. **Box Collider**,
+**Sphere Collider**, **Capsule Collider** and **Mesh Collider** are under Add Component > Physics; each takes the size of the
+object's mesh when added. Without a Rigidbody, a collider is something that stands still: a wall, the ground. Colliders under
+a parent stand where the parent puts them.
+
+- **Mesh Collider** is the model's own shape (chosen from the list of models, or the one its Mesh Renderer draws). As it is,
+  its triangles, hollows and all: for what stands still, such as a track, a building, uneven ground.
+- **Convex**, on a Mesh Collider, wraps the model as tightly as a convex shape can (no hollows, no holes): it can then move with
+  a Rigidbody, fall, roll, be hit and hit back, against every other kind of collider. A crate of an odd shape, a rock, a car's
+  body. The Inspector says how many corners and faces it has.
+- An object has one collider; for more shapes, put more objects under it.
+
+**Vehicles** hit the world with the colliders on them or under them, of any kind (a convex Mesh Collider of the body is the
+closest to the real shape): each point where one is in something is a stiff spring out of it, and what it hits is pushed back
+if it can move. The wheels' rays pass through the vehicle's own colliders. A vehicle with no colliders of its own uses the
+corners of a box of its size (`hitsWithItsBox`) and its Bumpers. The Driving example's Fiat has a convex Mesh Collider on its
+body shell (`Body Paint`): it touches the walls, and lands on its roof, with its own shape.
 
 ## What the editor shows of an asset
 

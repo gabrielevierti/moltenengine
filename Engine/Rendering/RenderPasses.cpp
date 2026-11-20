@@ -294,7 +294,7 @@ void Renderer::drawParticles(MTL::RenderCommandEncoder* encoder, Scene& scene, c
             float t = saturate(particle.age / particle.lifetime);
             float size = particleSize(emitter, t);
             Vec4 color = particleColor(emitter, t);
-            instances.push_back(gpu::ParticleInstance{vec4(particle.position, size), color});
+            instances.push_back(gpu::ParticleInstance{vec4(particle.position, size), color, vec4(particle.velocity, emitter.stretch)});
         }
         if (!emitter.isAdditive) {
             // Ordinary blending depends on the order: far particles first.

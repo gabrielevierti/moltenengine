@@ -637,6 +637,8 @@ bool drawEmitterProperties(EditorContext& editor, ParticleEmitter& emitter, bool
         changed |= ui::dragFloat("Turbulence", emitter.turbulence, 0.01f, 0.0f, 20.0f);
         ui::tooltip("Swirling, as in smoke that curls");
         if (emitter.turbulence > 0) changed |= ui::dragFloat("Swirl Size", emitter.turbulenceSize, 0.01f, 0.05f, 100.0f, "%.2f m");
+        changed |= ui::dragFloat("Streak", emitter.stretch, 0.001f, 0.0f, 1.0f, "%.3f s");
+        ui::tooltip("Each particle drawn as a streak along the way it goes, this many seconds of it long: rain, sparks. 0 for round dots.");
         changed |= ui::checkbox("Bounces", emitter.bounces);
         ui::tooltip("Off a level floor");
         if (emitter.bounces) {
@@ -721,7 +723,9 @@ void registerBuiltinComponents(EditorContext& editor) {
     });
 
     // One editor for each shape of collider, as separate components to add: Box Collider,
-    // Sphere Collider, Capsule Collider. (An object has one collider: adding another shape changes it.)
+    // Sphere Collider, Capsule Collider, Mesh Collider (convex or not). An object has one
+    // collider: adding another shape changes it; more shapes are more objects under it, which
+    // a vehicle collides with as its own body.
     auto drawCollider = [](EditorContext& context, Entity entity, Collider& collider) {
         bool changed = false;
         if (collider.shape == ColliderShape::Mesh) {
@@ -745,8 +749,23 @@ void registerBuiltinComponents(EditorContext& editor) {
             ui::tooltip("The model whose triangles it is. The object's scale is its size");
             std::string dropped;
             if (ui::acceptAsset(context.assets, {AssetType::Mesh}, dropped)) use(dropped);
-            ImGui::TextDisabled(collider.mesh ? "%d triangles. For things that stand still: other shapes collide with it." : "Read when the game runs.",
-                                collider.mesh ? int(collider.mesh->triangleCount()) : 0);
+            if (ui::checkbox("Convex", collider.isConvex)) {
+                collider.convex = nullptr;
+                collider.meshScale = Vec3{0, 0, 0};
+                changed = true;
+            }
+            ui::tooltip("Wrapped as a convex shape (no hollows, no holes): it can then move with a Rigidbody, fall, roll and be hit, "
+                        "and be a vehicle's body. Off: the model's own triangles, for things that stand still");
+            if (collider.isConvex) {
+                ImGui::TextDisabled(collider.convex ? "%d corners, %d faces. It can move." : "Wrapped when the game runs.",
+                                    collider.convex ? int(collider.convex->points.size()) : 0, collider.convex ? int(collider.convex->planes.size()) : 0);
+            } else {
+                ImGui::TextDisabled(collider.mesh ? "%d triangles. For things that stand still: other shapes collide with it." : "Read when the game runs.",
+                                    collider.mesh ? int(collider.mesh->triangleCount()) : 0);
+                if (context.engine.scene.get<RigidBody>(entity)) {
+                    ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1), "A Rigidbody moves it: turn Convex on, or it will not collide as it moves.");
+                }
+            }
             changed |= ui::checkbox("Trigger", collider.isTrigger);
             return changed;
         } else if (collider.shape == ColliderShape::Box) {

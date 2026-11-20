@@ -25,6 +25,14 @@ Vec3 inverseInertiaOf(const Collider& collider, float mass) {
             inertia = Vec3{across, r * r / 2, across};
             break;
         }
+        case ColliderShape::Mesh:
+            if (collider.isConvex && collider.convex) {
+                // As the box around it: near enough for how it turns.
+                Vec3 e = (collider.convex->bounds.max - collider.convex->bounds.min) * 0.5f;
+                inertia = Vec3{e.y * e.y + e.z * e.z, e.x * e.x + e.z * e.z, e.x * e.x + e.y * e.y} / 3.0f;
+                break;
+            }
+            [[fallthrough]];
         default: {
             Vec3 e = collider.halfExtents;
             inertia = Vec3{e.y * e.y + e.z * e.z, e.x * e.x + e.z * e.z, e.x * e.x + e.y * e.y} / 3.0f;
@@ -44,6 +52,23 @@ Vec3 turnFrom(const ProxyType& proxy, Vec3 twist) {
 
 }  // namespace
 
+/// Where a collider without a body of its own stands: in the world, under whatever it is under.
+void worldPlace(const Transform& transform, Vec3& position, Quat& rotation) {
+    if (!transform.parent.isValid()) {
+        position = transform.position;
+        rotation = transform.rotation;
+        return;
+    }
+    position = transform.worldPosition();
+    Vec3 x = xyz(transform.world.columns[0]), y = xyz(transform.world.columns[1]), z = xyz(transform.world.columns[2]);
+    float sx = simd::length(x), sy = simd::length(y), sz = simd::length(z);
+    if (sx < 1e-8f || sy < 1e-8f || sz < 1e-8f) {
+        rotation = transform.rotation;
+        return;
+    }
+    rotation = simd::normalize(Quat(Mat3(x / sx, y / sy, z / sz)));
+}
+
 ShapeInstance Physics::makeShape(const Collider& collider, Vec3 position, Quat rotation) {
     ShapeInstance shape;
     shape.shape = collider.shape;
@@ -53,6 +78,11 @@ ShapeInstance Physics::makeShape(const Collider& collider, Vec3 position, Quat r
     shape.radius = collider.radius;
     shape.halfHeight = collider.halfHeight;
     shape.mesh = collider.mesh.get();
+    if (collider.shape == ColliderShape::Mesh && collider.isConvex) {
+        shape.shape = ColliderShape::Convex;
+        shape.convex = collider.convex.get();
+        shape.mesh = nullptr;
+    }
     return shape;
 }
 
@@ -62,6 +92,7 @@ uint64_t Physics::pairKey(Entity a, Entity b) {
 }
 
 void Physics::step(Scene& scene, float dt) {
+    rayShapesReady_ = false;                    // bodies are about to move
     // 1. Integrate: velocity from forces, then position from velocity (semi-implicit Euler).
     scene.each<RigidBody, Transform>([&](Entity, RigidBody& body, Transform& transform) {
         if (!transform.isActiveInHierarchy) return;
@@ -105,8 +136,11 @@ void Physics::step(Scene& scene, float dt) {
         proxy.entity = entity;
         proxy.collider = &collider;
         proxy.body = scene.get<RigidBody>(entity);
-        Vec3 position = proxy.body ? proxy.body->position : transform.position;
-        proxy.shape = makeShape(collider, position, proxy.body ? proxy.body->rotation : transform.rotation);
+        Vec3 position;
+        Quat rotation;
+        if (proxy.body) position = proxy.body->position, rotation = proxy.body->rotation;
+        else worldPlace(transform, position, rotation);
+        proxy.shape = makeShape(collider, position, rotation);
         proxy.bounds = proxy.shape.bounds();
         if (proxy.body && proxy.body->type == BodyType::Dynamic) {
             proxy.inverseMass = 1.0f / std::max(proxy.body->mass, 1e-4f);
@@ -300,19 +334,69 @@ void Physics::teleport(Scene& scene, Entity entity, Vec3 position) {
     }
 }
 
-std::optional<RaycastHit> Physics::raycast(Scene& scene, const Ray& ray, float maxDistance, uint32_t mask, Entity ignore) {
-    std::optional<RaycastHit> closest;
+bool Physics::isUnder(Scene& scene, Entity entity, Entity ancestor) {
+    const Transform* up = scene.get<Transform>(entity);
+    for (int depth = 0; up && up->parent.isValid() && depth < 64; depth++) {
+        if (up->parent == ancestor) return true;
+        up = scene.get<Transform>(up->parent);
+    }
+    return false;
+}
+
+void Physics::prepareRayShapes(Scene& scene) {
+    size_t colliders = scene.count<Collider>();
+    if (rayShapesReady_ && rayShapesStamp_ == scene.transformStamp() && rayShapesColliders_ == colliders) return;
+    rayShapes_.clear();
     scene.each<Collider, Transform>([&](Entity entity, Collider& collider, Transform& transform) {
-        if (!transform.isActiveInHierarchy) return;
-        if (collider.isTrigger || !(collider.layer & mask) || entity == ignore) return;
+        if (!transform.isActiveInHierarchy || collider.isTrigger) return;
         const RigidBody* body = scene.get<RigidBody>(entity);
-        Vec3 position = body && body->isInitialized ? body->position : transform.position;
-        auto hit = raycastShape(ray, makeShape(collider, position, transform.rotation));
-        if (!hit || hit->distance > maxDistance) return;
-        if (!closest || hit->distance < closest->distance) {
-            closest = RaycastHit{entity, ray.at(hit->distance), hit->normal, hit->distance};
-        }
+        Vec3 position;
+        Quat rotation;
+        if (body && body->isInitialized) position = body->position, rotation = body->rotation;
+        else worldPlace(transform, position, rotation);
+        RayShape cached;
+        cached.entity = entity;
+        cached.shape = makeShape(collider, position, rotation);
+        AABB box = cached.shape.bounds();
+        cached.low = box.min - Vec3{0.01f, 0.01f, 0.01f};
+        cached.high = box.max + Vec3{0.01f, 0.01f, 0.01f};
+        cached.layer = collider.layer;
+        rayShapes_.push_back(cached);
     });
+    rayShapesReady_ = true;
+    rayShapesStamp_ = scene.transformStamp();
+    rayShapesColliders_ = colliders;
+}
+
+std::optional<RaycastHit> Physics::raycast(Scene& scene, const Ray& ray, float maxDistance, uint32_t mask, Entity ignore) {
+    prepareRayShapes(scene);
+    std::optional<RaycastHit> closest;
+    float reach = maxDistance;
+    for (const RayShape& cached : rayShapes_) {
+        if (!(cached.layer & mask) || cached.entity == ignore) continue;
+        // The box first: where along the ray it enters and leaves each pair of its sides.
+        float enter = 0, leave = reach;
+        bool misses = false;
+        for (int axis = 0; axis < 3 && !misses; axis++) {
+            float origin = ray.origin[axis], direction = ray.direction[axis];
+            if (std::abs(direction) < 1e-9f) {
+                misses = origin < cached.low[axis] || origin > cached.high[axis];
+                continue;
+            }
+            float a = (cached.low[axis] - origin) / direction, b = (cached.high[axis] - origin) / direction;
+            if (a > b) std::swap(a, b);
+            enter = std::max(enter, a);
+            leave = std::min(leave, b);
+            misses = enter > leave;
+        }
+        if (misses || !scene.isAlive(cached.entity)) continue;
+        // What is under the one ignored is ignored too: a car's own body, under the car.
+        if (ignore.isValid() && isUnder(scene, cached.entity, ignore)) continue;
+        auto hit = raycastShape(ray, cached.shape);
+        if (!hit || hit->distance > reach) continue;
+        reach = hit->distance;
+        closest = RaycastHit{cached.entity, ray.at(hit->distance), hit->normal, hit->distance};
+    }
     return closest;
 }
 
@@ -326,9 +410,12 @@ std::vector<Entity> Physics::overlapSphere(Scene& scene, Vec3 center, float radi
         if (!transform.isActiveInHierarchy) return;
         if (!(collider.layer & mask)) return;
         const RigidBody* body = scene.get<RigidBody>(entity);
-        Vec3 position = body && body->isInitialized ? body->position : transform.position;
+        Vec3 position;
+        Quat rotation;
+        if (body && body->isInitialized) position = body->position, rotation = body->rotation;
+        else worldPlace(transform, position, rotation);
         ContactInfo info;
-        if (collide(probe, makeShape(collider, position, transform.rotation), info)) found.push_back(entity);
+        if (collide(probe, makeShape(collider, position, rotation), info)) found.push_back(entity);
     });
     return found;
 }

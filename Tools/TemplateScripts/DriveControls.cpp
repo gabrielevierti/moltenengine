@@ -8,6 +8,7 @@
 //   Space     handbrake: the rear wheels lock, for the hairpin or to start a drift
 //   B         anti-lock brakes on and off, to feel what they do
 //   T         the touch controls on the screen, on and off (they show by themselves on a phone)
+//   R         back on its wheels, where it is (it does that by itself after a moment upside down)
 //
 // On a phone there are no keys: the two buttons on the left hold "steerLeft" and
 // "steerRight", those on the right "gas", "brake" and "jump" (the handbrake), which are read
@@ -26,6 +27,7 @@ struct DriveControls {
     std::string skidSound = "Audio/skid.wav";
     std::string windSound = "Audio/wind.wav";
 
+    float stuckFor = 0;                 // seconds on its side or its roof, hardly moving
     uint32_t skidVoice = 0, windVoice = 0;
     bool hasSounds = false;
 
@@ -59,6 +61,9 @@ struct DriveControls {
         if (gear >= 1 && along < 0.6f && ahead < -0.1f) gear = -1;
         else if (gear == -1 && along > -0.6f && ahead > 0.1f) gear = 1;
         float wantThrottle = gear >= 1 ? std::max(ahead, 0.0f) : std::max(-ahead, 0.0f);
+        // A speed limit (the pit lane's): the throttle is cut above it, as a limiter does.
+        float limit = world.value("speedLimit");
+        if (limit > 0 && std::abs(along) > limit) wantThrottle = 0;
         float wantBrake = gear >= 1 ? std::max(-ahead, 0.0f) : std::max(ahead, 0.0f);
         // Feet and hands move at their own speed, not at the speed keys change.
         controls.throttle = toward(controls.throttle, wantThrottle, dt * 6);
@@ -70,7 +75,9 @@ struct DriveControls {
         controls.handbrake = input.isDown("jump") ? 1.0f : 0.0f;
 
         // Anti-lock brakes are the wheels' own (Wheel::antiLock): this is the switch on the dashboard.
-        if (input.wasPressed(Key::B)) antiLockBrakes = !antiLockBrakes;
+        // The setting ("abs", kept between games) is the switch; B flips it.
+        if (input.wasPressed(Key::B)) world.setPreference("abs", antiLockBrakes ? 0.0f : 1.0f);
+        antiLockBrakes = world.preference("abs", 1) > 0.5f;
         world.scene.each<kit::Wheel, Transform>([&](Entity entity, kit::Wheel& wheel, Transform&) {
             if (kit::vehicleOf(world.scene, entity) == self) wheel.antiLock = antiLockBrakes;
         });
@@ -87,9 +94,41 @@ struct DriveControls {
         world.setValue("redline", kind.redline);
     }
 
-    void update(World& world, Entity self, float) {
+    /// Back on its wheels where it is: upright, facing the way it faced, a little above the
+    /// ground, still. What a marshal would do.
+    static void putBack(World& world, Entity self) {
+        kit::VehicleBody* car = world.scene.get<kit::VehicleBody>(self);
+        Transform* place = world.scene.get<Transform>(self);
+        if (!car || !place) return;
+        Vec3 ahead = car->body.forward();
+        ahead.y = 0;
+        if (simd::length(ahead) < 0.1f) ahead = Vec3{0, 0, -1};
+        ahead = simd::normalize(ahead);
+        float heading = std::atan2(-ahead.x, -ahead.z);
+        Quat upright = axisAngle(Vec3{0, 1, 0}, heading);
+        Vec3 at = car->body.position;
+        at.y = std::max(at.y, 0.0f) + 0.6f;
+        car->body.position = at;
+        car->body.orientation = upright;
+        car->body.velocity = Vec3{0, 0, 0};
+        car->body.angularVelocity = Vec3{0, 0, 0};
+        place->position = at;
+        place->rotation = upright;
+        world.scene.updateTransforms();
+    }
+
+    void update(World& world, Entity self, float dt) {
         const kit::VehicleBody* car = world.scene.get<kit::VehicleBody>(self);
         if (!car) return;
+        // Over on its side or its roof, and hardly moving: after a moment, back on its wheels.
+        bool isOver = car->body.up().y < 0.35f && simd::length(car->body.velocity) < 3.0f;
+        stuckFor = isOver ? stuckFor + dt : 0.0f;
+        bool asked = world.input.wasPressed(Key::R) || world.value("resetCar") > 0;
+        if (stuckFor > 1.5f || asked) {
+            putBack(world, self);
+            stuckFor = 0;
+            world.setValue("resetCar", 0);
+        }
         // The controls on the screen show by themselves once the screen is touched; T shows
         // and hides them where there is a keyboard, to try them with the mouse.
         if (world.input.wasPressed(Key::T)) showsTouchControls = !showsTouchControls;

@@ -511,6 +511,47 @@ def circuit(folder, half_width=5.0, verge=4.6):
         x, z = points[0][0] - 6.0 - slot * 7.0, points[0][1] + side * 2.3
         for a, b, c, d in ((x - 0.08, z - 1.3, x + 0.08, z + 1.3), (x - 3.6, z - 1.3, x, z - 1.14), (x - 3.6, z + 1.14, x, z + 1.3)):
             line.quad((a, 0.05, b), (c, 0.05, b), (c, 0.05, d), (a, 0.05, d), up)
+    # The pit lane: it leaves the road where the last hairpin opens onto the straight, runs
+    # behind the pit wall in front of the garages, and comes back after the straight.
+    pit_z, pit_half = -16.5, 3.0
+    def bezier(a, b, c, d, steps):
+        out = []
+        for i in range(steps + 1):
+            t = i / steps
+            u = 1 - t
+            out.append((u * u * u * a[0] + 3 * u * u * t * b[0] + 3 * u * t * t * c[0] + t * t * t * d[0],
+                        u * u * u * a[1] + 3 * u * u * t * b[1] + 3 * u * t * t * c[1] + t * t * t * d[1]))
+        return out
+    def on_road(k, offset):
+        e = edge(k, offset, 0)
+        return (e[0], e[2])
+    def ahead(k, metres, offset):
+        x, z = on_road(k, offset)
+        dx, dz = direction(k)
+        return (x + dx * metres, z + dz * metres)
+    leave, rejoin = count - 56, 50
+    pit = bezier(on_road(leave, -2.5), ahead(leave, 16, -3.5), (-88.0, pit_z), (-66.0, pit_z), 18)
+    pit += [(x, pit_z) for x in range(-64, 66, 2)]
+    pit += bezier((66.0, pit_z), (88.0, pit_z), ahead(rejoin, -16, -3.5), on_road(rejoin, -2.5), 18)[1:]
+    pit_box = (20.0, pit_z - 1.0)
+    lane = Mesh()
+    for k in range(len(pit) - 1):
+        (x0, z0), (x1, z1) = pit[k], pit[k + 1]
+        length = math.hypot(x1 - x0, z1 - z0)
+        if length < 1e-4: continue
+        nx, nz = -(z1 - z0) / length, (x1 - x0) / length
+        a, b = (x0 - nx * pit_half, 0.025, z0 - nz * pit_half), (x0 + nx * pit_half, 0.025, z0 + nz * pit_half)
+        c, d = (x1 + nx * pit_half, 0.025, z1 + nz * pit_half), (x1 - nx * pit_half, 0.025, z1 - nz * pit_half)
+        road.quad(a, b, c, d, up)
+        for side in (-1, 1):
+            i0, i1 = side * (pit_half - 0.3), side * (pit_half - 0.15)
+            line.quad((x0 + nx * i0, 0.045, z0 + nz * i0), (x0 + nx * i1, 0.045, z0 + nz * i1),
+                      (x1 + nx * i1, 0.045, z1 + nz * i1), (x1 + nx * i0, 0.045, z1 + nz * i0), up)
+    # The box where the tyres are changed: a rectangle on the lane, in front of a garage.
+    bx, bz = pit_box
+    for a, b, c, d in ((bx - 2.6, bz - 1.4, bx + 2.6, bz - 1.25), (bx - 2.6, bz + 1.25, bx + 2.6, bz + 1.4),
+                       (bx - 2.6, bz - 1.4, bx - 2.45, bz + 1.4), (bx + 2.45, bz - 1.4, bx + 2.6, bz + 1.4)):
+        line.quad((a, 0.05, b), (c, 0.05, b), (c, 0.05, d), (a, 0.05, d), up)
     road.write(folder + "/circuit_road.obj")
     red.write(folder + "/circuit_curb_red.obj")
     white.write(folder + "/circuit_curb_white.obj")
@@ -527,8 +568,12 @@ def circuit(folder, half_width=5.0, verge=4.6):
             length = math.hypot(b[0] - a[0], b[2] - a[2])
             dx, dz = direction(k * 2 + 1)
             if length < 0.5 or (b[0] - a[0]) * dx + (b[2] - a[2]) * dz < 0: continue      # the inside of a tight bend folds on itself: nothing there
-            walls.append(((a[0] + b[0]) * 0.5, (a[2] + b[2]) * 0.5, math.degrees(math.atan2(-(b[2] - a[2]), b[0] - a[0])), length + 0.15, k % 2))
+            mx, mz = (a[0] + b[0]) * 0.5, (a[2] + b[2]) * 0.5
+            # Not where the pit lane goes through.
+            if any((mx - px) ** 2 + (mz - pz) ** 2 < (pit_half + 2.6) ** 2 for px, pz in pit): continue
+            walls.append((mx, mz, math.degrees(math.atan2(-(b[2] - a[2]), b[0] - a[0])), length + 0.15, k % 2))
     tightest = min(1.0 / max(abs(bend(k)), 1e-6) for k in range(count))
     gates = [points[int(count * share)] for share in (0.0, 0.25, 0.5, 0.75)]
     return dict(points=points, walls=walls, gates=gates, half_width=half_width, length=count * 2.0, tightest=tightest,
+                pit=pit, pit_half=pit_half, pit_box=pit_box,
                 start=(points[0][0] - 9.5, points[0][1] - 2.3))

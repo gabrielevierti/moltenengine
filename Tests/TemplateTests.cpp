@@ -35,6 +35,25 @@ struct Play {
         kit::registerKit();
         world.assetRoot = templateAssets(name);
         isLoaded = world.loadSceneNow("Scenes/Main.scene");
+        // Straight into the race: the title screen waits for a player the tests do not have.
+        if (!keepsTitle) setField("GameMenu", "showsTitle", "0");
+    }
+    explicit Play(const char* name, bool withTitle) : keepsTitle(withTitle) {
+        script::registerStandardNodes();
+        kit::registerKit();
+        world.assetRoot = templateAssets(name);
+        isLoaded = world.loadSceneNow("Scenes/Main.scene");
+        if (!keepsTitle) setField("GameMenu", "showsTitle", "0");
+    }
+    bool keepsTitle = false;
+    /// A field of every component of a type the game's scripts declare (the tests do not know their types).
+    void setField(const char* typeName, const char* fieldName, const char* text) {
+        const ComponentType* type = ComponentRegistry::instance().find(typeName);
+        const Field* field = type ? type->findField(fieldName) : nullptr;
+        if (!field) return;
+        world.scene.each<Name>([&](Entity entity, Name&) {
+            if (void* component = type->get(world.scene, entity)) field->setValueText(component, text);
+        });
     }
     bool isLoaded = false;
     void frames(int count) {
@@ -866,7 +885,17 @@ TEST(the_driving_car_holds_a_turn_on_the_throttle_and_can_be_drifted) {
         kit::VehicleBody* car = play.world.scene.get<kit::VehicleBody>(play.world.find("Car"));
         if (!car) return -1.0f;
         car->stability = stability;
-        // Out on the grass, far from the walls, facing the open.
+        // A wide flat floor beyond the circuit, which ends where its ground does: room for a long turn.
+        Entity floor = play.world.scene.create("Test Floor");
+        Transform floorPlace;
+        floorPlace.position = Vec3{0, -0.5f, 260};
+        if (Transform* at = play.world.scene.get<Transform>(floor)) *at = floorPlace;
+        else play.world.scene.add(floor, floorPlace);
+        Collider wide;
+        wide.halfExtents = Vec3{600, 0.5f, 600};
+        play.world.scene.add(floor, wide);
+        play.world.scene.updateTransforms();
+        // Out there, far from the walls, facing the open.
         if (Transform* place = play.world.scene.get<Transform>(play.world.find("Car"))) place->position = Vec3{0, place->position.y, 260};
         play.frames(30);
         float worst = 0;
@@ -879,18 +908,19 @@ TEST(the_driving_car_holds_a_turn_on_the_throttle_and_can_be_drifted) {
             play.frames(1);
             float along = simd::dot(car->body.velocity, car->body.forward()), across = simd::dot(car->body.velocity, car->body.right());
             if (along > 3 && i > 60 * 2) worst = std::max(worst, std::abs(std::atan2(across, along)) * 57.3f);
-            if (note && i % 20 == 0) std::fprintf(note, "%.0f %d speed %.1f slide %.1f\n", double(stability), i, double(along * 3.6f), double(std::atan2(across, along) * 57.3f));
+            if (note && i % 20 == 0) {
+                std::fprintf(note, "%.0f %d speed %.1f slide %.1f at %.1f %.1f %.1f up %.2f\n", double(stability), i, double(along * 3.6f),
+                             double(std::atan2(across, along) * 57.3f), double(car->body.position.x), double(car->body.position.y), double(car->body.position.z),
+                             double(car->body.up().y));
+            }
         }
         return worst;
     };
-    FILE* note = nullptr;
+    FILE* note = std::getenv("MOLTEN_TURN_NOTE") ? stderr : nullptr;
     float held = worstSlide(0.85f, 0, note);
     float loose = worstSlide(0.0f, 0, note);
     float drifted = worstSlide(0.85f, 0.5f, note);
-    if (note) {
-        std::fprintf(note, "held %.1f loose %.1f drifted %.1f\n", double(held), double(loose), double(drifted));
-        std::fclose(note);
-    }
+    std::fprintf(stderr, "turn: held %.1f loose %.1f drifted %.1f\n", double(held), double(loose), double(drifted));
     CHECK(held >= 0 && held < 30);                  // it may slide, but it does not spin
     CHECK(drifted > 8 && drifted < 70);             // the handbrake starts a drift, and it is caught
 }
@@ -1020,4 +1050,226 @@ TEST(a_games_own_component_wins_in_either_order_it_is_declared) {
         CHECK(waiting == 1);
         registry.remove(name);
     }
+}
+
+// ---------------------------------------------------------------- the phone's icon
+#include "Assets/AppIcon.hpp"
+
+TEST(an_icon_drawn_in_a_transparent_margin_fills_the_phones_square) {
+    // A dark rounded square in a wide transparent margin, a bright mark in its middle: what a Mac icon looks like.
+    const int size = 200;
+    std::vector<uint8_t> pixels(size_t(size) * size * 4, 0);
+    for (int y = 0; y < size; y++) {
+        for (int x = 0; x < size; x++) {
+            float dx = std::max(std::abs(float(x) - 99.5f) - 40.0f, 0.0f), dy = std::max(std::abs(float(y) - 99.5f) - 40.0f, 0.0f);
+            if (x < 40 || x >= 160 || y < 40 || y >= 160 || dx * dx + dy * dy > 400) continue;    // corners rounded by 20
+            uint8_t* p = &pixels[(size_t(y) * size + size_t(x)) * 4];
+            bool mark = std::abs(x - 100) < 10 && std::abs(y - 100) < 10;
+            p[0] = mark ? 250 : 30, p[1] = mark ? 120 : 32, p[2] = mark ? 40 : 38, p[3] = 255;
+        }
+    }
+    std::vector<uint8_t> icon = fullBleedIcon(pixels, size, size, 64);
+    CHECK(icon.size() == 64 * 64 * 4);
+    bool allOpaque = true, anyLight = false;
+    for (size_t i = 0; i < icon.size(); i += 4) {
+        allOpaque = allOpaque && icon[i + 3] == 255;
+        anyLight = anyLight || (icon[i] > 200 && icon[i + 1] > 200 && icon[i + 2] > 200);
+    }
+    CHECK(allOpaque && !anyLight);                                  // no white frame, no white corners
+    CHECK(std::abs(int(icon[0]) - 30) <= 3 && std::abs(int(icon[2]) - 38) <= 3);       // a corner: the square's own color
+    const uint8_t* middle = &icon[(32 * 64 + 32) * 4];
+    CHECK(middle[0] > 200 && middle[1] > 90);                        // the mark, in the middle, filling more of it
+}
+
+// ---------------------------------------------------------------- the race: limits, recovery, pits, rain, menus
+namespace {
+/// True if the game's scripts these tests need were built in (they are the Driving project's).
+bool hasScripts(std::initializer_list<const char*> names) {
+    for (const char* name : names) {
+        const ComponentType* type = ComponentRegistry::instance().find(name);
+        if (!type) return false;
+    }
+    return true;
+}
+/// Puts the car somewhere, standing still, facing along the world's +x.
+void placeCar(Play& play, Vec3 at, Quat turned = axisAngle(Vec3{0, 1, 0}, radians(-90.0f))) {
+    kit::VehicleBody* car = play.world.scene.get<kit::VehicleBody>(play.world.find("Car"));
+    Transform* place = play.world.scene.get<Transform>(play.world.find("Car"));
+    if (!car || !place) return;
+    place->position = at;
+    place->rotation = turned;
+    car->body.position = at;
+    car->body.orientation = turned;
+    car->body.velocity = Vec3{0, 0, 0};
+    car->body.angularVelocity = Vec3{0, 0, 0};
+    play.world.scene.updateTransforms();
+}
+}  // namespace
+
+TEST(a_lap_with_four_wheels_on_the_grass_does_not_count) {
+    if (!hasScripts({"LapTimer", "Tyres"})) return;
+    Play play("Driving");
+    CHECK(play.isLoaded);
+    if (!play.world.find("Waypoint 1").isValid()) return;
+    play.frames(30);
+    CHECK(play.world.value("lapValid") == 1);                       // on the grid, on the road
+    placeCar(play, Vec3{0, 0.4f, 40});                              // the infield: grass all round
+    play.frames(40);
+    CHECK(play.world.value("lapValid") == 0);
+    // The pit lane is not grass.
+    Play pits("Driving");
+    pits.frames(10);
+    placeCar(pits, Vec3{-30, 0.4f, -16.5f});
+    pits.frames(40);
+    CHECK(pits.world.value("lapValid") == 1 && pits.world.value("inPitLane") == 1);
+    CHECK_NEAR(pits.world.value("speedLimit"), 60 / 3.6, 0.01);
+}
+
+TEST(an_upturned_car_is_put_back_on_its_wheels) {
+    if (!hasScripts({"DriveControls", "Tyres"})) return;
+    Play play("Driving");
+    if (!play.world.find("Waypoint 1").isValid()) return;
+    play.frames(10);
+    // On its roof on the straight.
+    placeCar(play, Vec3{30, 1.0f, 0}, axisAngle(Vec3{0, 0, 1}, radians(180.0f)) * axisAngle(Vec3{0, 1, 0}, radians(-90.0f)));
+    kit::VehicleBody* car = play.world.scene.get<kit::VehicleBody>(play.world.find("Car"));
+    CHECK(car && car->body.up().y < 0);
+    play.frames(60 * 3);
+    CHECK(car && car->body.up().y > 0.9f);
+    // Still facing along the straight, and near where it was.
+    CHECK(car && std::abs(car->body.forward().x) > 0.9f && std::abs(car->body.position.x - 30) < 3);
+    // R does the same at once.
+    placeCar(play, Vec3{-20, 1.0f, 0}, axisAngle(Vec3{0, 0, 1}, radians(90.0f)));
+    play.world.input.handleKey(Key::R, true);
+    play.frames(1);
+    play.world.input.handleKey(Key::R, false);
+    play.frames(2);
+    CHECK(car && car->body.up().y > 0.95f);
+}
+
+TEST(a_stop_in_the_pit_box_changes_the_tyres) {
+    if (!hasScripts({"Tyres"})) return;
+    Play play("Driving");
+    if (!play.world.find("Pit Box").isValid()) return;
+    play.frames(10);
+    const Transform* box = play.world.scene.get<Transform>(play.world.find("Pit Box"));
+    CHECK(box != nullptr);
+    if (!box) return;
+    // Worn tyres first: a hard few seconds of wheelspin on the spot.
+    CHECK(play.world.value("tyreCompound") == 1);
+    Vec3 at = box->worldPosition();
+    placeCar(play, Vec3{at.x, 0.4f, at.z});
+    play.frames(30);
+    CHECK(play.world.value("inPitLane") == 1);
+    play.world.input.handleKey(Key::Num4, true);                   // wet tyres for the next stop
+    play.frames(1);
+    play.world.input.handleKey(Key::Num4, false);
+    CHECK(play.world.value("nextCompound") == 3);
+    play.frames(30);
+    CHECK(play.world.value("pitStop") > 0);                         // stopped in the box: the stop has begun
+    kit::VehicleBody* car = play.world.scene.get<kit::VehicleBody>(play.world.find("Car"));
+    play.world.input.handleKey(Key::W, true);                      // the driver cannot leave before it is done
+    play.frames(60);
+    CHECK(car && std::abs(car->speed()) < 0.5f);
+    play.frames(60 * 4);
+    CHECK(play.world.value("pitStop") == 0 && play.world.value("tyreCompound") == 3 && play.world.value("tyreWear") == 0);
+    play.frames(60);
+    CHECK(car && car->speed() > 1.0f);                              // and then it goes
+    play.world.input.handleKey(Key::W, false);
+}
+
+TEST(rain_wets_the_road_and_the_tyres_grip_less) {
+    if (!hasScripts({"Weather", "Tyres"})) return;
+    auto gripIn = [](float weather, float compound) {
+        Play play("Driving");
+        play.world.setPreference("weather", weather);
+        play.world.setPreference("startCompound", compound);
+        play.frames(20);
+        float grip = 0;
+        play.world.scene.each<kit::Wheel>([&](Entity, kit::Wheel& wheel) { grip += wheel.grip; });
+        return std::make_pair(grip, play.world.value("wetness"));
+    };
+    auto [dry, dryWet] = gripIn(0, 1);
+    auto [wet, wetWet] = gripIn(2, 1);
+    auto [rainTyre, rainTyreWet] = gripIn(2, 3);
+    CHECK(dryWet < 0.01f && wetWet > 0.99f && rainTyreWet > 0.99f);
+    CHECK(wet < dry * 0.7f);                                        // mediums on a wet road: two thirds of the grip
+    CHECK(rainTyre > wet * 1.4f);                                   // wets in the wet: nearly all of it back
+    // And the rain falls.
+    Play play("Driving");
+    play.world.setPreference("weather", 2);
+    play.frames(30);
+    const ParticleEmitter* rain = play.world.scene.get<ParticleEmitter>(play.world.find("Rain"));
+    CHECK(rain && rain->isEmitting && !rain->particles.empty() && rain->stretch > 0);
+}
+
+TEST(the_game_opens_on_its_title_and_pauses) {
+    if (!hasScripts({"GameMenu"})) return;
+    Play play("Driving", true);
+    if (!play.world.find("Title Screen").isValid()) return;
+    play.frames(5);
+    auto isShown = [&](const char* name) {
+        const Transform* group = play.world.scene.get<Transform>(play.world.find(name));
+        return group && group->isActiveInHierarchy;
+    };
+    CHECK(isShown("Title Screen") && !isShown("Interface") && play.world.time.timeScale == 0);
+    play.world.input.handleKey(Key::Enter, true);
+    play.frames(1);
+    play.world.input.handleKey(Key::Enter, false);
+    play.frames(2);
+    CHECK(!isShown("Title Screen") && isShown("Interface") && play.world.time.timeScale == 1);
+    play.world.input.handleKey(Key::Escape, true);
+    play.frames(1);
+    play.world.input.handleKey(Key::Escape, false);
+    play.frames(1);
+    CHECK(isShown("Pause Screen") && play.world.time.timeScale == 0);
+    // The settings apply as they are chosen: the picture, the sound, the size of the buttons.
+    play.world.setPreference("quality", 0);
+    play.world.setPreference("volume", 0);
+    play.world.setPreference("controls", 2);
+    play.frames(1);
+    CHECK_NEAR(play.world.sceneSettings().renderScale, 0.7, 1e-4);
+    CHECK(!play.world.sceneSettings().rayTracedShadows && play.world.soundVolume == 0);
+    const kit::UIButton* gas = play.world.scene.get<kit::UIButton>(play.world.find("Gas"));
+    CHECK(gas && gas->radius > 100);
+}
+
+TEST(preferences_are_kept_from_one_game_to_the_next) {
+    std::string file = "/tmp/molten-test-preferences/Preferences.txt";
+    std::filesystem::remove_all("/tmp/molten-test-preferences");
+    {
+        World first;
+        first.preferencesFile = file;
+        CHECK(first.preference("bestLap", -1) == -1);
+        first.setPreference("bestLap", 41.25f);
+        first.setPreference("weather", 2);
+    }
+    World second;
+    second.preferencesFile = file;
+    CHECK_NEAR(second.preference("bestLap"), 41.25, 1e-4);
+    CHECK(second.preference("weather") == 2 && second.hasPreference("weather") && !second.hasPreference("volume"));
+    World none;                                                     // with no file, kept for the run only
+    none.setPreference("a", 3);
+    CHECK(none.preference("a") == 3);
+}
+
+#include <chrono>
+TEST(profile_the_driving_game_when_asked) {
+    // MOLTEN_PROFILE=1: how long a frame of the race takes on this machine, in the worst
+    // weather, with the car driven round. Not a check: a measurement, to compare.
+    if (!std::getenv("MOLTEN_PROFILE")) return;
+    Play play("Driving");
+    play.world.setPreference("weather", 2);
+    play.frames(30);
+    play.world.input.handleKey(Key::W, true);
+    auto begin = std::chrono::steady_clock::now();
+    int frames = std::atoi(std::getenv("MOLTEN_PROFILE")) > 1 ? std::atoi(std::getenv("MOLTEN_PROFILE")) : 600;
+    for (int i = 0; i < frames; i++) {
+        play.world.input.handleKey(Key::D, (i / 90) % 3 == 1);
+        play.frames(1);
+    }
+    double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count() / frames;
+    size_t drops = 0;
+    play.world.scene.each<ParticleEmitter>([&](Entity, ParticleEmitter& emitter) { drops += emitter.particles.size(); });
+    std::fprintf(stderr, "profile: %.3f ms a frame, %zu particles, %zu entities\n", ms, drops, play.world.scene.entityCount());
 }

@@ -234,6 +234,10 @@ private:
     std::vector<std::unique_ptr<detail::StorageBase>> storages_;
     size_t liveCount_ = 0;
     uint32_t transformStamp_ = 0;
+public:
+    /// Goes up each time the transforms are worked out again: what was cached of where things are is old.
+    uint32_t transformStamp() const { return transformStamp_; }
+private:
 };
 
 }  // namespace molten

@@ -7,6 +7,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
+#include <cstdlib>
+#include <cstdio>
 
 #include "Core/Log.hpp"
 #include "Core/TextFile.hpp"
@@ -34,6 +37,58 @@ RenderSettings& World::sceneSettings() {
 float World::value(const std::string& name) const {
     auto found = values_.find(name);
     return found == values_.end() ? 0.0f : found->second;
+}
+
+// ---------------------------------------------------------------- preferences
+
+void World::readPreferences() const {
+    if (preferencesReadFrom_ == preferencesFile && (!preferencesFile.empty() || !preferences_.empty())) return;
+    if (preferencesReadFrom_ != preferencesFile) preferences_.clear();
+    preferencesReadFrom_ = preferencesFile;
+    if (preferencesFile.empty()) return;
+    std::optional<std::string> text = text::readFile(preferencesFile);
+    if (!text) return;
+    // One a line: a name, a space, a number.
+    size_t at = 0;
+    while (at < text->size()) {
+        size_t end = text->find('\n', at);
+        std::string line = text->substr(at, end == std::string::npos ? std::string::npos : end - at);
+        at = end == std::string::npos ? text->size() : end + 1;
+        size_t space = line.rfind(' ');
+        if (space == std::string::npos || space == 0) continue;
+        preferences_[line.substr(0, space)] = std::strtof(line.c_str() + space + 1, nullptr);
+    }
+}
+
+float World::preference(const std::string& name, float fallback) const {
+    readPreferences();
+    auto found = preferences_.find(name);
+    return found == preferences_.end() ? fallback : found->second;
+}
+
+bool World::hasPreference(const std::string& name) const {
+    readPreferences();
+    return preferences_.count(name) > 0;
+}
+
+void World::setPreference(const std::string& name, float value) {
+    readPreferences();
+    auto found = preferences_.find(name);
+    if (found != preferences_.end() && found->second == value) return;
+    preferences_[name] = value;
+    if (preferencesFile.empty()) return;
+    std::vector<std::string> names;
+    for (const auto& entry : preferences_) names.push_back(entry.first);
+    std::sort(names.begin(), names.end());
+    std::string text;
+    char number[48];
+    for (const std::string& key : names) {
+        std::snprintf(number, sizeof(number), " %.9g\n", double(preferences_[key]));
+        text += key + number;
+    }
+    std::error_code code;
+    std::filesystem::create_directories(std::filesystem::path(preferencesFile).parent_path(), code);
+    if (!text::writeFile(preferencesFile, text)) logError("cannot save the preferences in %s", preferencesFile.c_str());
 }
 
 // ---------------------------------------------------------------- entities
@@ -154,13 +209,13 @@ Entity World::spawn(const std::string& prefab, Vec3 position) {
 }
 
 uint32_t World::startSound(const std::string& name, float volume, float pitch, bool loops) {
-    uint32_t sound = beginSound(name, volume, pitch, loops);
+    uint32_t sound = beginSound(name, volume * soundVolume, pitch, loops);
     if (sound != 0) startedSounds_.push_back(sound);
     return sound;
 }
 
 void World::changeSound(uint32_t sound, float volume, float pitch) {
-    if (sound != 0) adjustSound(sound, volume, pitch);
+    if (sound != 0) adjustSound(sound, volume * soundVolume, pitch);
 }
 
 void World::stopSound(uint32_t sound) {
@@ -261,13 +316,36 @@ std::vector<Entity> World::findAllWithTag(const std::string& tag) const {
     return found;
 }
 
+namespace {
+/// What the loops below need of a component type: its name, where it is filed, and its code.
+/// Copied (a component's code may declare types, which moves the list), but without its
+/// fields, which every frame would otherwise copy for nothing.
+struct TypeCalls {
+    std::string name, category;
+    void* (*get)(Scene&, Entity) = nullptr;
+    void (*collect)(Scene&, std::vector<Entity>& out) = nullptr;
+    void (*start)(void*, World&, Entity) = nullptr;
+    void (*update)(void*, World&, Entity, float) = nullptr;
+    void (*fixedUpdate)(void*, World&, Entity, float) = nullptr;
+    void (*lateUpdate)(void*, World&, Entity, float) = nullptr;
+    void (*onCollision)(void*, World&, Entity, Entity) = nullptr;
+    void (*onTriggerEnter)(void*, World&, Entity, Entity) = nullptr;
+    void (*draw)(void*, World&, Entity, Canvas&) = nullptr;
+};
+TypeCalls callsOf(const ComponentType& type) {
+    return TypeCalls{type.name, type.category, type.get, type.collect, type.start, type.update, type.fixedUpdate, type.lateUpdate,
+                     type.onCollision, type.onTriggerEnter, type.draw};
+}
+}  // namespace
+
 void World::runComponents(bool isFixedStep, float dt, bool isLate) {
     if (!runsComponents) return;
     // By index, and a copy of each type: a component's code may load a game module or
     // declare types, which moves the list.
     for (size_t i = 0; i < ComponentRegistry::instance().types().size(); i++) {
-        ComponentType type = ComponentRegistry::instance().types()[i];
-        if (isLate ? !type.lateUpdate : (!type.start && !type.update && !type.fixedUpdate)) continue;
+        const ComponentType& declared = ComponentRegistry::instance().types()[i];
+        if (isLate ? !declared.lateUpdate : (!declared.start && !declared.update && !declared.fixedUpdate)) continue;
+        TypeCalls type = callsOf(declared);
         // First note who has one, then look each up again: the code may create or destroy
         // entities and components, its own included.
         scratchEntities_.clear();
@@ -300,7 +378,7 @@ void World::dispatchPhysicsEvents() {
     std::vector<std::pair<Entity, Entity>> triggers = physics.takeEnteredTriggers();
     if (!runsComponents || (contacts.empty() && triggers.empty())) return;
     for (size_t i = 0; i < ComponentRegistry::instance().types().size(); i++) {
-        ComponentType type = ComponentRegistry::instance().types()[i];
+        TypeCalls type = callsOf(ComponentRegistry::instance().types()[i]);
         // Each of the two entities hears about the other.
         auto tell = [&](void (*function)(void*, World&, Entity, Entity), Entity self, Entity other) {
             if (!function || !scene.isAlive(self) || !scene.isAlive(other)) return;
@@ -331,7 +409,9 @@ void World::drawComponents(Canvas& canvas) {
         bool isInterface = pass == 1;
         if (isInterface) canvas.beginArea(Vec2{0, 0}, canvas.size(), interfaceScale);
         for (size_t i = 0; i < ComponentRegistry::instance().types().size(); i++) {
-            ComponentType type = ComponentRegistry::instance().types()[i];
+            const ComponentType& declared = ComponentRegistry::instance().types()[i];
+            if (!declared.draw) continue;
+            TypeCalls type = callsOf(declared);
             if (!type.draw || (type.category == "UI") != isInterface) continue;
             // While the game is not running (an editor, between plays) only the interface is
             // drawn: it has to be seen to be laid out. The rest draws what it does while it runs.
@@ -405,7 +485,12 @@ void World::prepareMeshColliders() {
     scene.each<Collider, Transform>([&](Entity, Collider& collider, Transform& transform) {
         if (collider.shape != ColliderShape::Mesh) return;
         Vec3 scale = transform.scale;
-        if (collider.mesh && simd::length_squared(scale - collider.meshScale) < 1e-10f) return;
+        bool hasWhatItNeeds = collider.isConvex ? collider.convex != nullptr : collider.mesh != nullptr;
+        if (hasWhatItNeeds && simd::length_squared(scale - collider.meshScale) < 1e-10f) return;
+        if (collider.isConvex && !collider.convex && collider.mesh && simd::length_squared(scale - collider.meshScale) < 1e-10f) {
+            collider.convex = ConvexShape::build(collider.mesh->points, Vec3{1, 1, 1});        // made convex since it was read
+            return;
+        }
         if (!collider.mesh && simd::length_squared(collider.meshScale) > 0 && simd::length_squared(scale - collider.meshScale) < 1e-10f) return;   // tried, and there is no such model
         collider.meshScale = scale;
         collider.mesh = nullptr;
@@ -415,6 +500,7 @@ void World::prepareMeshColliders() {
             return;
         }
         collider.mesh = MeshShape::build(data->positions, data->indices, scale);
+        collider.convex = collider.isConvex ? ConvexShape::build(data->positions, scale) : nullptr;
     });
 }
 

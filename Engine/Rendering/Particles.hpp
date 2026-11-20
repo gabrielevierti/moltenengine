@@ -66,6 +66,7 @@ struct ParticleEmitter {
     bool loops = false;                     // with a duration: starts over when everything it made is gone
 
     // ---- what the air and the ground do to them
+    float stretch = 0;                      // drawn as a streak this many seconds of its movement long: rain, sparks (0: a dot)
     float turbulence = 0;                   // meters per second of swirling, as in smoke that curls
     float turbulenceSize = 1.0f;            // how large the swirls are, in meters
     bool bounces = false;                   // off a level floor

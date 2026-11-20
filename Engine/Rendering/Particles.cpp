@@ -67,6 +67,7 @@ const EffectValue kValues[] = {
     NUMBER(sizeStart, false), NUMBER(sizeEnd, false), VECTOR(colorStart, 4, false), VECTOR(colorEnd, 4, false), NUMBER(windInfluence, false),
     VECTOR(boxSize, 3, true), NUMBER(middleAt, true), VECTOR(colorMiddle, 4, true), NUMBER(sizeMiddle, true), NUMBER(burstEvery, true),
     NUMBER(duration, true), NUMBER(turbulence, true), NUMBER(turbulenceSize, true), NUMBER(floorHeight, true), NUMBER(bounciness, true),
+    NUMBER(stretch, true),
 };
 #undef NUMBER
 #undef VECTOR
@@ -202,7 +203,7 @@ ParticleEmitter effectPreset(const std::string& name) {
         e.rate = 500, e.lifetimeMin = 1.0f, e.lifetimeMax = 1.3f, e.speedMin = 14.0f, e.speedMax = 17.0f, e.direction = Vec3{0, -1, 0}, e.spread = radians(2.0f);
         e.shape = ParticleEmitter::Shape::Box, e.boxSize = Vec3{24, 0.5f, 24}, e.gravity = Vec3{0, -4, 0}, e.drag = 0, e.windInfluence = 0.3f;
         e.isAdditive = false, e.colorStart = Vec4{0.7f, 0.78f, 0.9f, 0.5f}, e.colorEnd = Vec4{0.7f, 0.78f, 0.9f, 0.3f};
-        e.sizeStart = 0.035f, e.sizeEnd = 0.03f, e.maxParticles = 1200;
+        e.sizeStart = 0.025f, e.sizeEnd = 0.022f, e.maxParticles = 1200, e.stretch = 0.045f;      // streaks, not dots
     } else if (name == "Snow") {
         e.rate = 160, e.lifetimeMin = 5.0f, e.lifetimeMax = 8.0f, e.speedMin = 0.6f, e.speedMax = 1.2f, e.direction = Vec3{0, -1, 0}, e.spread = radians(10.0f);
         e.shape = ParticleEmitter::Shape::Box, e.boxSize = Vec3{24, 0.5f, 24}, e.gravity = Vec3{0, -0.2f, 0}, e.drag = 0.6f;

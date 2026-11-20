@@ -48,6 +48,9 @@ public:
         std::optional<Project> project = projectPath.empty() ? std::nullopt : Project::load(projectPath, &error);
         if (project) {
             engine.assets().setProjectDirectory(project->assetsDirectory());
+            // What the game keeps for the player: settings, records. In the player's own folder,
+            // named after the game (on a phone, inside the application's own).
+            engine.preferencesFile = userDataDirectory(project->name.empty() ? std::string("Molten Game") : project->name) + "/Preferences.txt";
             if (Window* window = engine.window()) {
                 window->setTitle(project->name);
                 if (!project->icon.empty()) window->setIcon(project->assetsDirectory() + "/" + project->icon);
@@ -76,7 +79,8 @@ public:
         engine.isSimulationPaused = wantsSplash;        // the game waits behind the splash
     }
 
-    void draw(Engine& engine, Canvas& canvas) override {
+    // Over the game and its interface: the splash, and then the game coming through it as it fades.
+    void drawOver(Engine& engine, Canvas& canvas) override {
         if (Splash::isOver(splashSeconds_)) return;
         if (!logo_ && !triedLogo_) {
             triedLogo_ = true;
@@ -87,8 +91,10 @@ public:
         // A key, a click or a tap is "I have seen it".
         bool skipped = engine.input.wasPressed(MouseButton::Left) || engine.input.wasPressed(Key::Space) ||
                        engine.input.wasPressed(Key::Enter) || engine.input.wasPressed(Key::Escape);
-        if (skipped) splashSeconds_ = std::max(splashSeconds_, Splash::kDuration - 0.5f);
-        if (Splash::isOver(splashSeconds_) || skipped) {
+        if (skipped) splashSeconds_ = std::max(splashSeconds_, Splash::kDuration - Splash::kFade);
+        // The game starts as the splash begins to fade: what shows through it is the game
+        // itself, running, with its interface; not a still picture that starts later.
+        if (splashSeconds_ >= Splash::kDuration - Splash::kFade || skipped) {
             engine.runsComponents = true;
             engine.isSimulationPaused = false;
         }

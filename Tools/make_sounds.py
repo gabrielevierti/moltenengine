@@ -132,6 +132,20 @@ def write_all(folder, engines=None):
     # Wind: low and wide, gusting slowly.
     wind = shaped(np.random.default_rng(31).standard_normal(RATE * 3), lambda f: 1.0 / (1.0 + (f / 280.0) ** 2) + 0.02)
     save(folder, "wind.wav", wind, peak=0.7)
+    # Rain: a hiss with no tone in it, and drops landing close by, here and there.
+    n = RATE * 4
+    rng = np.random.default_rng(51)
+    hiss = shaped(rng.standard_normal(n), lambda f: (f / 900.0) ** 0.5 / (1.0 + (f / 7000.0) ** 2) + 0.02)
+    drops = np.zeros(n)
+    for start in rng.integers(0, n - 2000, 260):
+        length = int(rng.uniform(300, 1400))
+        drops[start:start + length] += rng.standard_normal(length) * np.exp(-np.arange(length) / (length * 0.2)) * rng.uniform(0.3, 1.0)
+    drops = shaped(drops, lambda f: 1.0 / (1.0 + (1800.0 / np.maximum(f, 1.0)) ** 2))
+    rain = hiss / np.max(np.abs(hiss)) + 0.5 * drops / np.max(np.abs(drops))
+    # Its end runs into its start: it loops without a click.
+    fade = RATE // 4
+    rain[:fade] = rain[:fade] * np.linspace(0, 1, fade) + rain[-fade:] * np.linspace(1, 0, fade)
+    save(folder, "rain.wav", rain[:-fade], peak=0.6)
     # The tires on the road at speed: a rumble.
     save(folder, "road.wav", noise(RATE * 2, 40, 420, 41), peak=0.6)
     # A turbocharger: the whistle of its wheel, two notes a little apart that beat, over rushing air.
