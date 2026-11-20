@@ -30,7 +30,7 @@ namespace {
 
 const char* const kVersion = "1.0";
 /// Where the engine's source is.
-const char* const kRepository = "https://github.com/gabrielevierti/MoltenMetalEngine";
+const char* const kRepository = "https://github.com/gabrielevierti/moltenengine";
 
 /// Everything the engine logs also goes to the console panel. The engine may log from
 /// another thread (audio), so messages wait here until the frame collects them.
