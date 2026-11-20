@@ -54,7 +54,7 @@ Components find each other by name: `Follow` follows the entity called `Player`,
 
 A material is an asset: a `.material` file in the project, made with **+ New > Material** in the assets (or from a mesh's Material menu). The first thing it says is its **shader**, which program draws the surface: *Lit* (color, metal, roughness, lit by the scene) or *Unlit* (its own color and nothing else). Select a material and the inspector shows its properties; select an entity and the material of its mesh is at the bottom of the inspector. Either way it is the same material: change it and everything that uses it changes, in every scene.
 
-Give a mesh a material by dragging it from the assets onto the object in the view, or into the mesh's **Material**, or by choosing it from the list there. A scene made before materials were assets keeps its own; **Save This One as an Asset**, in the same menu, turns one into a file.
+Give a mesh a material by dragging it from the assets onto the object in the view (it shows on whatever the pointer is over, and stays when you let go), onto its row in the Hierarchy, or into the mesh's **Material**, or by choosing it from the list there. A scene made before materials were assets keeps its own; **Save This One as an Asset**, in the same menu, turns one into a file.
 
 ## Input
 

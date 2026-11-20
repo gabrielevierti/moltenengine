@@ -338,6 +338,24 @@ private:
                     }
                 }
             }
+            // A material from the Explorer, onto the thing this row is.
+            if (const ImGuiPayload* held = ImGui::GetDragDropPayload(); held && held->IsDataType(ui::kAssetPayload)) {
+                std::string path(static_cast<const char*>(held->Data));
+                const AssetInfo* asset = editor.assets.find(path);
+                MeshRenderer* renderer = world.get<MeshRenderer>(entity);
+                if (asset && asset->type == AssetType::Material && renderer) {
+                    isBetween = false;
+                    if (ImGui::AcceptDragDropPayload(ui::kAssetPayload, ImGuiDragDropFlags_AcceptNoDrawDefaultRect)) {
+                        if (std::shared_ptr<Material> material = editor.engine.assets().material(path)) {
+                            renderer->material = material;
+                            scene.select(entity);
+                            scene.markChanged();
+                        }
+                    }
+                } else {
+                    isBetween = true;                   // nothing to do with it here: no highlight
+                }
+            }
             ImGui::EndDragDropTarget();
             isDropTarget = !isBetween;
         }

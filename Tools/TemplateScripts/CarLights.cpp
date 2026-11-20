@@ -17,6 +17,7 @@ struct CarLights {
     Vec3 brakeColor{1.0f, 0.06f, 0.03f};
 
     float braking = 0;                  // eased: a filament takes a moment to glow and to fade
+    bool ownsLampMaterial = false;
 
     void update(World& world, Entity self, float dt) {
         const kit::VehicleBody* car = world.scene.get<kit::VehicleBody>(self);
@@ -40,6 +41,12 @@ struct CarLights {
         }
         // The lamps themselves: their material gives off the same light, so that they bloom.
         if (MeshRenderer* lamps = world.scene.get<MeshRenderer>(world.find("Rear Lights"))) {
+            if (lamps->material && !ownsLampMaterial) {
+                // A copy of its own to light: the material is an asset, shared and kept, and playing must not change it.
+                lamps->material = std::make_shared<Material>(*lamps->material);
+                lamps->material->assetName.clear();
+                ownsLampMaterial = true;
+            }
             if (lamps->material) lamps->material->emissive = brakeColor * (0.6f + 5.0f * braking);
         }
     }

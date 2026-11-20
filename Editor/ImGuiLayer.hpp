@@ -27,6 +27,11 @@ public:
     static ImTextureID textureId(const Texture* texture);
 
 private:
+    static std::vector<MTL::Texture*>& heldForTheFrame();
+
+public:
+
+private:
     void draw(MTL::CommandBuffer* commandBuffer, MTL::RenderCommandEncoder* encoder);
 
     bool isActive_ = false;

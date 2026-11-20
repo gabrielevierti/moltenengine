@@ -874,8 +874,32 @@ void drawSceneView(EditorContext& editor) {
     // Things dragged in from the asset browser land where the pointer is on the ground.
     ImGui::SetCursorScreenPos(position);
     ImGui::Dummy(size);
+    // A material shows on whatever it is held over, before it is let go: what it was wearing comes back when the pointer moves on.
+    static Entity triedOn;
+    static std::shared_ptr<Material> wornBefore;
+    if (triedOn.isValid()) {
+        if (MeshRenderer* renderer = scene.get<MeshRenderer>(triedOn)) renderer->material = wornBefore;
+        triedOn = Entity{};
+        wornBefore.reset();
+    }
     if (ImGui::BeginDragDropTarget()) {
-        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(ui::kAssetPayload)) {
+        const ImGuiPayload* held = ImGui::GetDragDropPayload();
+        if (held && held->IsDataType(ui::kAssetPayload)) {
+            std::string path(static_cast<const char*>(held->Data));
+            const AssetInfo* asset = editor.assets.find(path);
+            if (asset && asset->type == AssetType::Material) {
+                Entity hit = pick(editor, viewport.screenRay(io.MousePos));
+                MeshRenderer* renderer = scene.get<MeshRenderer>(hit);
+                std::shared_ptr<Material> material = renderer ? engine.assets().material(path) : nullptr;
+                if (renderer && material) {
+                    triedOn = hit;
+                    wornBefore = renderer->material;
+                    renderer->material = material;
+                    ImGui::SetTooltip("%s", document.nameOf(hit).c_str());
+                }
+            }
+        }
+        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(ui::kAssetPayload, ImGuiDragDropFlags_AcceptNoDrawDefaultRect)) {
             std::string path(static_cast<const char*>(payload->Data));
             const AssetInfo* asset = editor.assets.find(path);
             if (asset && asset->type == AssetType::Mesh && std::filesystem::path(path).extension() == ".obj") {
@@ -888,6 +912,8 @@ void drawSceneView(EditorContext& editor) {
                 std::shared_ptr<Material> material = engine.assets().material(path);
                 if (renderer && material) {
                     renderer->material = material;
+                    triedOn = Entity{};                 // it keeps it
+                    wornBefore.reset();
                     document.select(hit);
                     document.markChanged();
                 } else if (!renderer) {

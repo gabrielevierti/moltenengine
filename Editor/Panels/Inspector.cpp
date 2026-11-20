@@ -670,6 +670,8 @@ void registerBuiltinComponents(EditorContext& editor) {
     registry.addComponent<MeshRenderer>(nullptr, "Mesh Renderer", [](EditorContext& context, Entity, MeshRenderer& renderer) {
         bool changed = false;
         std::vector<std::string> meshes = meshChoices(context);
+        // One part of a model ("Models/car.glb#3") is not in the list of files: show it all the same.
+        if (renderer.mesh && !renderer.mesh->name.empty() && indexOfName(meshes, renderer.mesh->name) < 0) meshes.push_back(renderer.mesh->name);
         int meshIndex = renderer.mesh ? indexOfName(meshes, renderer.mesh->name) : -1;
         if (ui::combo("Mesh", meshIndex, meshes)) {
             renderer.mesh = context.engine.assets().mesh(meshes[size_t(meshIndex)]);

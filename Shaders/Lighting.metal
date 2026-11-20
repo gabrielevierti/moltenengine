@@ -327,9 +327,12 @@ static float4 reflectionTraced(float3 worldPosition, float3 normal, float3 view,
 
 // Light from the whole environment: the irradiance map for the diffuse part, the
 // prefiltered map and the BRDF lookup table (the "split sum") for the specular part.
+// `mirrorShare` is how much of the mirrored part is kept (1: all of it). Where a traced ray
+// found the mirrored direction hidden, that part is replaced by what the ray saw; the matte
+// part, which comes from every direction, is never taken away with it.
 static float3 environmentLight(Surface surface, constant FrameUniforms &frame,
                                texturecube<float> irradianceMap, texturecube<float> prefilteredMap,
-                               texture2d<float> brdfLUT, sampler linearSampler) {
+                               texture2d<float> brdfLUT, sampler linearSampler, float mirrorShare) {
     float3 F = fresnelSchlickRoughness(surface.NdotV, surface.F0, surface.roughness);
     float3 diffuse = (1.0 - F) * (1.0 - surface.metallic) * surface.albedo
                    * irradianceMap.sample(linearSampler, surface.normal).rgb;
@@ -340,7 +343,7 @@ static float3 environmentLight(Surface surface, constant FrameUniforms &frame,
     float2 brdf = brdfLUT.sample(linearSampler, float2(surface.NdotV, surface.roughness)).rg;
     float3 specular = prefiltered * (F * brdf.x + brdf.y);
 
-    return (diffuse + specular) * surface.occlusion * frame.environmentIntensity;
+    return (diffuse + specular * mirrorShare) * surface.occlusion * frame.environmentIntensity;
 }
 
 // ---------------------------------------------------------------- fog

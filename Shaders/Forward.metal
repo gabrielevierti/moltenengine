@@ -164,23 +164,24 @@ static float4 shadePixel(MeshVertexOut in, MaterialSample m,
             // shadows `sunLight` is 1 and this changes nothing.
             light.radiance *= sunLight;
         }
-        color += reflectedLight(surface, light.direction, light.radiance);
+        // (Each part is kept between nothing and a great deal: one that is not a number
+        // would otherwise blacken the whole pixel, and the bloom around it.)
+        color += clamp(reflectedLight(surface, light.direction, light.radiance), 0.0, 60000.0);
     }
 #if MOLTEN_EXTRAS
     // Where a traced ray found the mirrored sky hidden, a smooth surface gets its rough
     // share of the sky's light only: the part that does not depend on the direction.
-    float3 sky = environmentLight(surface, frame, irradianceMap, prefilteredMap, brdfLUT, linearSampler);
     float smoothness = 1.0 - surface.roughness;
-    color += sky * mix(1.0, m.mirror, smoothness * smoothness);
+    color += clamp(environmentLight(surface, frame, irradianceMap, prefilteredMap, brdfLUT, linearSampler, mix(1.0, m.mirror, smoothness * smoothness)), 0.0, 60000.0);
     // What a traced ray found in the mirrored direction, as strongly as this surface mirrors at this angle.
     float3 mirrorColor = mix(float3(0.04), m.baseColor.rgb, m.metallic);
     float glancing = pow(1.0 - saturate(dot(m.normal, normalize(pass.cameraPosition - in.worldPosition))), 5.0);
-    color += m.mirrored * (mirrorColor + (1.0 - mirrorColor) * glancing) * (smoothness * smoothness);
+    color += clamp(m.mirrored * (mirrorColor + (1.0 - mirrorColor) * glancing) * (smoothness * smoothness), 0.0, 60000.0);
     // And the light bounced to it from its surroundings, taken up by what is not metal in it.
-    color += m.bounced * m.baseColor.rgb * (1.0 - m.metallic) * m.occlusion;
+    color += clamp(m.bounced * m.baseColor.rgb * (1.0 - m.metallic) * m.occlusion, 0.0, 60000.0);
     return float4(applyFogAlong(color, in.worldPosition, pass.cameraPosition, m.fogSun, frame), m.baseColor.a);
 #else
-    color += environmentLight(surface, frame, irradianceMap, prefilteredMap, brdfLUT, linearSampler);
+    color += clamp(environmentLight(surface, frame, irradianceMap, prefilteredMap, brdfLUT, linearSampler, 1.0), 0.0, 60000.0);
 
     return float4(applyFog(color, in.viewDepth, frame), m.baseColor.a);
 #endif

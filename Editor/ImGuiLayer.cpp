@@ -119,15 +119,32 @@ void ImGuiLayer::draw(MTL::CommandBuffer* commandBuffer, MTL::RenderCommandEncod
     if (!isActive_ || !hasFrame_) return;
     hasFrame_ = false;                  // each frame's lists are converted and drawn once
     ImDrawData* drawData = ImGui::GetDrawData();
-    if (!drawData) return;
-    convertColorsToLinear(drawData);
-    encoder->pushDebugGroup(NS::String::string("Editor interface", NS::UTF8StringEncoding));
-    ImGui_ImplMetal_RenderDrawData(drawData, commandBuffer, encoder);
-    encoder->popDebugGroup();
+    if (drawData) {
+        convertColorsToLinear(drawData);
+        encoder->pushDebugGroup(NS::String::string("Editor interface", NS::UTF8StringEncoding));
+        ImGui_ImplMetal_RenderDrawData(drawData, commandBuffer, encoder);
+        encoder->popDebugGroup();
+    }
+    // The encoder holds what it was given from here on: the pictures of this frame can go.
+    for (MTL::Texture* held : heldForTheFrame()) held->release();
+    heldForTheFrame().clear();
+}
+
+std::vector<MTL::Texture*>& ImGuiLayer::heldForTheFrame() {
+    static std::vector<MTL::Texture*> held;
+    return held;
 }
 
 ImTextureID ImGuiLayer::textureId(const Texture* texture) {
-    return texture ? ImTextureID(reinterpret_cast<uintptr_t>(texture->handle())) : ImTextureID(0);
+    if (!texture || !texture->handle()) return ImTextureID(0);
+    // A picture handed to the interface is drawn at the end of the frame, by its address. Whoever
+    // owns it may let it go before then (a preview made again, a cache emptied): keep it until it is drawn.
+    std::vector<MTL::Texture*>& held = heldForTheFrame();
+    if (held.size() < 4096) {
+        texture->handle()->retain();
+        held.push_back(texture->handle());
+    }
+    return ImTextureID(reinterpret_cast<uintptr_t>(texture->handle()));
 }
 
 }  // namespace molten::editor
