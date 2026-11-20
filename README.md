@@ -30,23 +30,6 @@ You write games with C++ components or visual scripts, build scenes in a full ed
   <img src="Docs/readme/features-light.svg" width="100%" alt="Features: a complete visual editor; C++ or visual scripting; ray tracing on Apple GPUs; physics down to the parts; Mac, iPhone and iPad; made only for Apple silicon.">
 </picture>
 
-## Made with Molten: Driving
-
-The example game is **Driving**: a Fiat 500 on a small circuit, to lap against the clock. It is a separate download (`MoltenProjects.zip`), not part of the engine: unzip it anywhere and open it with **Open a Project…**.
-
-![Driving: the Fiat 500 under the start gantry, lap timer and best lap at the top, speed and gear at the bottom](Docs/driving.jpg)
-
-| | |
-| --- | --- |
-| ![The Fiat 500 on the track](Docs/driving-car.jpg) | ![The circuit from above](Docs/driving-circuit.jpg) |
-
-- **The game.** A 566 m circuit with curbs, walls, a pit lane and lamps, in evening light. Lap times and a best lap kept between games, track limits, tyres that wear and a pit stop to change them, sun, clouds or rain, a title screen, a pause menu and settings, a dashboard, and touch controls.
-- **What it shows.** A car simulated from its parts: springs and dampers, tyres that grip and slide, a turbocharged four-cylinder behind a gearbox, stability control that allows a drift, brakes shared by the load on each wheel. Plus a glTF model used in parts with a material each, the game's own scripts in `Assets/Scripts`, and an interface laid out in the Game view.
-
-![Driving on an iPhone, with the touch controls on screen](Docs/driving-iphone.jpg)
-
-A tour of the project and its scripts is in [Making Games](Docs/MakingGames.md).
-
 ## Getting started
 
 **Requirements:** a Mac with Apple silicon, macOS 13+, Xcode 15+ (or the Xcode Command Line Tools) and CMake 3.24+.
