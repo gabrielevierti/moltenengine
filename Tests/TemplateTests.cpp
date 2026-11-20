@@ -63,166 +63,41 @@ struct Play {
 
 }  // namespace
 
-TEST(template_roll_a_ball_can_be_won) {
-    Play play("RollABall");
-    CHECK(play.isLoaded);
-    play.frames(30);
-    CHECK(std::abs(play.positionOf("Player").y - 0.5f) < 0.05f);       // resting on the floor
-    CHECK(play.count("Coin") == 8);
-
-    // Go to each coin in turn, as a player would.
-    for (int coin = 1; coin <= 8; coin++) {
-        std::string name = "Coin " + std::to_string(coin);
-        for (int frame = 0; frame < 900 && play.world.scene.isAlive(play.world.find(name)); frame++) {
-            play.steer("Player", play.positionOf(name.c_str()));
-            play.frames(1);
-        }
-        CHECK(!play.world.scene.isAlive(play.world.find(name)));
-    }
-    CHECK(play.world.value("score") == 8);
-    CHECK(play.world.value("won") == 1);
-    CHECK(kit::HudText::filled(play.world, "Coins {score} / 8") == "Coins 8 / 8");
-
-    // The star is picked up by a visual script.
-    for (int frame = 0; frame < 900 && play.world.scene.isAlive(play.world.find("Star")); frame++) {
-        play.steer("Player", play.positionOf("Star"));
-        play.frames(1);
-    }
-    CHECK(play.world.value("stars") == 1);
-    CHECK(!play.world.scene.isAlive(play.world.find("Star")));
-
-    // The camera kept up.
-    Vec3 camera = play.positionOf("Camera"), player = play.positionOf("Player");
-    CHECK(std::abs(camera.x - player.x) < 1.5f && camera.y > 7);
-}
-
-TEST(template_space_shooter_can_be_played_and_lost) {
-    Play play("SpaceShooter");
-    CHECK(play.isLoaded);
-    play.frames(2);
-    CHECK(play.world.value("lives") == 3);
-
-    // Hold fire and stay under the nearest enemy.
-    float bestScore = 0;
-    int mostBullets = 0;
-    for (int frame = 0; frame < 60 * 25; frame++) {
-        play.world.input.handleKey(Key::Space, true);
-        Vec3 nearest{0, 0, -100};
-        play.world.scene.each<Name>([&](Entity entity, Name& name) {
-            if (name.value != "Enemy") return;
-            Vec3 at = play.world.scene.get<Transform>(entity)->position;
-            if (at.z > nearest.z && at.z < 8) nearest = at;
-        });
-        Vec3 ship = play.positionOf("Player");
-        play.world.input.handleKey(Key::A, nearest.x < ship.x - 0.2f);
-        play.world.input.handleKey(Key::D, nearest.x > ship.x + 0.2f);
-        play.frames(1);
-        bestScore = std::max(bestScore, play.world.value("score"));
-        mostBullets = std::max(mostBullets, play.count("Bullet"));
-        CHECK(std::abs(play.positionOf("Player").x) <= 10.01f || !play.world.scene.isAlive(play.world.find("Player")));
-    }
-    CHECK(mostBullets >= 3);
-    CHECK(bestScore >= 50);                                             // shot down several
-    CHECK(play.world.scene.count<Name>() < 200);                              // nothing piles up
-
-    // Now do nothing in the enemies' way until the ship is gone: the scene starts over.
-    play.world.input.handleKey(Key::Space, false);
-    play.world.input.handleKey(Key::A, false);
-    play.world.input.handleKey(Key::D, false);
-    bool wasHit = false, restarted = false;
-    for (int frame = 0; frame < 60 * 240 && !restarted; frame++) {
-        float before = play.world.value("lives");
-        play.frames(1);
-        float after = play.world.value("lives");
-        if (after < before) wasHit = true;
-        if (wasHit && after == 3 && before < 3) restarted = true;
-    }
-    CHECK(wasHit);
-    CHECK(restarted);
-    CHECK(play.world.value("score") == 0);                              // a new game counts from nothing
-}
-
-TEST(template_brick_breaker_can_be_played) {
-    Play play("BrickBreaker");
-    CHECK(play.isLoaded);
-    CHECK(play.count("Brick") == 40);
-    bool lost = false;
-    float slowest = 1e9f, fastest = 0;
-    for (int frame = 0; frame < 60 * 180 && play.world.value("won") == 0; frame++) {
-        // Keep the paddle under the ball.
-        Vec3 ball = play.positionOf("Ball"), paddle = play.positionOf("Paddle");
-        play.world.input.handleKey(Key::A, ball.x < paddle.x - 0.3f);
-        play.world.input.handleKey(Key::D, ball.x > paddle.x + 0.3f);
-        play.frames(1);
-        if (const RigidBody* body = play.world.scene.get<RigidBody>(play.world.find("Ball"))) {
-            if (frame > 5) {
-                float speed = simd::length(body->velocity);
-                slowest = std::min(slowest, speed);
-                fastest = std::max(fastest, speed);
-            }
-            CHECK(std::abs(body->position.x) < 8.6f && body->position.z > -11.6f);     // stays on the table
-        }
-        if (play.count("Brick") == 40 && play.world.value("score") > 0) lost = true;
-    }
-    CHECK(!lost);
-    CHECK(play.world.value("score") == 40);
-    CHECK(play.world.value("won") == 1);
-    CHECK(slowest > 10.5f && fastest < 11.5f);
-
-    // And a ball nobody catches is lost: the game starts again with all its bricks.
-    Play idle("BrickBreaker");
-    idle.world.input.handleKey(Key::D, true);                           // the paddle goes and stays in a corner
-    bool restarted = false;
-    float most = 0;
-    for (int frame = 0; frame < 60 * 120 && !restarted; frame++) {
-        idle.frames(1);
-        float score = idle.world.value("score");
-        if (score < most) restarted = true;
-        most = std::max(most, score);
-    }
-    CHECK(restarted);
-    CHECK(idle.count("Brick") == 40);
-}
-
 // ---------------------------------------------------------------- what the games needed
-
 #include "Kit/Effects.hpp"
 #include "Project/Project.hpp"
 #include "Rendering/Canvas.hpp"
 #include "Scene/SceneFile.hpp"
-
 TEST(templates_are_listed_and_a_project_can_start_from_one) {
-    std::string templates = std::filesystem::path(templateAssets("RollABall")).parent_path().parent_path().string();
+    std::string templates = std::filesystem::path(templateAssets("Driving")).parent_path().parent_path().string();
     std::vector<ProjectTemplate> found = projectTemplates(templates);
-    CHECK(found.size() == 5);
-    CHECK(found.size() == 5 && found[0].name == "Brick Breaker" && found[1].name == "Driving" && found[2].name == "Flying" &&
-          found[3].name == "Roll a Ball" && found[4].name == "Space Shooter");
-    CHECK(!found.empty() && !found[0].description.empty());
+    CHECK(found.size() == 1 && found[0].name == "Driving" && !found[0].description.empty());
 
     namespace fs = std::filesystem;
     fs::path scratch = fs::temp_directory_path() / "molten-template-test";
     fs::remove_all(scratch);
     fs::create_directories(scratch);
     std::string error;
-    std::optional<Project> project = Project::create(scratch.string(), "My Shooter", &error, found.size() == 5 ? found[4].directory : "");
+    std::optional<Project> project = Project::create(scratch.string(), "My Racer", &error, found.size() == 1 ? found[0].directory : "");
     CHECK(project.has_value());
     if (project) {
-        CHECK(project->name == "My Shooter");
+        CHECK(project->name == "My Racer");
         CHECK(project->startScene == "Scenes/Main.scene");
         CHECK(fs::exists(fs::path(project->assetsDirectory()) / "Scenes/Main.scene"));
-        CHECK(fs::exists(fs::path(project->assetsDirectory()) / "Prefabs/Enemy.prefab"));
+        CHECK(fs::exists(fs::path(project->assetsDirectory()) / "Scripts/LapTimer.cpp"));
+        CHECK(fs::exists(fs::path(project->assetsDirectory()) / "Models/Fiat500/fiat500.glb"));
         CHECK(!fs::exists(fs::path(project->directory) / "template.txt"));     // the copy is a project, not a template
         CHECK(fs::exists(project->filePath()));
-        // And the copy plays.
+        // And the copy plays: its car stands on the road.
         World world;
         world.assetRoot = project->assetsDirectory();
         CHECK(world.loadSceneNow(project->startScene));
         for (int i = 0; i < 120; i++) world.advance(1.0 / 60.0);
-        CHECK(world.value("lives") == 3);
+        const Transform* car = world.scene.get<Transform>(world.find("Car"));
+        CHECK(car && car->worldPosition().y > 0.1f && car->worldPosition().y < 1.0f);
     }
     fs::remove_all(scratch);
 }
-
 TEST(a_prefab_is_part_of_a_scene_with_only_what_it_uses) {
     Scene scene;
     auto red = std::make_shared<Material>();
@@ -557,85 +432,9 @@ TEST(template_driving_laps_its_circuit) {
     CHECK(car->body.up().y > 0.8f);
 }
 
-TEST(template_flying_can_be_flown) {
-    Play play("Flying");
-    CHECK(play.isLoaded);
-    play.frames(120);
-    kit::VehicleBody* plane = play.world.scene.get<kit::VehicleBody>(play.world.find("Plane"));
-    CHECK(plane != nullptr);
-    if (!plane) return;
-    const kit::VehicleBody* flight = plane;         // the stall is the aeroplane's, whoever flies it
-    // It stands on the runway until it is given power; then it takes off the way the help says:
-    // Shift for power, and S once it is fast enough.
-    CHECK(plane->isOnGround && play.world.value("airspeed") < 3 && play.world.value("throttle") == 0);
-    CHECK_NEAR(plane->body.position.y, 1.69, 0.12);                     // on its wheels, on the runway's surface
-    play.world.input.handleKey(Key::LeftShift, true);
-    play.frames(60 * 3);
-    play.world.input.handleKey(Key::LeftShift, false);
-    CHECK(play.world.value("throttle") == 100);
-    for (int frame = 0; frame < 60 * 40 && play.world.value("airspeed") < 112; frame++) play.frames(1);
-    CHECK(play.world.value("airspeed") >= 112 && plane->isOnGround);
-    CHECK(std::abs(plane->body.position.x) < 6);                        // it ran straight down the runway
-    play.world.input.handleKey(Key::S, true);
-    for (int frame = 0; frame < 60 * 25 && plane->body.position.y < 40; frame++) play.frames(1);
-    play.world.input.handleKey(Key::S, false);
-    CHECK(plane->body.position.y >= 40 && !plane->isOnGround && !flight->isStalled);
-    // Hands off, it levels off and goes on flying straight.
-    play.frames(60 * 12);
-    float before = plane->body.position.y;
-    play.frames(60 * 10);
-    CHECK(std::abs(plane->body.position.y - before) < 40);
-    CHECK(std::abs(plane->body.right().y) < 0.05f && !flight->isStalled);
-    // A touch of the right pedal swings the nose right, and it settles when the pedal is let go.
-    Vec3 ahead = plane->body.forward();
-    play.world.input.handleKey(Key::E, true);
-    play.frames(60);
-    play.world.input.handleKey(Key::E, false);
-    Vec3 swung = plane->body.forward();
-    CHECK(ahead.x * swung.z - ahead.z * swung.x > 0.03f);               // turned to the right, seen from above
-    play.frames(60 * 4);
-    Vec3 turning = plane->body.toLocal(plane->body.angularVelocity);
-    CHECK(std::abs(turning.y) < 0.03f);                                 // no wagging left over
-    // The moving surfaces of the model follow the controls.
-    play.world.input.handleKey(Key::A, true);
-    play.frames(6);
-    const kit::Hinge* aileron = play.world.scene.get<kit::Hinge>(play.world.find("Aileron L"));
-    CHECK(aileron && aileron->angle < -1);                              // rolling left: the left aileron is up
-    play.world.input.handleKey(Key::A, false);
-    play.frames(60 * 4);
-
-    // Flown the way keys fly: all or nothing. Stick hard back for ten seconds: it climbs, and does not stall.
-    play.world.input.handleKey(Key::S, true);
-    bool stalled = false;
-    for (int frame = 0; frame < 60 * 10; frame++) {
-        play.frames(1);
-        stalled = stalled || flight->isStalled;
-    }
-    play.world.input.handleKey(Key::S, false);
-    CHECK(!stalled);
-    CHECK(plane->body.up().y > 0.3f);                                   // it did not go over on its back
-    // Hard right for three seconds: a real bank, but not upside down. Let go: the wings come level.
-    play.world.input.handleKey(Key::D, true);
-    play.frames(180);
-    float banked = -plane->body.right().y;
-    play.world.input.handleKey(Key::D, false);
-    CHECK(banked > 0.35f && banked < 0.95f);
-    Vec3 headingBefore = plane->body.forward();
-    play.frames(60 * 5);
-    CHECK(std::abs(plane->body.right().y) < 0.12f);
-    CHECK(plane->body.up().y > 0.9f);
-    CHECK(plane->body.forward().x > headingBefore.x - 0.05f);           // and it had turned right while banked
-    // Hands off for twenty seconds: still flying, still the right way up, not sinking into the ground.
-    play.frames(60 * 20);
-    CHECK(!flight->isStalled && plane->body.up().y > 0.9f && plane->body.position.y > 60);
-    CHECK(play.world.value("altitude") >= 60);
-    CHECK(simd::length(play.positionOf("Camera") - plane->body.position) < 30);
-}
-
 #include "Assets/Gltf.hpp"
 #include "Assets/MeshData.hpp"
 #include "Core/TextFile.hpp"
-
 TEST(template_models_are_read_as_meshes) {
     std::string models = templateAssets("Driving") + "/Models/";
     for (const char* name : {"circuit_road.obj", "circuit_lines.obj", "circuit_curb_red.obj", "circuit_start.obj", "trees_leaves.obj"}) {
@@ -674,9 +473,6 @@ TEST(template_models_are_read_as_meshes) {
         CHECK(gltfFileOf("Models/car.glb", &part) == "Models/car.glb" && part == -1);
         CHECK(isGltfFile("Models/car.glb#12") && !isGltfFile("Models/car.obj"));
     }
-    std::optional<std::string> plane = text::readFile(templateAssets("Flying") + "/Models/plane_wing_l.obj");
-    CHECK(plane.has_value());
-    if (plane) CHECK_NEAR(MeshData::parseOBJ(*plane)->bounds().halfExtents().x * 2, 5.23, 0.15);    // half the span the simulation flies with
 }
 
 TEST(joystick_axes_drive_actions) {
@@ -705,8 +501,26 @@ TEST(joystick_axes_drive_actions) {
 #include "Script/Convert.hpp"
 
 TEST(visual_scripts_become_code) {
-    std::optional<std::string> text = text::readFile(templateAssets("RollABall") + "/Scripts/Star.graph");
-    CHECK(text.has_value());
+    // A star that turns and is picked up: what a visual script of a pickup looks like on disk.
+    std::optional<std::string> text = std::string(R"(molten-graph 1
+node 1 "OnUpdate" 60 60
+node 2 "Rotate" 320 60
+  value "axis" "0 1 0"
+  value "degrees" "180"
+node 3 "OnTriggerEnter" 60 260
+node 4 "Branch" 320 260
+node 5 "OtherIs" 60 400
+  value "name" "Player"
+node 6 "AddValue" 580 260
+  value "name" "stars"
+  value "amount" "1"
+node 7 "DestroySelf" 840 260
+link 1 "then" 2 "in"
+link 3 "then" 4 "in"
+link 5 "result" 4 "condition"
+link 4 "true" 6 "in"
+link 6 "then" 7 "in"
+)");
     std::optional<script::Graph> graph = script::Graph::fromText(*text);
     CHECK(graph.has_value());
     std::string code = script::graphToCpp(*graph, script::typeNameFor("star pickup"), "Scripts/Star.graph");
@@ -731,18 +545,21 @@ TEST(visual_scripts_become_code) {
 }
 
 TEST(water_and_fog_settings_are_kept) {
-    Play play("Flying");
-    CHECK(play.isLoaded);
-    const RenderSettings& settings = play.world.sceneSettings();
-    CHECK_NEAR(settings.fogHeightFalloff, 0.006, 1e-5);
-    CHECK_NEAR(settings.fogSunScatter, 5, 1e-4);
-    std::optional<std::string> text = text::readFile(templateAssets("Flying") + "/Materials/Water.material");
-    CHECK(text.has_value());
     Material water;
-    CHECK(readMaterial(*text, water) && water.isWater);
+    CHECK(readMaterial("molten-material 1\nshader water\nbaseColor 0.03 0.2 0.27 1\nroughness 0.05\nwater 0.35 1\n", water) && water.isWater);
     CHECK_NEAR(water.waveScale, 0.35, 1e-5);
     std::string written = writeMaterial(water);
     CHECK(written.find("shader water") != std::string::npos && written.find("water 0.35 1") != std::string::npos);
+    // The fog's shape goes through a scene file and back.
+    RenderSettings fog;
+    fog.fogHeightFalloff = 0.006f;
+    fog.fogSunScatter = 5.0f;
+    Scene empty, back;
+    std::vector<NamedMaterial> none;
+    RenderSettings read;
+    CHECK(readScene(writeScene(empty, none, fog), back, none, read, SceneAssets{}));
+    CHECK_NEAR(read.fogHeightFalloff, 0.006, 1e-5);
+    CHECK_NEAR(read.fogSunScatter, 5, 1e-4);
 
     // Something that floats comes to rest at the water's surface instead of falling through it.
     World world;

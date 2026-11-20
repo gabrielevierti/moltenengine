@@ -572,7 +572,8 @@ void TouchStick::update(World& world, Entity, float) {
 
 void TouchStick::draw(World& world, Entity, Canvas& canvas) {
     gScreen = canvas.size();
-    if (onlyOnTouchScreens && !world.input.hasTouched()) return;
+    // Hidden until a finger is seen, but shown while the scene is edited: it has to be seen to be laid out.
+    if (onlyOnTouchScreens && world.runsComponents && !world.input.hasTouched()) return;
     Vec2 base = placeOnScreen(gScreen, anchor, offset);
     Vec2 thumb = isHeld ? knob : base;
     if (isHeld && simd::length(thumb - base) > radius) thumb = base + simd::normalize(thumb - base) * radius;
@@ -593,12 +594,14 @@ void TouchButton::update(World& world, Entity, float) {
 
 void TouchButton::draw(World& world, Entity, Canvas& canvas) {
     gScreen = canvas.size();
-    if (onlyOnTouchScreens && !world.input.hasTouched()) return;
+    // Hidden until a finger is seen, but shown while the scene is edited: it has to be seen to be laid out.
+    if (onlyOnTouchScreens && world.runsComponents && !world.input.hasTouched()) return;
     Vec2 middle = place(gScreen);
     canvas.circle(middle, radius, color * Vec4{1, 1, 1, isHeld ? 0.9f : 0.3f});
     canvas.ring(middle, radius, 2.0f, color);
     if (!label.empty()) {
-        float size = radius * 0.7f;
+        // Smaller for a longer word, so that it stays inside the circle.
+        float size = radius * 0.7f * std::min(1.0f, 3.2f / float(std::max<size_t>(label.size(), 1)));
         canvas.text(label, Vec2{middle.x, middle.y - size * 0.6f}, size, Vec4{color.x, color.y, color.z, 0.95f}, TextAlign::Center);
     }
 }

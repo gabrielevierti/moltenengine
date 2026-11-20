@@ -109,7 +109,8 @@ struct DriveControls {
         world.scene.each<kit::TouchStick, Transform>([&](Entity, kit::TouchStick& stick, Transform&) { stick.onlyOnTouchScreens = !onScreen; });
         world.scene.each<kit::TouchButton, Transform>([&](Entity, kit::TouchButton& button, Transform&) { button.onlyOnTouchScreens = !onScreen; });
         // And what the keys do is of no use to someone holding a phone.
-        for (const char* name : {"Help", "Help 2"}) {
+        // On a touch screen the keys' help and the engine's name go: the thumbs need the room.
+        for (const char* name : {"Help", "Help 2", "Engine"}) {
             if (kit::HudText* help = world.scene.get<kit::HudText>(world.find(name))) help->color.w = world.input.hasTouched() ? 0.0f : 0.55f;
         }
         if (!hasSounds) {

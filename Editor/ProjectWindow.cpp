@@ -63,84 +63,7 @@ void drawPicture(ImDrawList* drawList, ImVec2 min, ImVec2 max, const std::string
     auto background = [&](ImU32 color) { drawList->AddRectFilled(min, max, color, rounding, ImDrawFlags_RoundCornersTop); };
     drawList->PushClipRect(min, max, true);
 
-    if (key == "RollABall") {
-        background(IM_COL32(52, 84, 132, 255));
-        drawList->AddRectFilled(p(0, 0.3f), p(1, 0.52f), IM_COL32(86, 122, 170, 255));                 // the horizon's haze
-        drawList->AddRectFilled(p(0, 0.5f), p(1, 1), IM_COL32(70, 78, 92, 255));                       // the floor
-        drawList->AddRectFilled(p(0, 0.5f), p(1, 0.535f), IM_COL32(182, 188, 198, 255));               // the far wall
-        const float coins[4][3] = {{0.66f, 0.63f, 0.045f}, {0.83f, 0.74f, 0.06f}, {0.56f, 0.86f, 0.08f}, {0.2f, 0.6f, 0.04f}};
-        for (const auto& coin : coins) {
-            ImVec2 center = p(coin[0], coin[1]);
-            float radius = height * coin[2];
-            drawList->AddEllipseFilled(ImVec2(center.x, center.y + radius * 1.35f), ImVec2(radius * 0.8f, radius * 0.22f), IM_COL32(0, 0, 0, 70));
-            drawList->AddEllipseFilled(center, ImVec2(radius * 0.62f, radius), IM_COL32(255, 200, 60, 255));
-            drawList->AddEllipseFilled(ImVec2(center.x - radius * 0.1f, center.y), ImVec2(radius * 0.34f, radius * 0.7f), IM_COL32(255, 232, 140, 255));
-        }
-        ImVec2 ball = p(0.36f, 0.7f);
-        float radius = height * 0.19f;
-        drawList->AddEllipseFilled(ImVec2(ball.x + radius * 0.1f, ball.y + radius * 0.98f), ImVec2(radius * 1.05f, radius * 0.26f), IM_COL32(0, 0, 0, 90));
-        drawList->AddCircleFilled(ball, radius, IM_COL32(236, 84, 36, 255), 48);
-        drawList->AddCircleFilled(ImVec2(ball.x - radius * 0.28f, ball.y - radius * 0.3f), radius * 0.5f, IM_COL32(255, 132, 78, 255), 32);
-        drawList->AddCircleFilled(ImVec2(ball.x - radius * 0.38f, ball.y - radius * 0.42f), radius * 0.16f, IM_COL32(255, 222, 200, 255), 16);
-    } else if (key == "SpaceShooter") {
-        background(IM_COL32(10, 12, 26, 255));
-        unsigned seed = 7;
-        for (int i = 0; i < 46; i++) {
-            seed = seed * 1664525u + 1013904223u;
-            float x = float((seed >> 8) & 1023) / 1023.0f;
-            seed = seed * 1664525u + 1013904223u;
-            float y = float((seed >> 8) & 1023) / 1023.0f;
-            drawList->AddCircleFilled(p(x, y), i % 7 == 0 ? 1.6f : 1.0f, IM_COL32(200, 215, 255, i % 3 == 0 ? 210 : 110), 6);
-        }
-        const float enemies[3][2] = {{0.2f, 0.2f}, {0.74f, 0.15f}, {0.86f, 0.42f}};
-        for (const auto& enemy : enemies) {
-            ImVec2 center = p(enemy[0], enemy[1]);
-            float half = height * 0.075f;
-            drawList->AddRectFilled(ImVec2(center.x - half * 1.5f, center.y - half * 1.5f), ImVec2(center.x + half * 1.5f, center.y + half * 1.5f), IM_COL32(230, 50, 60, 40), half);
-            drawList->AddRectFilled(ImVec2(center.x - half, center.y - half), ImVec2(center.x + half, center.y + half), IM_COL32(226, 54, 62, 255), half * 0.3f);
-            drawList->AddRectFilled(ImVec2(center.x - half * 0.45f, center.y - half * 0.45f), ImVec2(center.x + half * 0.45f, center.y + half * 0.45f), IM_COL32(255, 140, 130, 255), 2);
-        }
-        // An enemy that has just been hit.
-        ImVec2 blast = p(0.5f, 0.3f);
-        drawList->AddCircleFilled(blast, height * 0.17f, IM_COL32(255, 120, 40, 50), 32);
-        drawList->AddCircleFilled(blast, height * 0.11f, IM_COL32(255, 150, 50, 220), 32);
-        drawList->AddCircleFilled(blast, height * 0.06f, IM_COL32(255, 235, 170, 255), 24);
-        for (int i = 0; i < 8; i++) {
-            float angle = float(i) * 0.785f + 0.3f;
-            ImVec2 direction(std::cos(angle), std::sin(angle));
-            drawList->AddLine(ImVec2(blast.x + direction.x * height * 0.14f, blast.y + direction.y * height * 0.14f),
-                              ImVec2(blast.x + direction.x * height * 0.2f, blast.y + direction.y * height * 0.2f), IM_COL32(255, 190, 90, 220), 2);
-        }
-        ImVec2 ship = p(0.5f, 0.8f);
-        float size = height * 0.12f;
-        for (float y : {0.6f, 0.5f}) drawList->AddLine(p(0.5f, y), p(0.5f, y - 0.06f), IM_COL32(120, 220, 255, 255), 3);
-        drawList->AddTriangleFilled(ImVec2(ship.x - size * 0.3f, ship.y + size * 0.7f), ImVec2(ship.x + size * 0.3f, ship.y + size * 0.7f),
-                                    ImVec2(ship.x, ship.y + size * 1.5f), IM_COL32(90, 170, 255, 200));
-        drawList->AddTriangleFilled(ImVec2(ship.x, ship.y - size), ImVec2(ship.x - size, ship.y + size * 0.8f), ImVec2(ship.x + size, ship.y + size * 0.8f),
-                                    IM_COL32(205, 214, 232, 255));
-        drawList->AddTriangleFilled(ImVec2(ship.x, ship.y - size * 0.45f), ImVec2(ship.x - size * 0.3f, ship.y + size * 0.4f),
-                                    ImVec2(ship.x + size * 0.3f, ship.y + size * 0.4f), IM_COL32(70, 120, 210, 255));
-    } else if (key == "BrickBreaker") {
-        background(IM_COL32(13, 15, 30, 255));
-        const ImU32 rows[5] = {IM_COL32(240, 72, 72, 255), IM_COL32(246, 150, 50, 255), IM_COL32(238, 220, 70, 255), IM_COL32(74, 208, 110, 255),
-                               IM_COL32(72, 150, 250, 255)};
-        const float left = 0.08f, right = 0.92f, top = 0.1f, rowHeight = 0.085f, gap = 0.012f;
-        const int columns = 8;
-        float brickWidth = (right - left - gap * float(columns - 1)) / float(columns);
-        for (int row = 0; row < 5; row++) {
-            for (int column = 0; column < columns; column++) {
-                if ((row == 4 && (column == 3 || column == 4)) || (row == 3 && column == 4)) continue;      // already broken
-                float x = left + float(column) * (brickWidth + gap), y = top + float(row) * (rowHeight + gap * 1.6f);
-                drawList->AddRectFilled(p(x, y), p(x + brickWidth, y + rowHeight), rows[row], 2.5f);
-            }
-        }
-        ImVec2 ball = p(0.57f, 0.68f);
-        float radius = height * 0.035f;
-        drawList->AddLine(p(0.47f, 0.84f), ball, IM_COL32(255, 255, 255, 40), radius * 1.2f);
-        drawList->AddCircleFilled(ball, radius * 2.6f, IM_COL32(255, 240, 200, 36), 24);
-        drawList->AddCircleFilled(ball, radius, IM_COL32(255, 250, 235, 255), 24);
-        drawList->AddRectFilled(p(0.36f, 0.88f), p(0.6f, 0.925f), IM_COL32(232, 236, 244, 255), height * 0.02f);
-    } else if (key == "Driving") {
+    if (key == "Driving") {
         background(IM_COL32(96, 140, 196, 255));
         drawList->AddRectFilled(p(0, 0.38f), p(1, 0.56f), IM_COL32(150, 180, 214, 255));
         drawList->AddRectFilled(p(0, 0.54f), p(1, 1), IM_COL32(44, 46, 52, 255));                      // the road
@@ -161,25 +84,6 @@ void drawPicture(ImDrawList* drawList, ImVec2 min, ImVec2 max, const std::string
         }
         // Smoke off the front tire.
         for (int i = 0; i < 4; i++) drawList->AddCircleFilled(p(x - 0.3f - float(i) * 0.07f, y + 0.06f - float(i) * 0.012f), height * (0.035f + 0.016f * float(i)), IM_COL32(230, 230, 235, 110 - i * 22), 16);
-    } else if (key == "Flying") {
-        background(IM_COL32(84, 138, 204, 255));
-        drawList->AddRectFilledMultiColor(min, p(1, 0.75f), IM_COL32(60, 110, 190, 255), IM_COL32(60, 110, 190, 255), IM_COL32(150, 190, 226, 255), IM_COL32(150, 190, 226, 255));
-        drawList->AddRectFilled(p(0, 0.78f), p(1, 1), IM_COL32(58, 104, 50, 255));
-        const ImVec2 strip[4] = {p(0.42f, 0.78f), p(0.5f, 0.78f), p(0.86f, 1), p(0.5f, 1)};
-        drawList->AddConvexPolyFilled(strip, 4, IM_COL32(48, 50, 56, 255));
-        const float clouds[3][3] = {{0.2f, 0.22f, 0.07f}, {0.78f, 0.34f, 0.05f}, {0.62f, 0.14f, 0.04f}};
-        for (const auto& cloud : clouds) {
-            for (int i = -1; i <= 1; i++) drawList->AddCircleFilled(p(cloud[0] + float(i) * cloud[2] * 0.9f, cloud[1] + (i == 0 ? -0.02f : 0.0f)), height * cloud[2] * (i == 0 ? 1.2f : 0.9f), IM_COL32(255, 255, 255, 200), 20);
-        }
-        // The aeroplane, climbing away, seen from behind and a little to one side.
-        const float x = 0.42f, y = 0.46f;
-        const ImVec2 wing[4] = {p(x - 0.3f, y + 0.07f), p(x + 0.3f, y - 0.09f), p(x + 0.3f, y - 0.05f), p(x - 0.3f, y + 0.11f)};
-        drawList->AddConvexPolyFilled(wing, 4, IM_COL32(236, 236, 232, 255));
-        drawList->AddEllipseFilled(p(x, y), ImVec2(width * 0.035f, height * 0.085f), IM_COL32(222, 222, 218, 255));
-        const ImVec2 tail[4] = {p(x - 0.1f, y + 0.115f), p(x + 0.1f, y + 0.065f), p(x + 0.1f, y + 0.09f), p(x - 0.1f, y + 0.14f)};
-        drawList->AddConvexPolyFilled(tail, 4, IM_COL32(236, 236, 232, 255));
-        const ImVec2 fin[3] = {p(x - 0.008f, y + 0.1f), p(x + 0.012f, y - 0.06f), p(x + 0.03f, y + 0.1f)};
-        drawList->AddConvexPolyFilled(fin, 3, IM_COL32(206, 40, 32, 255));
     } else if (key.empty()) {
         // The empty project: a floor that goes to the horizon and one cube on it.
         background(IM_COL32(40, 46, 56, 255));
@@ -402,7 +306,7 @@ ProjectWindow::Result ProjectWindow::draw(const std::vector<std::string>& recent
             // The engine comes with the empty project only: the example games are their own download.
             ImGui::PushStyleColor(ImGuiCol_Text, kDim);
             ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + contentWidth);
-            ImGui::TextUnformatted("The example games (Roll a Ball, Space Shooter, Brick Breaker, Driving, Flying) are a separate download, "
+            ImGui::TextUnformatted("The example game (Driving: a Fiat 500 on a little circuit, with touch controls) is a separate download, "
                                    "MoltenProjects.zip. Unzip it where you keep your projects and open one with \"Open a Project...\".");
             ImGui::PopTextWrapPos();
             ImGui::PopStyleColor();

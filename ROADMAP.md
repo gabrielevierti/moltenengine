@@ -179,7 +179,7 @@ Work goes down this list in the order of the section "Next".
    marched through and lit from the sun's side. Never yet compiled on a Mac. Still to do: fog in froxels (shared by all pixels and
    lit by every light), shafts with ray traced shadows and against the sky, local volumes of smoke and gas, clouds that shade the ground
 6. [~] Liquids made of drops (position based fluids) that fill what holds them and pour. [ ] Particles on the GPU, an effects editor
-7. [~] Mesh colliders: solid hills, tracks and models as they are shaped (the Flying project's hills are one). [ ] Convex ones, and mesh against mesh.
+7. [~] Mesh colliders: solid hills, tracks and models as they are shaped (the Driving project's road and walls). [ ] Convex ones, and mesh against mesh.
 8. [~] Shaders written by hand as assets (`.shader`: a surface function and its properties), chosen in a material beside Lit, Unlit and Water,
    compiled with the engine's own and again when saved; a mistake is reported and costs nothing else. Not yet seen compiling on a Mac.
    [ ] Their own textures, a vertex stage, unlit and transparent variants, the preview ball drawn with them

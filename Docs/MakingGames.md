@@ -4,17 +4,15 @@ This is the shortest way from an empty editor to something you can play: what co
 
 ## Start from a game
 
-The project window offers, next to **Empty**, three small complete games. Pick one, give it a name, and the new project is a copy of it that you own: open the scene, press Play (Cmd+P), then take it apart.
+The example game is **Driving**: a Fiat 500 on a small circuit, to lap against the clock.
 
-| Template | What it is | What it shows |
-| --- | --- | --- |
-| **Roll a Ball** | Roll around an arena and collect the coins. | Physics, pickups, a camera that follows, a score, winning. One pickup is a visual script. |
-| **Space Shooter** | Fly left and right, shoot what comes down. | Prefabs, spawning, health and damage, explosions, lives, starting over. |
-| **Brick Breaker** | Keep the ball in play and clear the wall. | A ball that bounces forever, a paddle, things that break, losing and winning. |
-| **Driving** | A small circuit to lap against the clock in a Fiat 500: lights, exhaust smoke, a dashboard, touch controls. | A machine simulated from its parts: springs, tires, engines and a gearbox, with sound. |
-| **Flying** | A light aeroplane, a runway, hills. | Flight from lift and drag on each surface: take off, stall, land. |
+| | |
+| --- | --- |
+| **What it is** | A 566 m circuit with curbs, walls, a paddock and lamps, in evening light. Lap times and a best lap, a dashboard (speed, gear, revs), headlights and brake lights, smoke from the exhaust and from tires that slide, and controls for a touch screen. |
+| **What it shows** | A car simulated from its parts (springs and dampers, tires that grip and slide, seven engines behind a gearbox, brakes shared by the load on each wheel), a glTF model used in parts with a material each, the game's own scripts in `Assets/Scripts`, an interface laid out in the Game view. |
+| **Keys** | W A S D or the arrows to drive, Space for the handbrake, 1 to 7 for the engine, B for ABS, L for the lamps, T for the touch controls. |
 
-The example games are not part of the engine: they are a separate download, `MoltenProjects.zip`, to unzip anywhere and open as projects (a new project in the editor starts empty). They are written by `Tools/make_templates.py`, and every one is played from start to finish by the unit tests (`Tests/TemplateTests.cpp`) with the keys a person would press, without a screen.
+It is not part of the engine: it is a separate download, `MoltenProjects.zip`, to unzip anywhere and open as a project (a new project in the editor starts empty). It is written by `Tools/make_templates.py` (the car by `Tools/import_fiat500.py`), and the unit tests (`Tests/TemplateTests.cpp`) drive it without a screen: a full stop from speed, and three laps by an autopilot that has to stay on the road. The car is "Fiat 500 x Outlaw" by Subin, under CC-BY-4.0: see the project's `CREDITS.txt`.
 
 ## The components that come with the engine
 
@@ -93,7 +91,7 @@ Vehicles are built from parts, each a component, so that the same parts make a c
 | `DriveControls` | the root | The driver's keys. Sets `speed`, `rpm`, `gear`. |
 | `FlightControls` | the root | The pilot's keys, with an assist that keeps the wings level and the nose out of a stall. Sets `airspeed`, `altitude`, `climb`, `throttle`, `flaps`, `stall`. |
 
-Controls write what is wanted into `VehicleBody::controls` (throttle, brake, steer, pitch, roll, yaw, flaps); parts read it. Your own code can write there instead: `body->setControls(...)`. `kit::makeCar` and `kit::makeAirplane` build one of each from code. The Driving and Flying templates are these parts with models on them.
+Controls write what is wanted into `VehicleBody::controls` (throttle, brake, steer, pitch, roll, yaw, flaps); parts read it. Your own code can write there instead: `body->setControls(...)`. `kit::makeCar` and `kit::makeAirplane` build one of each from code. The Driving example is these parts with a model on them.
 
 Both read their numbers from the inspector (mass, spring rates, wing area, power), so a van, a go-kart, a glider or a jet trainer is a matter of changing them.
 
