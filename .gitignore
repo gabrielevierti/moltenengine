@@ -1,1 +1,8 @@
-/build
+build/
+build.log
+.DS_Store
+*.xcuserstate
+xcuserdata/
+.vscode/
+.idea/
+screenshot.png
