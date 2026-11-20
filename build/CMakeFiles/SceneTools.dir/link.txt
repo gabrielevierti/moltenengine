@@ -1,1 +1,0 @@
-/usr/bin/c++ -O3 -DNDEBUG -arch arm64 -mmacosx-version-min=13.0 -bundle -Wl,-headerpad_max_install_names -o Plugins/SceneTools.dylib CMakeFiles/SceneTools.dir/Plugins/SceneTools/SceneTools.cpp.o  -Wl,-bundle_loader,molten

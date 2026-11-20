@@ -22,7 +22,10 @@ TEST(gpu_structs_have_the_sizes_the_shaders_expect) {
     CHECK(sizeof(gpu::PassUniforms) == 368);
     CHECK(sizeof(gpu::InstanceData) == 144);
     CHECK(sizeof(gpu::LightData) == 96);
-    CHECK(sizeof(gpu::MaterialUniforms) == 64);
+    CHECK(sizeof(gpu::MaterialUniforms) == 208);
+    CHECK(offsetof(gpu::MaterialUniforms, customShader) == 72);
+    CHECK(offsetof(gpu::MaterialUniforms, custom) == 80);
+    CHECK(offsetof(gpu::MaterialUniforms, water) == 64);
     CHECK(sizeof(gpu::CanvasVertex) == 32);
     CHECK(sizeof(gpu::LineVertex) == 32);
     CHECK(sizeof(gpu::ParticleInstance) == 32);
@@ -30,7 +33,13 @@ TEST(gpu_structs_have_the_sizes_the_shaders_expect) {
     CHECK(offsetof(gpu::PassUniforms, time) == 336);
     CHECK(offsetof(gpu::LightData, type) == 48);
     CHECK(offsetof(gpu::FrameUniforms, cascadeSplits) == 256);
-    CHECK(sizeof(gpu::FrameUniforms) == 512);
+    CHECK(sizeof(gpu::FrameUniforms) == 544);
+    CHECK(offsetof(gpu::FrameUniforms, fogShaftSteps) == 528);
+    CHECK(offsetof(gpu::FrameUniforms, volumetricClouds) == 532);
+    CHECK(offsetof(gpu::FrameUniforms, fogHeightFalloff) == 508);
+    CHECK(offsetof(gpu::FrameUniforms, tracesReflections) == 520);
+    CHECK(offsetof(gpu::FrameUniforms, bounceIntensity) == 524);
+    CHECK(sizeof(gpu::TracedSurface) == 32);
     CHECK(offsetof(gpu::FrameUniforms, lightCount) == 352);
     CHECK(offsetof(gpu::FrameUniforms, fogDensity) == 480);
     CHECK(offsetof(gpu::FrameUniforms, shadowRayCount) == 500);

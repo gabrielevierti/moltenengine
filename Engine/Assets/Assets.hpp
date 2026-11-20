@@ -49,6 +49,12 @@ public:
     std::shared_ptr<Texture> texture(const std::string& name, TextureFormat format = TextureFormat::RGBA8_sRGB);
     /// A Wavefront OBJ model, or one of the built-in shapes: "cube", "sphere", "plane", "cylinder".
     std::shared_ptr<Mesh> mesh(const std::string& name);
+    /// A material that is a file of its own (a `.material`), shared by everything that
+    /// names it: change it and every mesh that uses it changes. Null if there is no such file.
+    std::shared_ptr<Material> material(const std::string& name);
+    /// Makes `material` the asset `name` from now on (the editor, when a material is saved
+    /// as a file for the first time).
+    void adoptMaterial(const std::string& name, std::shared_ptr<Material> material);
     /// A font baked by Tools/bake_font.py: `name`.png and `name`.txt.
     std::shared_ptr<Font> font(const std::string& name);
     /// A WAV, FLAC or MP3 file.
@@ -80,6 +86,8 @@ private:
     std::string projectDirectory_;
     std::unordered_map<std::string, std::shared_ptr<Texture>> textures_;
     std::unordered_map<std::string, std::shared_ptr<Mesh>> meshes_;
+    std::unordered_map<std::string, std::shared_ptr<struct GltfModel>> models_;     // glTF files read, for their parts
+    std::unordered_map<std::string, std::shared_ptr<Material>> materials_;
     std::unordered_map<std::string, std::shared_ptr<Font>> fonts_;
     std::unordered_map<std::string, std::shared_ptr<AudioClip>> sounds_;
     std::shared_ptr<Mesh> cube_, sphere_, plane_, cylinder_;

@@ -175,6 +175,14 @@ struct EditorContext {
     /// The folder the asset browser shows. New assets are made here.
     std::string currentFolder;
 
+    /// Opens a visual script (a .graph file, as a path relative to Assets) on the drawing board.
+    void editGraph(const std::string& path);
+    std::string graphToEdit;            // what the board has been asked to open; it clears this
+
+    /// A panel that edits something of its own (the visual script board) sets this every
+    /// frame it has the keyboard: Delete, Cmd+Z, Cmd+D and Cmd+A are then its, not the scene's.
+    bool panelOwnsEditKeys = false;
+
     std::vector<ConsoleMessage> console;
 
     /// Says something to the user: in the status bar for a few seconds, and in the console.
@@ -194,6 +202,9 @@ struct EditorContext {
     ViewportInfo viewport;
     /// Moves the editor's camera to look at the selection.
     bool frameSelectionRequested = false;
+    bool alignWithViewRequested = false;    // put the selection where the view's camera is, facing the same way
+    bool wantsNewScript = false;            // a panel asked for the New Script window
+    bool gameViewHasFocus = false;          // the Game window has the keyboard: while playing, keys are the game's
 };
 
 inline Scene& sceneOf(EditorContext& editor) { return editor.engine.scene; }

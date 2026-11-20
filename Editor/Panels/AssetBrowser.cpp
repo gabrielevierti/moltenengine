@@ -1,6 +1,8 @@
 // The asset browser: the project's Assets folder. Folders on the left, what is in the
 // open one on the right. Drag things into the scene, onto a material, or into a folder.
 #include "Editor.hpp"
+#include "Rendering/Particles.hpp"
+#include "Rendering/SurfaceShader.hpp"
 #include "Panels/Widgets.hpp"
 #include "Platform.hpp"
 
@@ -37,19 +39,23 @@ TileLook lookOf(AssetType type) {
         case AssetType::Scene: return {IM_COL32(255, 122, 47, 255), "SC"};
         case AssetType::Mesh: return {IM_COL32(76, 154, 255, 255), "3D"};
         case AssetType::Texture: return {IM_COL32(120, 190, 120, 255), "TX"};
-        case AssetType::Audio: return {IM_COL32(190, 120, 220, 255), "AU"};
+        case AssetType::Audio: return {IM_COL32(255, 122, 47, 255), "AU"};
         case AssetType::Font: return {IM_COL32(150, 160, 175, 255), "Aa"};
         case AssetType::Shader: return {IM_COL32(240, 200, 80, 255), "SH"};
         case AssetType::Script: return {IM_COL32(110, 200, 210, 255), "C+"};
         case AssetType::Text: return {IM_COL32(150, 160, 175, 255), "TXT"};
         case AssetType::Other: return {IM_COL32(110, 118, 130, 255), "?"};
+        case AssetType::Graph: return {IM_COL32(255, 122, 47, 255), "VS"};
+        case AssetType::Prefab: return {IM_COL32(86, 156, 255, 255), "PRE"};
+        case AssetType::Effect: return {IM_COL32(255, 170, 60, 255), "FX"};
+        case AssetType::Material: return {IM_COL32(230, 120, 160, 255), "MAT"};
     }
     return {IM_COL32(110, 118, 130, 255), "?"};
 }
 
 class AssetBrowserPanel final : public Panel {
 public:
-    AssetBrowserPanel() { title = "Assets"; }
+    AssetBrowserPanel() { title = "Explorer"; }
 
     void draw(EditorContext& editor) override {
         if (!editor.hasProject) {
@@ -147,18 +153,53 @@ private:
         ImGui::EndDragDropTarget();
     }
 
+    /// What can be made in the folder that is shown: the same list under + New and under a right click.
+    void drawNewItems(EditorContext& editor) {
+        if (ImGui::MenuItem("Folder")) createFolder(editor);
+        if (ImGui::MenuItem("Material")) {
+            if (std::shared_ptr<Material> material = createMaterialAsset(editor, editor.currentFolder, "New Material", nullptr)) {
+                editor.selectedAsset = material->assetName;
+                startRenaming(editor, material->assetName);
+            }
+        }
+        if (ImGui::MenuItem("Script")) editor.wantsNewScript = true;        // C++: asks for its name, makes it in Scripts and opens it
+        if (ImGui::MenuItem("Visual Script")) {
+            std::string path = editor.assets.uniquePath(editor.currentFolder, "New Script", ".graph");
+            if (text::writeFile(editor.assets.absolutePath(path), script::Graph::starter().toText())) {
+                editor.assets.refresh();
+                startRenaming(editor, path);
+            }
+        }
+        if (ImGui::MenuItem("Shader")) {
+            // A surface shader to write by hand: it starts as one that works, to change.
+            std::string path = editor.assets.uniquePath(editor.currentFolder, "New Shader", ".shader");
+            if (text::writeFile(editor.assets.absolutePath(path), newSurfaceShaderText())) {
+                editor.assets.refresh();
+                startRenaming(editor, path);
+            }
+        }
+        if (ImGui::MenuItem("Effect")) {
+            // A particle effect to shape in the Viewer: it starts as a fire.
+            std::string path = editor.assets.uniquePath(editor.currentFolder, "New Effect", ".effect");
+            if (text::writeFile(editor.assets.absolutePath(path), writeEffect(effectPreset("Fire")))) {
+                editor.assets.refresh();
+                startRenaming(editor, path);
+            }
+        }
+        if (ImGui::MenuItem("Scene")) {
+            // A new file with what every new scene starts with. The scene that is open is left alone.
+            std::string path = editor.assets.uniquePath(editor.currentFolder, "New Scene", ".scene");
+            if (text::writeFile(editor.assets.absolutePath(path), editor.scene.defaultSceneText())) {
+                editor.assets.refresh();
+                startRenaming(editor, path);
+            }
+        }
+    }
+
     void drawToolbar(EditorContext& editor) {
         if (ImGui::Button("+ New")) ImGui::OpenPopup("##new");
         if (ImGui::BeginPopup("##new")) {
-            if (ImGui::MenuItem("Folder")) createFolder(editor);
-            if (ImGui::MenuItem("Scene")) {
-                // A new file with what every new scene starts with. The scene that is open is left alone.
-                std::string path = editor.assets.uniquePath(editor.currentFolder, "New Scene", ".scene");
-                if (text::writeFile(editor.assets.absolutePath(path), editor.scene.defaultSceneText())) {
-                    editor.assets.refresh();
-                    startRenaming(editor, path);
-                }
-            }
+            drawNewItems(editor);
             ImGui::EndPopup();
         }
         ImGui::SameLine();
@@ -250,7 +291,10 @@ private:
         ImGui::InvisibleButton("##rest", ImVec2(std::max(rest.x, 1.0f), std::max(rest.y, 30.0f)));
         if (ImGui::IsItemClicked()) editor.selectedAsset.clear();
         if (ImGui::BeginPopupContextItem("##rest-menu")) {
-            if (ImGui::MenuItem("New Folder")) createFolder(editor);
+            if (ImGui::BeginMenu("New")) {
+                drawNewItems(editor);
+                ImGui::EndMenu();
+            }
             if (ImGui::MenuItem("Import...")) importFiles(editor);
             ImGui::Separator();
             if (ImGui::MenuItem("Reveal in Finder")) platform::revealInFinder(assets.absolutePath(editor.currentFolder));
@@ -262,6 +306,7 @@ private:
         // Everything needed after the tile's actions is copied now: an action may rescan.
         const std::string path = asset.path, name = asset.name;
         const AssetType type = asset.type;
+        const uintmax_t assetSize = asset.size;
         const bool isFolder = asset.isFolder();
 
         ImGui::PushID(path.c_str());
@@ -279,6 +324,8 @@ private:
                     filter_.clear();
                 } else if (type == AssetType::Scene) {
                     editor.requestOpenScene(editor.assets.absolutePath(path));
+                } else if (type == AssetType::Graph) {
+                    editor.editGraph(path);
                 } else {
                     platform::openWithDefaultApplication(editor.assets.absolutePath(path));
                 }
@@ -295,7 +342,13 @@ private:
 
         if (ImGui::BeginPopupContextItem("##menu")) {
             editor.selectedAsset = path;
+            if (ImGui::BeginMenu("New")) {
+                drawNewItems(editor);
+                ImGui::EndMenu();
+            }
+            ImGui::Separator();
             if (type == AssetType::Scene && ImGui::MenuItem("Open Scene")) editor.requestOpenScene(editor.assets.absolutePath(path));
+            if (type == AssetType::Graph && ImGui::MenuItem("Edit Script")) editor.editGraph(path);
             if (ImGui::MenuItem("Rename")) startRenaming(editor, path);
             if (ImGui::MenuItem("Reveal in Finder")) platform::revealInFinder(editor.assets.absolutePath(path));
             if (!isFolder && ImGui::MenuItem("Open with Default Application")) platform::openWithDefaultApplication(editor.assets.absolutePath(path));
@@ -312,10 +365,21 @@ private:
         TileLook look = lookOf(type);
         if (texture) {
             drawList->AddImageRounded(ImGuiLayer::textureId(texture.get()), pictureMin, pictureMax, ImVec2(0, 0), ImVec2(1, 1), IM_COL32_WHITE, 4.0f);
+        } else if (type == AssetType::Material && editor.engine.assets().material(path)) {
+            drawMaterialPreview(drawList, ImVec2((pictureMin.x + pictureMax.x) * 0.5f, (pictureMin.y + pictureMax.y) * 0.5f), tileSize_ * 0.42f,
+                                *editor.engine.assets().material(path));
+        } else if (!isFolder && drawAssetPreview(editor, drawList, pictureMin, pictureMax, path, type, assetSize, look.color)) {
+            // drawn
         } else if (isFolder) {
-            float tab = tileSize_ * 0.4f, top = tileSize_ * 0.22f;
-            drawList->AddRectFilled(ImVec2(pictureMin.x + 4, pictureMin.y + top - 8), ImVec2(pictureMin.x + 4 + tab, pictureMin.y + top + 4), look.color, 3.0f);
-            drawList->AddRectFilled(ImVec2(pictureMin.x + 4, pictureMin.y + top), ImVec2(pictureMax.x - 4, pictureMax.y - tileSize_ * 0.12f), look.color, 4.0f);
+            // Everything a share of the tile's size, so that it is the same folder at any size.
+            float t = tileSize_;
+            float left = pictureMin.x + t * 0.08f, right = pictureMax.x - t * 0.08f;
+            float top = pictureMin.y + t * 0.26f, bottom = pictureMax.y - t * 0.14f;
+            float round = t * 0.06f;
+            ImU32 back = IM_COL32(184, 142, 66, 255);
+            drawList->AddRectFilled(ImVec2(left, top - t * 0.1f), ImVec2(left + t * 0.36f, top + round), back, round, ImDrawFlags_RoundCornersTop);       // the tab
+            drawList->AddRectFilled(ImVec2(left, top), ImVec2(right, bottom), back, round);
+            drawList->AddRectFilled(ImVec2(left, top + t * 0.07f), ImVec2(right, bottom), look.color, round);                                           // the front
         } else {
             ImVec2 min(pictureMin.x + tileSize_ * 0.14f, pictureMin.y + 2), max(pictureMax.x - tileSize_ * 0.14f, pictureMax.y - 2);
             drawList->AddRectFilled(min, max, IM_COL32(40, 44, 51, 255), 5.0f);

@@ -12,6 +12,37 @@ void Canvas::begin(Vec2 sizeInPoints, float pixelsPerPoint) {
     batches_.clear();
     clips_.clear();
     isClipEmpty_ = false;
+    isInArea_ = false;
+    startsNewBatch_ = false;
+}
+
+void Canvas::beginArea(Vec2 origin, Vec2 size) {
+    if (isInArea_) return;
+    isInArea_ = true;
+    areaOrigin_ = origin;
+    sizeOutsideArea_ = size_;
+    areaFirstVertex_ = vertices_.size();
+    areaFirstBatch_ = batches_.size();
+    size_ = size;
+    clips_.clear();
+    pushClip(Vec2{0, 0}, size);
+    startsNewBatch_ = true;
+}
+
+void Canvas::endArea() {
+    if (!isInArea_) return;
+    isInArea_ = false;
+    // Everything drawn since beginArea was placed as if the area began at the corner of
+    // the screen: move it, and its clip rectangles, to where the area really is.
+    for (size_t i = areaFirstVertex_; i < vertices_.size(); i++) vertices_[i].position += areaOrigin_;
+    for (size_t i = areaFirstBatch_; i < batches_.size(); i++) {
+        batches_[i].clipMin += areaOrigin_;
+        batches_[i].clipMax += areaOrigin_;
+    }
+    clips_.clear();
+    isClipEmpty_ = false;
+    size_ = sizeOutsideArea_;
+    startsNewBatch_ = true;
 }
 
 void Canvas::setFont(const FontMetrics* metrics, const Texture* atlas) {
@@ -40,7 +71,7 @@ Canvas::Batch& Canvas::batchFor(const Texture* texture, bool isText) {
     // Consecutive shapes that use the same texture and the same clip share a draw call.
     bool isClipped = !clips_.empty();
     Vec2 clipMin = isClipped ? clips_.back().min : Vec2{0, 0}, clipMax = isClipped ? clips_.back().max : Vec2{0, 0};
-    bool fits = !batches_.empty() && batches_.back().texture == texture && batches_.back().isText == isText &&
+    bool fits = !startsNewBatch_ && !batches_.empty() && batches_.back().texture == texture && batches_.back().isText == isText &&
                 batches_.back().isClipped == isClipped && simd::all(batches_.back().clipMin == clipMin) &&
                 simd::all(batches_.back().clipMax == clipMax);
     if (!fits) {
@@ -52,6 +83,7 @@ Canvas::Batch& Canvas::batchFor(const Texture* texture, bool isText) {
         batch.clipMin = clipMin;
         batch.clipMax = clipMax;
         batches_.push_back(batch);
+        startsNewBatch_ = false;
     }
     return batches_.back();
 }

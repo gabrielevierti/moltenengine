@@ -2,6 +2,7 @@
 
 #include "Core/TextFile.hpp"
 
+#include <sstream>
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
@@ -39,7 +40,16 @@ std::string readGuid(const fs::path& metaPath) {
 }
 
 bool writeGuid(const fs::path& metaPath, const std::string& guid) {
-    return text::writeFile(metaPath.string(), "molten-meta 1\nguid " + guid + "\n");
+    // A file's import settings live in its .meta too (Assets/ImportSettings.hpp): kept.
+    std::string settings;
+    if (std::optional<std::string> contents = text::readFile(metaPath.string())) {
+        std::istringstream lines(*contents);
+        std::string line;
+        while (std::getline(lines, line)) {
+            if (line.rfind("import ", 0) == 0) settings += line + "\n";
+        }
+    }
+    return text::writeFile(metaPath.string(), "molten-meta 1\nguid " + guid + "\n" + settings);
 }
 
 std::string joinPath(const std::string& folder, const std::string& name) {
@@ -61,11 +71,15 @@ std::string AssetInfo::stem() const {
 AssetType AssetDatabase::typeOfExtension(const std::string& extension) {
     std::string e = lower(extension);
     if (e == ".scene") return AssetType::Scene;
+    if (e == ".graph") return AssetType::Graph;
+    if (e == ".prefab") return AssetType::Prefab;
+    if (e == ".material") return AssetType::Material;
     if (e == ".obj" || e == ".gltf" || e == ".glb" || e == ".fbx" || e == ".usdz") return AssetType::Mesh;
     if (e == ".png" || e == ".jpg" || e == ".jpeg" || e == ".tga" || e == ".bmp" || e == ".hdr" || e == ".exr" || e == ".ktx2") return AssetType::Texture;
     if (e == ".wav" || e == ".mp3" || e == ".flac" || e == ".ogg" || e == ".m4a") return AssetType::Audio;
     if (e == ".ttf" || e == ".otf") return AssetType::Font;
-    if (e == ".metal") return AssetType::Shader;
+    if (e == ".metal" || e == ".shader") return AssetType::Shader;
+    if (e == ".effect") return AssetType::Effect;
     if (e == ".cpp" || e == ".hpp" || e == ".h" || e == ".mm") return AssetType::Script;
     if (e == ".txt" || e == ".md" || e == ".json") return AssetType::Text;
     return AssetType::Other;
@@ -83,6 +97,10 @@ const char* AssetDatabase::typeName(AssetType type) {
         case AssetType::Script: return "Code";
         case AssetType::Text: return "Text";
         case AssetType::Other: return "File";
+        case AssetType::Graph: return "Visual Script";
+        case AssetType::Prefab: return "Prefab";
+        case AssetType::Effect: return "Effect";
+        case AssetType::Material: return "Material";
     }
     return "File";
 }

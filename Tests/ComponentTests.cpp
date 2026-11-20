@@ -133,7 +133,7 @@ TEST(scene_files_keep_components_nobody_declared) {
         "molten-scene 1\n"
         "entity \"Door\"\n"
         "  transform 0 0 0  0 0 0 1  1 1 1\n"
-        "  component \"Hinge\"\n"
+        "  component \"Latch\"\n"
         "    field angle \"35\"\n"
         "    field label \"north door\"\n"
         "  component \"TestSpinner\"\n"
@@ -149,7 +149,7 @@ TEST(scene_files_keep_components_nobody_declared) {
     CHECK(scene.get<TestSpinner>(door) != nullptr && scene.get<TestSpinner>(door)->laps == 5);
 
     std::string written = writeScene(scene, materials, settings);
-    CHECK(written.find("component \"Hinge\"") != std::string::npos);
+    CHECK(written.find("component \"Latch\"") != std::string::npos);
     CHECK(written.find("field angle \"35\"") != std::string::npos);
     CHECK(written.find("field label \"north door\"") != std::string::npos);
     CHECK(written.find("removedLongAgo") == std::string::npos);     // a field the code no longer has is let go

@@ -36,6 +36,7 @@ enum {
     MMBufferFrame     = 4,   // FrameUniforms: sun, shadows, environment, fog
     MMBufferLights    = 5,   // LightData[]
     MMBufferAccelerationStructure = 6,   // the scene for ray tracing, when the GPU can trace rays
+    MMBufferTracedSurfaces = 7,          // TracedSurface[], one for each instance of that scene: what a ray that hits it sees
 };
 
 enum {
@@ -125,7 +126,23 @@ typedef struct {
     // Ray tracing.
     uint32_t shadowRayCount;         // rays per pixel toward the sun; 0 means shadow maps (or no shadows)
     float sunAngularRadius;          // in radians: a larger sun gives softer ray-traced shadows
+
+    // The extras (compiled where MOLTEN_EXTRAS is defined).
+    float fogHeightFalloff;          // fog thins with height at this rate per meter; 0 is the same everywhere
+    float fogSunScatter;             // how much the fog glows toward the sun
+    uint32_t occlusionRayCount;      // rays per pixel for traced ambient occlusion; 0 is off
+    uint32_t tracesReflections;      // 1: smooth surfaces send a ray to see what they mirror
+    float bounceIntensity;           // above zero: the rays for ambient light also bring back the light of what they hit
+    uint32_t fogShaftSteps;          // above zero: the fog is walked through in this many steps, lit where the sun reaches it
+    uint32_t volumetricClouds;       // 1: clouds have depth, and are walked through too
 } FrameUniforms;
+
+// What a ray sees of the thing it hits: its color and its glow. One for each instance of
+// the ray tracing scene, in the same order.
+typedef struct {
+    simd_float4 baseColor;
+    simd_float4 emissive;            // xyz; w is unused
+} TracedSurface;
 
 typedef struct {
     simd_float3 position;            // world space, for point and spot lights
@@ -154,6 +171,10 @@ typedef struct {
     float occlusionStrength;
     float alphaCutoff;               // used by the alpha-tested variants
     simd_float2 uvScale;
+    float water;                     // above zero: the surface is water, and this is how fine its waves are
+    float waveHeight;                // how steep they are
+    float customShader;              // above zero: which hand-written surface shader runs, counted from 1
+    simd_float4 custom[8];           // its properties, in the order the shader declares them
 } MaterialUniforms;
 
 // ---------------------------------------------------------------- post-processing and capture

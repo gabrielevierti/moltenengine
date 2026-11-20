@@ -126,6 +126,12 @@ ComponentRegistry& ComponentRegistry::instance() {
 void ComponentRegistry::add(ComponentType type) {
     for (ComponentType& existing : types_) {
         if (existing.name == type.name) {
+            // A game's own Follow takes the place of the one that comes with the engine,
+            // which is kept for when the game's code is not there.
+            if (existing.module == nullptr && type.module != nullptr) {
+                type.category = type.category.empty() ? existing.category : type.category;
+                replaced.push_back(existing);
+            }
             existing = std::move(type);
             return;
         }
@@ -140,6 +146,33 @@ void ComponentRegistry::remove(const std::string& name) {
 void ComponentRegistry::removeModule(const void* module) {
     types_.erase(std::remove_if(types_.begin(), types_.end(), [module](const ComponentType& type) { return type.module == module; }),
                  types_.end());
+    for (ComponentType& type : replaced) {
+        if (!find(type.name)) types_.push_back(type);
+    }
+    replaced.clear();
+}
+
+void ComponentRegistry::setCategory(const std::string& name, const std::string& category) {
+    for (ComponentType& type : types_) {
+        if (type.name == name) type.category = category;
+    }
+}
+
+std::string ComponentRegistry::displayName(const std::string& typeName) {
+    std::string out;
+    for (size_t i = 0; i < typeName.size(); i++) {
+        char c = typeName[i];
+        bool isUpper = c >= 'A' && c <= 'Z';
+        // A space before a capital that starts a word: "PlayerMover", but not inside "HUD".
+        if (i > 0 && isUpper) {
+            char before = typeName[i - 1];
+            bool beforeIsLower = before >= 'a' && before <= 'z';
+            bool nextIsLower = i + 1 < typeName.size() && typeName[i + 1] >= 'a' && typeName[i + 1] <= 'z';
+            if (beforeIsLower || (before >= 'A' && before <= 'Z' && nextIsLower)) out += ' ';
+        }
+        out += c;
+    }
+    return out;
 }
 
 const ComponentType* ComponentRegistry::find(const std::string& name) const {

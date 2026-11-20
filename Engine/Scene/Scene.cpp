@@ -64,8 +64,10 @@ const Mat4& Scene::resolveWorld(detail::Storage<Transform>& transforms, uint32_t
     Entity parent = transform.parent;
     if (parent.isValid() && isAlive(parent) && transforms.contains(parent.index)) {
         transform.world = resolveWorld(transforms, parent.index) * local;
+        transform.isActiveInHierarchy = transform.isActive && transforms.find(parent.index)->isActiveInHierarchy;
     } else {
         transform.world = local;
+        transform.isActiveInHierarchy = transform.isActive;
     }
     return transform.world;
 }

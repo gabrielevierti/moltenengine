@@ -4,7 +4,7 @@
 //     MyGame/
 //       MyGame.molten      this file: the name, the scene the game starts with
 //       Assets/            everything the game ships: scenes, models, textures, sounds
-//       Source/            the game's C++ code: components declared with MOLTEN_COMPONENT
+//       Assets/Scripts/    the game's C++ code: components declared with MOLTEN_COMPONENT
 //       Plugins/           editor plugins built for this project (.dylib)
 //       Settings/          how the editor was left: window layout, snapping
 //       Library/           what the editor can rebuild; never put under version control
@@ -29,11 +29,21 @@ struct Project {
     std::string startScene;             // relative to Assets: "Scenes/Main.scene"
     std::string version = "0.1.0";      // of the game, as the developer numbers it
     std::string identifier;             // the bundle identifier: "com.example.mygame"
+    bool showsSplash = true;            // the exported game opens with the engine's splash screen
+    std::string icon;                   // a square picture of Assets for the game's icon: "Icon.png"; empty for the engine's own
+
+    /// The picture file the game's icon is made from: its own, or the engine's.
+    std::string iconFile(const std::string& engineRoot) const {
+        return icon.empty() ? engineRoot + "/Assets/Branding/icon.png" : assetsDirectory() + "/" + icon;
+    }
 
     std::string filePath() const;
     std::string assetsDirectory() const { return directory + "/Assets"; }
     /// The game's own C++ code. The editor builds everything in it into one library.
-    std::string sourceDirectory() const { return directory + "/Source"; }
+    /// Where the game's own scripts are: among the assets, so that they show in the Explorer.
+    std::string sourceDirectory() const { return directory + "/Assets/Scripts"; }
+    /// Where they were before; still built if it is there.
+    std::string legacySourceDirectory() const { return directory + "/Source"; }
     std::string pluginsDirectory() const { return directory + "/Plugins"; }
     std::string settingsDirectory() const { return directory + "/Settings"; }
     std::string libraryDirectory() const { return directory + "/Library"; }
@@ -43,7 +53,10 @@ struct Project {
 
     /// Makes `parentDirectory/name` with the folders above and an empty project file.
     /// Fails if that folder exists and is not empty.
-    static std::optional<Project> create(const std::string& parentDirectory, const std::string& name, std::string* error = nullptr);
+    /// With `templateDirectory` (the folder of another project, see projectTemplates), the
+    /// new project starts as a copy of that one's assets and code instead of empty.
+    static std::optional<Project> create(const std::string& parentDirectory, const std::string& name, std::string* error = nullptr,
+                                         const std::string& templateDirectory = {});
 
     bool save(std::string* error = nullptr) const;
 
@@ -54,6 +67,16 @@ struct Project {
     /// "My Game!" -> "MyGame": what the folder and the project file are called.
     static std::string fileNameFor(const std::string& name);
 };
+
+/// A project to start from: a small complete game that can be opened, played and changed.
+struct ProjectTemplate {
+    std::string name;                   // "Roll a Ball"
+    std::string description;            // a sentence or two, from the template's template.txt
+    std::string directory;
+};
+
+/// The templates in a folder (the engine's Templates), by name. Each is a project folder.
+std::vector<ProjectTemplate> projectTemplates(const std::string& templatesDirectory);
 
 /// The projects opened lately, most recent first, kept in a text file of the user's.
 struct RecentProjects {

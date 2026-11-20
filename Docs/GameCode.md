@@ -2,7 +2,7 @@
 
 A project's `Source` folder holds the game's C++. The editor compiles every `.cpp` file in it into one library, loads it, and from then on the game's components behave like the engine's own: they are in Add Component, their fields are in the inspector, scenes save them, Undo covers them, and their code runs when the game plays.
 
-A new project starts with `Source/Game.cpp`, which has one component in it. This page explains every part.
+A new project has an empty `Assets/Scripts` folder: **Game > New Script** (or **+ New > Script** in the Explorer) makes the first one, with one component in it. This page explains every part.
 
 ## A component
 
@@ -53,9 +53,15 @@ MOLTEN_COMPONENT(Spinner, MOLTEN_FIELD(turnsPerSecond).range(-4, 4), MOLTEN_FIEL
 
 References to other entities and to assets are not field types yet; until they are, find entities by name in `start` (`engine.scene.find("Door")`) and keep the result in a field you do not list.
 
+## A new script
+
+**Game > New Script...** asks for a name, makes `Source/<Name>.cpp` with a component of that name in it, opens the file in the program your Mac uses for C++ (Xcode, unless you chose another) and builds. Game > Scripts lists every script of the project; a click opens it.
+
+Scripts that are drawn instead of written are in [VisualScripting.md](VisualScripting.md).
+
 ## Building
 
-**Game > Build Game Code**, or Cmd+B. It also happens when a project is opened.
+**Saving a file is enough.** The editor watches the `Source` folder and rebuilds when something in it changes (Game > Rebuild When Code Is Saved turns this off). Game > Build Game Code, or Cmd+B, builds on demand; opening a project builds too.
 
 What the editor does: it writes the open scene to text, empties it, loads the new library, and reads the scene back. Components come back by name with the fields the new code has: a field you added starts at its default, one you removed is let go. The scene's undo history survives. If the code does not compile, the compiler's messages go to the console and the code that was loaded before stays.
 

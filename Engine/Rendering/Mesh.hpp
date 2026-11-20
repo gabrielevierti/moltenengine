@@ -8,6 +8,9 @@
 #include <memory>
 #include <string>
 
+#include <optional>
+#include <vector>
+
 namespace molten {
 
 class Mesh {
@@ -22,6 +25,17 @@ public:
     MTL::AccelerationStructure* accelerationStructure() const { return accelerationStructure_.get(); }
     /// In the mesh's own space. The renderer transforms it to cull against the view.
     const AABB& bounds() const { return bounds_; }
+    /// Moves the vertices of a mesh to those of `data`, which must have as many and the
+    /// same triangles: what an animated model does every frame. False if it does not fit.
+    bool update(const MeshData& data);
+    bool isDynamic = false;             // made for one entity and changed as it moves
+    /// Where a ray in the mesh's own space first meets one of its triangles, as a multiple
+    /// of the ray's direction. For tools that need to know what is under the pointer.
+    std::optional<float> raycast(const Ray& ray) const;
+
+    /// Its corners and which three make each triangle, as they were given: kept for tools.
+    const std::vector<Vec3>& positions() const { return positions_; }
+    const std::vector<uint32_t>& indices() const { return indices_; }
 
     /// Where the mesh came from: a file name in the Assets folder, or "cube", "sphere",
     /// "plane", "cylinder". Empty for meshes made in code. Scene files store this name.
@@ -34,6 +48,8 @@ private:
     NS::SharedPtr<MTL::AccelerationStructure> accelerationStructure_;
     uint32_t indexCount_ = 0;
     AABB bounds_;
+    std::vector<Vec3> positions_;       // kept for raycast
+    std::vector<uint32_t> indices_;
 };
 
 }  // namespace molten

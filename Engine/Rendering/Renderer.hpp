@@ -22,6 +22,7 @@
 #include "Rendering/Environment.hpp"
 #include "Rendering/FrameAllocator.hpp"
 #include "Rendering/Material.hpp"
+#include "Rendering/SurfaceShader.hpp"
 #include "Scene/Scene.hpp"
 
 #include <dispatch/dispatch.h>
@@ -42,6 +43,7 @@ struct SkySettings {
     float sunDiskIntensity = 30.0f;             // how much brighter than the sunlight the disk itself looks
     float sunAngularRadius = radians(1.2f);
     float cloudCoverage = 0.0f;                 // 0 a clear sky, 1 overcast
+    bool cloudsHaveDepth = false;               // clouds as volumes one looks through, lit from the sun's side, instead of a flat layer
     float cloudScale = 1.0f;                    // larger numbers make smaller clouds
     Vec2 cloudSpeed{0.012f, 0.004f};            // how fast the wind carries them
 };
@@ -55,18 +57,39 @@ struct RenderSettings {
     float shadowBias = 0.0001f;                 // in shadow-map depth, on top of the normal offset
     float shadowNormalOffset = 2.0f;            // in shadow-map texels; 2 covers the 3 x 3 filter
 
+    /// The wind of the scene, in meters per second, and how gusty it is (0 steady, 1 wild).
+    /// Smoke, fire and anything else that asks (windAt in Rendering/Particles.hpp) follows it.
+    Vec3 wind{0, 0, 0};
+    float windGustiness = 0.4f;
+
     /// Sun shadows by tracing rays against the scene's triangles instead of looking them up
     /// in shadow maps: exact at any distance, sharp where an object touches the ground and
     /// softer away from it. Used only where the GPU can trace rays (Renderer::canTraceRays);
     /// elsewhere the shadow maps stay.
     bool rayTracedShadows = false;
     int shadowRayCount = 4;                     // rays per pixel: more is smoother and slower
+    /// With traced sun shadows on: the light of the sky is also hidden by what is really in
+    /// the way (corners, the underside of a car), found with short rays from every pixel.
+    bool rayTracedOcclusion = false;
+    int occlusionRayCount = 4;
+    /// And smooth surfaces stop mirroring the sky where something stands between them and it.
+    bool rayTracedReflections = false;
+    /// Global illumination, one bounce: the rays of the ambient light also bring back the
+    /// light of what they hit, so that a red wall in the sun tints the floor beside it.
+    bool rayTracedBounce = false;
+    float bounceIntensity = 1.0f;
 
     SkySettings sky;
     float environmentIntensity = 1.0f;          // strength of the image-based lighting
 
     Vec3 fogColor{0.38f, 0.52f, 0.72f};
     float fogDensity = 0.0f;                    // 0 turns fog off
+    float fogHeightFalloff = 0.0f;              // per meter: above zero the fog lies low and thins with height, as mist does
+    float fogSunScatter = 0.0f;                 // how much the fog glows toward the sun
+    /// Shafts of light: the fog is walked through from the eye to each thing seen, and it
+    /// glows only where the sun reaches it, so that what stands in the sun's way casts
+    /// beams of shadow through the mist. The number of steps; 0 is off.
+    int fogShaftSteps = 0;
 
     bool ambientOcclusionEnabled = true;
     float ambientOcclusionRadius = 0.6f;        // in world units
@@ -127,6 +150,23 @@ public:
     Rect sceneViewport;
     Vec4 backgroundColor{0.08f, 0.09f, 0.11f, 1};   // linear
 
+    /// Views of the scene drawn into textures of their own instead of the target, each
+    /// through its own camera: an editor shows them in its windows (a scene view and a
+    /// game view, side by side if wanted). While there are any, the target itself gets
+    /// only the background, the canvas and the overlay.
+    struct SceneView {
+        int width = 0, height = 0;          // pixels; a view without size is skipped
+        Entity camera;                      // looked through whatever the scene says; invalid: the scene's active camera
+        bool showsDebugLines = false;       // the editor's grid and outlines belong to its own view
+    };
+    std::vector<SceneView> views;
+    /// The view the canvas is drawn into (a game's interface belongs to the picture of the
+    /// game); -1 draws it into the target, over everything.
+    int canvasView = -1;
+    /// The picture of a view, as of the last frame drawn; null before the first. Valid until
+    /// the end of the next frame.
+    MTL::Texture* viewTexture(size_t index) const { return index < viewColors_.size() ? viewColors_[index].get() : nullptr; }
+
     /// Called at the end of the last pass of every frame that goes to the screen, after the
     /// canvas, with the encoder still open: whatever it draws lands on top of everything.
     /// Not called for renderToImage. The editor draws its interface here.
@@ -139,7 +179,18 @@ public:
     /// green, blue, alpha), rows from the top. For screenshots and for running without a window.
     std::vector<uint8_t> renderToImage(Scene& scene, const Canvas& canvas, int width, int height, double time);
 
+    /// The picture of a view as it was last drawn: four bytes a pixel (red, green, blue,
+    /// alpha), rows from the top. Empty if the view has no picture yet. Waits for the GPU.
+    std::vector<uint8_t> readView(size_t index, int& width, int& height);
+
     /// True if this GPU traces rays and the ray tracing shaders are in use.
+    /// True if the shaders compiled with the extras: water, fog with height, traced ambient light.
+    bool hasExtras() const { return shaders_.hasExtras(); }
+    /// The hand-written surface shaders in use (materials name them: Material::shader).
+    /// Set `surfaceShaders().pathOf` to say where their files are.
+    SurfaceShaderSet& surfaceShaders() { return surfaceShaders_; }
+    /// What the compiler said if they did not compile; empty when they did.
+    const std::string& surfaceShaderError() const { return shaders_.surfaceError(); }
     bool canTraceRays() const { return device_.supportsRayTracing() && shaders_.hasRayTracing(); }
 
     GraphicsDevice& device() { return device_; }
@@ -197,7 +248,15 @@ private:
                      const FrameAllocator::Allocation& frameUniforms, const FrameAllocator::Allocation& lights);
     bool buildSceneAccelerationStructure(MTL::CommandBuffer* commandBuffer, const std::vector<DrawItem>& items);
     void renderBloom(MTL::CommandBuffer* commandBuffer);
-    void renderFinal(MTL::CommandBuffer* commandBuffer, const Canvas& canvas, const RenderTarget& target);
+    void renderFinal(MTL::CommandBuffer* commandBuffer, const Canvas& canvas, const RenderTarget& target, bool withOverlay);
+    /// One whole picture of the scene into `target`: everything from shadows to tone mapping.
+    void renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const Canvas& canvas, const RenderTarget& target, double time,
+                    bool withOverlay);
+    /// The target when the scene is in views: background, canvas, overlay.
+    void renderInterface(MTL::CommandBuffer* commandBuffer, const Canvas& canvas, const RenderTarget& target);
+    /// Exchanges the working textures with those kept for picture number `slot`, so that
+    /// pictures of different sizes each keep their own instead of reallocating every frame.
+    void swapTargets(size_t slot);
     Rect sceneRect(MTL::Texture* target) const;
     void drawFullscreen(MTL::CommandBuffer* commandBuffer, MTL::Texture* target, const char* fragmentFunction, BlendMode blend,
                         bool keepContents, const void* uniforms, size_t uniformsSize, MTL::Texture* source0, MTL::Texture* source1,
@@ -211,6 +270,8 @@ private:
 
     GraphicsDevice& device_;
     ShaderLibrary shaders_;
+    SurfaceShaderSet surfaceShaders_;
+    int compiledSurfaceShaders_ = 0;       // how many of them the shaders in use were compiled with
     Environment environment_;
     FrameAllocator allocators_[kFramesInFlight];
     int frameIndex_ = 0;
@@ -230,10 +291,23 @@ private:
     int shadowMapSize_ = 0, shadowMapSlices_ = 0;
     NS::SharedPtr<MTL::Texture> imageTarget_;       // for renderToImage
 
+    struct TargetSet {
+        int width = 0, height = 0, samples = 0;
+        bool hasOcclusion = false;
+        NS::SharedPtr<MTL::Texture> colorMultisample, depth, color, prepassDepth, prepassNormal, occlusionRaw, occlusion;
+        std::vector<NS::SharedPtr<MTL::Texture>> bloom;
+    };
+    std::vector<TargetSet> targetSets_;                             // one per picture drawn in a frame
+    std::vector<NS::SharedPtr<MTL::Texture>> viewColors_;           // the finished pictures of `views`
+    std::vector<NS::SharedPtr<MTL::Texture>> retiredTextures_;      // replaced this frame; someone may still draw with them
+    bool drawsDebugLines_ = true;                                   // in the picture being drawn
+    bool hasSceneStructureThisFrame_ = false;
+
     // Ray tracing: the whole scene as one structure that refers to each mesh's own.
     NS::SharedPtr<MTL::AccelerationStructure> sceneAccelerationStructure_;
     NS::SharedPtr<MTL::Buffer> sceneAccelerationScratch_;
     size_t sceneAccelerationCapacity_ = 0, sceneAccelerationScratchCapacity_ = 0;
+    FrameAllocator::Allocation tracedSurfaces_;                     // gpu::TracedSurface for each instance of the scene structure
     std::vector<const MTL::AccelerationStructure*> tracedMeshes_;   // what the scene structure refers to this frame
     bool tracesRaysThisFrame_ = false;
 };

@@ -18,6 +18,11 @@ namespace molten::editor::ui {
 
 /// The name of an asset being dragged from the asset browser: the payload is its path
 /// relative to Assets, with the terminating zero.
+/// Shows `text` beside the pointer while it rests on the item just drawn.
+inline void tooltip(const char* text) {
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s", text);
+}
+
 inline constexpr const char* kAssetPayload = "MOLTEN_ASSET";
 /// An entity being dragged in the hierarchy: the payload is an molten::Entity.
 inline constexpr const char* kEntityPayload = "MOLTEN_ENTITY";

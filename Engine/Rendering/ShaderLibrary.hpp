@@ -45,6 +45,10 @@ public:
     /// True if the shaders in use contain the ray tracing code. False on a GPU without ray
     /// tracing, and also if that code failed to compile and the engine fell back.
     bool hasRayTracing() const { return hasRayTracing_; }
+    /// True if the shaders in use contain the extras (MOLTEN_EXTRAS): water, fog that lies
+    /// low and glows toward the sun, traced ambient light. They are tried first and left out
+    /// if they do not compile, so that a mistake in them never costs the whole picture.
+    bool hasExtras() const { return hasExtras_; }
 
     /// The pipeline for this description, or nullptr if the shaders failed to compile.
     MTL::RenderPipelineState* pipeline(const PipelineDescription& description);
@@ -52,13 +56,21 @@ public:
     /// Recompiles if any shader file changed on disk. Returns true if new shaders are in use.
     bool reloadIfChanged();
 
+    /// The code of the hand-written surface shaders (see SurfaceShader.hpp), compiled with
+    /// the engine's own from now on. If it does not compile, the engine's shaders are used
+    /// without it, materials that use one are drawn as plain lit surfaces, and
+    /// surfaceError() says what the compiler said. Returns true if new shaders are in use.
+    bool setSurfaceCode(std::string code);
+    bool hasSurfaceCode() const { return hasSurfaceCode_; }
+    const std::string& surfaceError() const { return surfaceError_; }
+
     bool isValid() const { return library_.get() != nullptr; }
     /// The compiler's message from the last failed compilation; empty after a success.
     const std::string& lastError() const { return lastError_; }
 
 private:
     bool compile();
-    bool compileVariant(const std::string& source, bool withRayTracing);
+    bool compileVariant(const std::string& source, bool withRayTracing, bool withExtras, bool withSurfaces);
     std::filesystem::file_time_type newestFileTime() const;
 
     MTL::Device* device_;
@@ -71,6 +83,9 @@ private:
     std::string lastError_;
     bool allowRayTracing_ = false;
     bool hasRayTracing_ = false;
+    bool hasExtras_ = false;
+    std::string surfaceCode_, surfaceError_;
+    bool hasSurfaceCode_ = false;
 };
 
 }  // namespace molten

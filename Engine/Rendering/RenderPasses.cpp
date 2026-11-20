@@ -32,6 +32,20 @@ void Renderer::bindMaterial(MTL::RenderCommandEncoder* encoder, const Material& 
     uniforms.occlusionStrength = material.occlusionStrength;
     uniforms.alphaCutoff = material.alphaCutoff;
     uniforms.uvScale = material.uvScale;
+    uniforms.water = material.isWater ? std::max(material.waveScale, 0.01f) : 0.0f;
+    uniforms.waveHeight = material.waveHeight;
+    if (!material.shader.empty()) {
+        // Its own shader: which one, and its properties in the order the shader declares them.
+        int place = surfaceShaders_.use(material.shader);
+        const SurfaceShader* shader = surfaceShaders_.shader(place);
+        if (shader && place <= compiledSurfaceShaders_ && shaders_.hasSurfaceCode()) {
+            uniforms.customShader = float(place);
+            for (size_t i = 0; i < shader->properties.size() && i < 8; i++) {
+                const Vec4* said = material.shaderValue(shader->properties[i].name);
+                uniforms.custom[i] = said ? *said : shader->properties[i].value;
+            }
+        }
+    }
     // A few dozen bytes: Metal copies them into the command buffer, no buffer of our own needed.
     encoder->setFragmentBytes(&uniforms, sizeof(uniforms), gpu::MMBufferMaterial);
 
@@ -44,6 +58,9 @@ void Renderer::bindMaterial(MTL::RenderCommandEncoder* encoder, const Material& 
     encoder->setFragmentTexture(textureOr(material.metallicRoughnessTexture, white_), gpu::MMTextureMetallicRoughness);
     encoder->setFragmentTexture(textureOr(material.occlusionTexture, white_), gpu::MMTextureOcclusion);
     encoder->setFragmentTexture(textureOr(material.emissiveTexture, white_), gpu::MMTextureEmissive);
+    // Pixel art is drawn in sharp pixels: its picture says so (its import settings).
+    bool isPixelated = material.baseColorTexture && material.baseColorTexture->isPixelated;
+    encoder->setFragmentSamplerState(isPixelated ? device_.pixelSampler() : device_.materialSampler(), gpu::MMSamplerMaterial);
 }
 
 void Renderer::drawBatches(MTL::RenderCommandEncoder* encoder, const std::vector<Batch>& batches, MeshPass pass,
@@ -230,6 +247,7 @@ void Renderer::renderScene(MTL::CommandBuffer* commandBuffer, Scene& scene, cons
     if (tracesRaysThisFrame_) {
         // Only the "_traced" fragment functions read it, and they are only used in frames like this one.
         encoder->setFragmentAccelerationStructure(sceneAccelerationStructure_.get(), gpu::MMBufferAccelerationStructure);
+        if (tracedSurfaces_.buffer) encoder->setFragmentBuffer(tracedSurfaces_.buffer, tracedSurfaces_.offset, gpu::MMBufferTracedSurfaces);
         // Metal must be told that the pass also reads the structures the scene's one refers to.
         for (const MTL::AccelerationStructure* meshStructure : tracedMeshes_) {
             encoder->useResource(meshStructure, MTL::ResourceUsageRead, MTL::RenderStageFragment);
@@ -269,13 +287,13 @@ void Renderer::renderScene(MTL::CommandBuffer* commandBuffer, Scene& scene, cons
 
 void Renderer::drawParticles(MTL::RenderCommandEncoder* encoder, Scene& scene, const View& view) {
     std::vector<gpu::ParticleInstance> instances;
-    scene.each<ParticleEmitter>([&](Entity, ParticleEmitter& emitter) {
-        if (emitter.particles.empty()) return;
+    scene.each<ParticleEmitter, Transform>([&](Entity, ParticleEmitter& emitter, Transform& transform) {
+        if (emitter.particles.empty() || !transform.isActiveInHierarchy) return;
         instances.clear();
         for (const Particle& particle : emitter.particles) {
             float t = saturate(particle.age / particle.lifetime);
-            float size = lerp(emitter.sizeStart, emitter.sizeEnd, t);
-            Vec4 color = emitter.colorStart + (emitter.colorEnd - emitter.colorStart) * t;
+            float size = particleSize(emitter, t);
+            Vec4 color = particleColor(emitter, t);
             instances.push_back(gpu::ParticleInstance{vec4(particle.position, size), color});
         }
         if (!emitter.isAdditive) {
@@ -308,7 +326,7 @@ void Renderer::drawParticles(MTL::RenderCommandEncoder* encoder, Scene& scene, c
 
 void Renderer::drawDebugLines(MTL::RenderCommandEncoder* encoder) {
     const std::vector<gpu::LineVertex>& vertices = debug.vertices();
-    if (vertices.empty()) return;
+    if (vertices.empty() || !drawsDebugLines_) return;
 
     PipelineDescription description;
     description.vertexFunction = "vertex_line";
@@ -358,7 +376,7 @@ void Renderer::renderBloom(MTL::CommandBuffer* commandBuffer) {
 
 // ---------------------------------------------------------------- 6. the final pass
 
-void Renderer::renderFinal(MTL::CommandBuffer* commandBuffer, const Canvas& canvas, const RenderTarget& target) {
+void Renderer::renderFinal(MTL::CommandBuffer* commandBuffer, const Canvas& canvas, const RenderTarget& target, bool withOverlay) {
     bool hasBloom = settings.bloomEnabled && !bloom_.empty();
     gpu::PostUniforms uniforms{};
     uniforms.exposure = settings.exposure;
@@ -414,7 +432,22 @@ void Renderer::renderFinal(MTL::CommandBuffer* commandBuffer, const Canvas& canv
 
     // The 2D canvas goes on top, after tone mapping: interface colors must not be tone mapped.
     drawCanvas(encoder, canvas, target.texture);
-    if (overlay && target.drawable) overlay(commandBuffer, encoder);
+    if (overlay && withOverlay) overlay(commandBuffer, encoder);
+    encoder->endEncoding();
+}
+
+void Renderer::renderInterface(MTL::CommandBuffer* commandBuffer, const Canvas& canvas, const RenderTarget& target) {
+    auto pass = NS::TransferPtr(MTL::RenderPassDescriptor::alloc()->init());
+    MTL::RenderPassColorAttachmentDescriptor* color = pass->colorAttachments()->object(0);
+    color->setTexture(target.texture);
+    color->setLoadAction(MTL::LoadActionClear);
+    color->setClearColor(MTL::ClearColor::Make(double(backgroundColor.x), double(backgroundColor.y), double(backgroundColor.z),
+                                               double(backgroundColor.w)));
+    color->setStoreAction(MTL::StoreActionStore);
+    MTL::RenderCommandEncoder* encoder = commandBuffer->renderCommandEncoder(pass.get());
+    encoder->setLabel(label("Interface"));
+    drawCanvas(encoder, canvas, target.texture);
+    if (overlay) overlay(commandBuffer, encoder);
     encoder->endEncoding();
 }
 

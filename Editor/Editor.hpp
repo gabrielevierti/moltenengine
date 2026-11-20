@@ -4,7 +4,9 @@
 //   EditorApp.cpp        the frame: menus, the dock space, shortcuts, projects, dialogs
 //   Viewport.cpp         the 3D view: camera, picking, gizmos with snapping, overlays
 //   SceneDocument.cpp    the open scene: file, selection, undo, play mode
-//   Panels/*.cpp         the windows: hierarchy, inspector, assets, materials, rendering, console
+//   Panels/*.cpp         the windows: hierarchy, inspector, assets, materials, rendering, console, visual script
+//   GraphEditor.cpp      the drawing board of a visual script: nodes, pins, wires
+//   GameBuild.cpp        compiling a project's code, making a script file, exporting an application
 //   PluginHost.cpp       the registry everything is registered in, and loading plugin libraries
 //   ImGuiLayer.cpp       Dear ImGui on the engine's window and renderer
 //   Platform.mm          macOS dialogs, the Trash, the Finder
@@ -24,10 +26,11 @@ void registerHierarchyPanel(EditorContext& editor);
 void registerInspectorPanel(EditorContext& editor);
 void registerBuiltinComponents(EditorContext& editor);
 void registerAssetBrowserPanel(EditorContext& editor);
-void registerMaterialsPanel(EditorContext& editor);
+void registerAssetViewerPanel(EditorContext& editor);
 void registerRenderingPanel(EditorContext& editor);
 void registerConsolePanel(EditorContext& editor);
 void registerProjectPanel(EditorContext& editor);
+void registerVisualScriptPanel(EditorContext& editor);
 void registerCreateEntries(EditorContext& editor);
 
 /// The entries of the Create menu as menu items. New entities become children of `parent`.
@@ -36,12 +39,48 @@ void drawCreateMenu(EditorContext& editor, Entity parent);
 /// A small picture of a texture with a menu to choose, drop or clear it. True if it changed.
 bool textureSlot(EditorContext& editor, const char* name, std::shared_ptr<Texture>& slot, TextureFormat format);
 
+/// The settings of a particle effect, in sections, with effects to start from. With
+/// `offersFiles`, also a button that saves it as a `.effect` file. True if one was changed.
+bool drawEmitterProperties(EditorContext& editor, ParticleEmitter& emitter, bool offersFiles);
+
+/// The scene that is open, as its own camera sees it, as a picture (Panels/AssetPreviews.cpp):
+/// computed on the processor, for a window that shows a scene without drawing it.
+std::shared_ptr<Texture> makeScenePicture(EditorContext& editor, int width, int height);
+
+/// Materials (Panels/MaterialEditor.cpp). The material on a ball, rendered: under a sun and a
+/// sky, with its pictures. `setMaterialPreviewAssets` says where pictures come from and are made.
+void setMaterialPreviewAssets(Assets* assets);
+void forgetMaterialPreviews();
+/// Forgets every thumbnail, so that each is made again from its file: after a file's import settings change.
+void forgetAssetPreviews();
+void drawMaterialPreview(ImDrawList* drawList, ImVec2 center, float radius, const Material& material);
+/// The properties of a material, shader first. Returns true if one was changed.
+bool drawMaterialProperties(EditorContext& editor, Material& material);
+/// The "Material" row of a mesh: shows which, lets another be chosen, dropped in, or made.
+bool drawMaterialSlot(EditorContext& editor, std::shared_ptr<Material>& slot);
+/// Writes a material asset back to its file.
+bool saveMaterialAsset(EditorContext& editor, const Material& material);
+/// Makes a new `.material` file in a folder of Assets, as a copy of `from` if given.
+std::shared_ptr<Material> createMaterialAsset(EditorContext& editor, const std::string& folder, const std::string& name, const Material* from);
+std::string materialDisplayName(EditorContext& editor, const std::shared_ptr<Material>& material);
+
 /// The names Assets::mesh() accepts: the built-in shapes, then the models of the project.
 std::vector<std::string> meshChoices(EditorContext& editor);
 
 // ---- Viewport.cpp
 /// Runs the 3D view in the given rectangle of the window (in points).
-void drawViewport(EditorContext& editor, ImVec2 position, ImVec2 size);
+/// A picture of an asset made from what is in its file (Panels/AssetPreviews.cpp). Returns
+/// false if there is none for this kind, or the file gave nothing to draw.
+bool drawAssetPreview(EditorContext& editor, ImDrawList* drawList, ImVec2 min, ImVec2 max, const std::string& path, AssetType type, uintmax_t size,
+                      ImU32 accent);
+/// A few words about it: "340 triangles", "1.2 s", "12 entities". Empty if there is nothing to say.
+std::string assetPreviewNote(EditorContext& editor, const std::string& path, AssetType type, uintmax_t size);
+
+void drawSceneView(EditorContext& editor);
+/// `takesCanvas`: the engine's canvas (the game's interface) is drawn into this view.
+void drawGameView(EditorContext& editor, bool takesCanvas);
+/// With no project open there is nothing to show in either.
+void hideSceneAndGameViews(EditorContext& editor);
 
 // ---- PluginHost.cpp
 class PluginHost {

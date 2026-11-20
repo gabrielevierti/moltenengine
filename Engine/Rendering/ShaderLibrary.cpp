@@ -5,6 +5,8 @@
 #include "Rendering/GPUTypes.hpp"
 #include "Rendering/ShaderSource.hpp"
 
+#include <cstdlib>
+
 namespace molten {
 
 namespace {
@@ -28,6 +30,31 @@ NS::SharedPtr<MTL::VertexDescriptor> makeMeshVertexDescriptor() {
     return descriptor;
 }
 
+/// The engine's source with the surface shaders' code put where Forward.metal marks the
+/// place, and the line numbers of what follows set right again.
+std::string withSurfaceCode(const std::string& source, const std::string& code) {
+    const std::string marker = "// MOLTEN_CUSTOM_SURFACES";
+    size_t at = source.find(marker);
+    if (at == std::string::npos) return source;
+    size_t lineEnd = source.find('\n', at);
+    if (lineEnd == std::string::npos) lineEnd = source.size() - 1;
+    // Which file and line the marker is on: the last #line before it, and the lines since.
+    std::string file = "Forward.metal";
+    long line = 1;
+    size_t directive = source.rfind("#line ", at);
+    if (directive != std::string::npos) {
+        size_t directiveEnd = source.find('\n', directive);
+        line = std::strtol(source.c_str() + directive + 6, nullptr, 10);
+        size_t quote = source.find('"', directive);
+        if (quote != std::string::npos && quote < directiveEnd) file = source.substr(quote + 1, source.find('"', quote + 1) - quote - 1);
+        for (size_t i = directiveEnd + 1; i < at; i++) {
+            if (source[i] == '\n') line++;
+        }
+    }
+    std::string restore = "#line " + std::to_string(line + 1) + " \"" + file + "\"\n";
+    return source.substr(0, lineEnd + 1) + code + restore + source.substr(lineEnd + 1);
+}
+
 }  // namespace
 
 ShaderLibrary::ShaderLibrary(MTL::Device* device, std::string directory, bool allowRayTracing)
@@ -46,19 +73,41 @@ bool ShaderLibrary::compile() {
         return false;
     }
 
-    // With ray tracing first. If only that part fails (an older system, a mistake in the
-    // ray tracing code), the game still runs: the same shaders without it, and shadow maps.
-    if (allowRayTracing_) {
-        if (compileVariant(source.text, true)) return true;
-        logWarning("the ray tracing shaders did not compile; continuing without ray tracing");
+    // The fullest shaders first, then with less: if only the extras fail (a mistake in
+    // them, an older system), or only the ray tracing, the game still runs with the rest.
+    struct Variant {
+        bool rayTracing, extras;
+    };
+    const Variant variants[] = {{true, true}, {true, false}, {false, true}, {false, false}};
+    // Hand-written surface shaders are somebody else's code: tried with each variant once,
+    // and left out for good at the first failure, with the compiler's words kept for them.
+    bool triesSurfaces = !surfaceCode_.empty();
+    surfaceError_.clear();
+    for (const Variant& variant : variants) {
+        if (variant.rayTracing && !allowRayTracing_) continue;
+        if (triesSurfaces) {
+            if (compileVariant(withSurfaceCode(source.text, surfaceCode_), variant.rayTracing, variant.extras, true)) return true;
+            triesSurfaces = false;
+            surfaceError_ = lastError_;
+            logError("the project's surface shaders did not compile, and are left out:\n%s", surfaceError_.c_str());
+        }
+        if (compileVariant(source.text, variant.rayTracing, variant.extras, false)) return true;
+        logWarning("the shaders did not compile%s%s; trying with less", variant.rayTracing ? " with ray tracing" : "", variant.extras ? " with the extras" : "");
     }
-    return compileVariant(source.text, false);
+    return false;
 }
 
-bool ShaderLibrary::compileVariant(const std::string& source, bool withRayTracing) {
-    // The definition goes in front of the text, on the first line, so that the line
-    // numbers of everything after it stay what the #line directives say.
-    std::string text = withRayTracing ? "#define MOLTEN_RAYTRACING 1\n" + source : source;
+bool ShaderLibrary::setSurfaceCode(std::string code) {
+    if (code == surfaceCode_) return false;
+    surfaceCode_ = std::move(code);
+    return compile();
+}
+
+bool ShaderLibrary::compileVariant(const std::string& source, bool withRayTracing, bool withExtras, bool withSurfaces) {
+    // The definitions go in front of the text.
+    // (Each file of the source says its own line numbers, so lines in front of it move nothing.)
+    std::string text = std::string(withRayTracing ? "#define MOLTEN_RAYTRACING 1\n" : "") + (withExtras ? "#define MOLTEN_EXTRAS 1\n" : "") +
+                       (withSurfaces ? "#define MOLTEN_CUSTOM 1\n" : "") + source;
     NS::Error* error = nullptr;
     auto compiled = NS::TransferPtr(device_->newLibrary(toNSString(text), nullptr, &error));
     if (!compiled) {
@@ -68,9 +117,12 @@ bool ShaderLibrary::compileVariant(const std::string& source, bool withRayTracin
     }
     library_ = compiled;
     hasRayTracing_ = withRayTracing;
+    hasExtras_ = withExtras;
+    hasSurfaceCode_ = withSurfaces;
     pipelines_.clear();             // they were built from the old functions
     lastError_.clear();
-    logInfo("compiled %zu shader files from %s%s", files_.size(), directory_.c_str(), withRayTracing ? ", with ray tracing" : "");
+    logInfo("compiled %zu shader files from %s%s%s%s", files_.size(), directory_.c_str(), withRayTracing ? ", with ray tracing" : "", withExtras ? ", with the extras" : "",
+            withSurfaces ? ", with the project's surface shaders" : "");
     return true;
 }
 

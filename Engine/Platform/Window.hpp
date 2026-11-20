@@ -45,6 +45,8 @@ public:
     /// Hides the pointer and lets it move without limits: for first-person cameras.
     void setCursorCaptured(bool captured);
     void setTitle(const std::string& title);
+    /// The program's icon while it runs, from a picture file (a square PNG). Nothing on a phone, where the application's own is used.
+    void setIcon(const std::string& picturePath);
 
     /// The GLFW window itself: for tools, like the editor's interface, that listen to its events.
     GLFWwindow* nativeHandle() const { return window_; }

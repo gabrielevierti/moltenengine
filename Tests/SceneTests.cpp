@@ -6,7 +6,7 @@ using namespace molten;
 
 namespace {
 struct Health { int value = 100; };
-struct Tag { int id = 0; };
+struct Marker { int id = 0; };
 }
 
 TEST(entities_are_created_destroyed_and_reused) {
@@ -48,16 +48,16 @@ TEST(removing_keeps_other_components_intact) {
     std::vector<Entity> entities;
     for (int i = 0; i < 10; i++) {
         entities.push_back(scene.create());
-        scene.add(entities.back(), Tag{i});
+        scene.add(entities.back(), Marker{i});
     }
-    scene.remove<Tag>(entities[3]);
+    scene.remove<Marker>(entities[3]);
     scene.destroy(entities[0]);
     scene.flushDestroyed();
-    CHECK(scene.count<Tag>() == 8);
+    CHECK(scene.count<Marker>() == 8);
     for (int i = 1; i < 10; i++) {
         if (i == 3) continue;
-        CHECK(scene.get<Tag>(entities[size_t(i)]) != nullptr);
-        CHECK(scene.get<Tag>(entities[size_t(i)])->id == i);
+        CHECK(scene.get<Marker>(entities[size_t(i)]) != nullptr);
+        CHECK(scene.get<Marker>(entities[size_t(i)])->id == i);
     }
 }
 
@@ -65,12 +65,12 @@ TEST(each_visits_entities_with_all_components) {
     Scene scene;
     Entity both = scene.create(), onlyHealth = scene.create(), onlyTag = scene.create();
     scene.add(both, Health{1});
-    scene.add(both, Tag{1});
+    scene.add(both, Marker{1});
     scene.add(onlyHealth, Health{2});
-    scene.add(onlyTag, Tag{3});
+    scene.add(onlyTag, Marker{3});
 
     int visited = 0;
-    scene.each<Health, Tag>([&](Entity entity, Health& health, Tag& tag) {
+    scene.each<Health, Marker>([&](Entity entity, Health& health, Marker& tag) {
         visited++;
         CHECK(entity == both);
         health.value += tag.id;

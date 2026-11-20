@@ -59,12 +59,86 @@ std::string currentExecutablePath() {
 std::vector<std::string> gameSourceFiles(const Project& project) {
     std::vector<std::string> files;
     std::error_code code;
-    fs::recursive_directory_iterator it(project.sourceDirectory(), fs::directory_options::skip_permission_denied, code), end;
-    for (; !code && it != end; it.increment(code)) {
-        if (it->is_regular_file(code) && it->path().extension() == ".cpp") files.push_back(it->path().string());
+    for (const std::string& directory : {project.sourceDirectory(), project.legacySourceDirectory()}) {
+        code.clear();
+        fs::recursive_directory_iterator it(directory, fs::directory_options::skip_permission_denied, code), end;
+        for (; !code && it != end; it.increment(code)) {
+            if (it->is_regular_file(code) && it->path().extension() == ".cpp") files.push_back(it->path().string());
+        }
     }
     std::sort(files.begin(), files.end());
     return files;
+}
+
+uint64_t gameSourceSignature(const Project& project) {
+    uint64_t signature = 1469598103934665603ull;        // FNV-1a over names, sizes and times
+    auto mix = [&signature](uint64_t value) {
+        for (int i = 0; i < 8; i++) {
+            signature ^= (value >> (i * 8)) & 0xFF;
+            signature *= 1099511628211ull;
+        }
+    };
+    std::error_code code;
+    for (const std::string& directory : {project.sourceDirectory(), project.legacySourceDirectory()}) {
+        code.clear();
+        fs::recursive_directory_iterator it(directory, fs::directory_options::skip_permission_denied, code), end;
+        for (; !code && it != end; it.increment(code)) {
+            std::string extension = it->path().extension().string();
+            if (!it->is_regular_file(code) || (extension != ".cpp" && extension != ".hpp" && extension != ".h")) continue;
+            for (char c : it->path().string()) mix(uint64_t(static_cast<unsigned char>(c)));
+            mix(uint64_t(it->file_size(code)));
+            mix(uint64_t(it->last_write_time(code).time_since_epoch().count()));
+        }
+    }
+    return signature;
+}
+
+std::string createScriptFile(const Project& project, const std::string& name, std::string* error) {
+    auto fail = [error](const std::string& message) {
+        if (error) *error = message;
+        return std::string();
+    };
+    if (name.empty()) return fail("The script needs a name");
+    for (size_t i = 0; i < name.size(); i++) {
+        char c = name[i];
+        bool isLetter = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+        bool isDigit = c >= '0' && c <= '9';
+        if (!isLetter && !(isDigit && i > 0)) return fail("Use letters, digits and _ only, starting with a letter: the name becomes a C++ type");
+    }
+    std::error_code code;
+    fs::create_directories(project.sourceDirectory(), code);
+    fs::path file = fs::path(project.sourceDirectory()) / (name + ".cpp");
+    if (fs::exists(file, code)) return fail(name + ".cpp already exists");
+
+    std::string source =
+        "#include \"MoltenMetal.hpp\"\n"
+        "\n"
+        "using namespace molten;\n"
+        "\n"
+        "// Add this component to an entity in the editor: Add Component > " + name + ".\n"
+        "struct " + name + " {\n"
+        "    // Fields listed at the bottom of this file are shown in the inspector and saved in scenes.\n"
+        "    float speed = 1.0f;\n"
+        "\n"
+        "    // Once, when the game starts.\n"
+        "    void start(Engine& engine, Entity self) {\n"
+        "    }\n"
+        "\n"
+        "    // Every frame while the game plays. `dt` is the length of the frame in seconds.\n"
+        "    void update(Engine& engine, Entity self, float dt) {\n"
+        "        if (Transform* transform = engine.scene.get<Transform>(self)) {\n"
+        "            // An example: W and S move the entity forward and back.\n"
+        "            float direction = 0;\n"
+        "            if (engine.input.isDown(Key::W)) direction += 1;\n"
+        "            if (engine.input.isDown(Key::S)) direction -= 1;\n"
+        "            transform->position += transform->forward() * (direction * speed * dt);\n"
+        "        }\n"
+        "    }\n"
+        "};\n"
+        "\n"
+        "MOLTEN_COMPONENT(" + name + ", MOLTEN_FIELD(speed))\n";
+    if (!text::writeFile(file.string(), source)) return fail("Cannot write " + file.string());
+    return file.string();
 }
 
 BuildResult buildGameCode(const Project& project, const std::string& hostExecutable) {
@@ -87,7 +161,7 @@ BuildResult buildGameCode(const Project& project, const std::string& hostExecuta
     // A "bundle" is a library made to be loaded into one particular program: what the code
     // uses of the engine is looked up in that program when it is loaded, not copied in.
     std::string command = "xcrun clang++ -std=c++20 -g -O1 -mmacosx-version-min=13.0 -bundle -bundle_loader " + quoted(hostExecutable);
-    command += " -I " + quoted(project.sourceDirectory());
+    command += " -I " + quoted(project.sourceDirectory()) + " -I " + quoted(project.legacySourceDirectory());
     std::string includes = MOLTEN_GAME_INCLUDE_DIRS;
     size_t start = 0;
     while (start < includes.size()) {
@@ -144,6 +218,29 @@ std::string exportMacApplication(const Project& project, const std::string& dest
     fs::path gameLibrary = fs::path(project.libraryDirectory()) / "Game" / "Game.dylib";
     if (fs::exists(gameLibrary, code)) fs::copy_file(gameLibrary, resources / "Game.dylib", fs::copy_options::overwrite_existing, code);
 
+    // Its icon: the project's own picture or the engine's, in the sizes the Finder and the Dock
+    // ask for, packed by the system's own tools. Without them the game still runs, with no icon in the Finder.
+    bool hasIcon = false;
+    {
+        std::string picture = project.iconFile(engineRoot);
+        fs::path iconset = fs::temp_directory_path() / "molten-icon.iconset";
+        fs::remove_all(iconset, code);
+        fs::create_directories(iconset, code);
+        int status = 0;
+        std::string commands;
+        for (int size : {16, 32, 128, 256, 512}) {
+            std::string s = std::to_string(size), twice = std::to_string(size * 2);
+            commands += "sips -z " + s + " " + s + " " + (quoted)(picture) + " --out " + (quoted)((iconset / ("icon_" + s + "x" + s + ".png")).string()) + " >/dev/null && ";
+            commands += "sips -z " + twice + " " + twice + " " + (quoted)(picture) + " --out " + (quoted)((iconset / ("icon_" + s + "x" + s + "@2x.png")).string()) + " >/dev/null && ";
+        }
+        commands += "iconutil -c icns " + (quoted)(iconset.string()) + " -o " + (quoted)((resources / "AppIcon.icns").string());
+        if (fs::exists(picture, code)) {
+            run(commands, status);
+            hasIcon = status == 0 && fs::exists(resources / "AppIcon.icns", code);
+        }
+        fs::remove_all(iconset, code);
+    }
+
     std::string identifier = project.identifier.empty() ? "com.example." + name : project.identifier;
     std::string plist =
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
@@ -156,6 +253,7 @@ std::string exportMacApplication(const Project& project, const std::string& dest
         "  <key>CFBundleShortVersionString</key><string>" + project.version + "</string>\n"
         "  <key>CFBundleVersion</key><string>1</string>\n"
         "  <key>LSMinimumSystemVersion</key><string>13.0</string>\n"
+        + std::string(hasIcon ? "  <key>CFBundleIconFile</key><string>AppIcon</string>\n" : "") +
         "  <key>NSHighResolutionCapable</key><true/>\n"
         "  <key>LSApplicationCategoryType</key><string>public.app-category.games</string>\n"
         "</dict>\n</plist>\n";

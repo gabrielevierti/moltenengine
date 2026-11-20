@@ -46,19 +46,33 @@ struct EditorOnly {};
 struct SceneAssets {
     std::function<std::shared_ptr<Mesh>(const std::string&)> mesh;
     std::function<std::shared_ptr<Texture>(const std::string&, TextureFormat)> texture;
+    /// A material that is an asset of its own, by its file's name in Assets.
+    std::function<std::shared_ptr<Material>(const std::string&)> material;
 };
+
+/// A material as the text of a `.material` file, and back. `texture` loads the textures
+/// the file names; without it they are left out.
+std::string writeMaterial(const Material& material);
+bool readMaterial(const std::string& text, Material& material,
+                  const std::function<std::shared_ptr<Texture>(const std::string&, TextureFormat)>& texture = nullptr);
 
 class Assets;
 SceneAssets sceneAssets(Assets& assets);
 
 /// The whole scene as text. Materials that are used by an entity but missing from
 /// `materials` are written too, under a made-up name.
-std::string writeScene(Scene& scene, const std::vector<NamedMaterial>& materials, const RenderSettings& settings);
+///
+/// With `only`, just those entities are written (a parent outside the list is forgotten),
+/// with the materials they use and without the scene's settings: this is how a prefab
+/// is made of part of a scene.
+std::string writeScene(Scene& scene, const std::vector<NamedMaterial>& materials, const RenderSettings& settings,
+                       const std::vector<Entity>* only = nullptr);
 
 /// Adds what the text describes to `scene` (clear it first to replace it) and replaces
 /// `materials`. Returns false, and logs why, if the text is not a scene file at all.
+/// `created`, if given, receives the entities that were added, in file order.
 bool readScene(const std::string& text, Scene& scene, std::vector<NamedMaterial>& materials, RenderSettings& settings,
-               const SceneAssets& assets);
+               const SceneAssets& assets, std::vector<Entity>* created = nullptr);
 
 bool saveSceneFile(const std::string& path, Scene& scene, const std::vector<NamedMaterial>& materials, const RenderSettings& settings);
 bool loadSceneFile(const std::string& path, Scene& scene, std::vector<NamedMaterial>& materials, RenderSettings& settings,

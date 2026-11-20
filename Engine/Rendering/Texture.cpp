@@ -37,6 +37,15 @@ std::shared_ptr<Texture> Texture::solidColor(GraphicsDevice& device, Vec4 color,
     return fromPixels(device, pixel, 1, 1, format, false);
 }
 
+bool Texture::readPixels(const std::string& path, std::vector<uint8_t>& out, int& width, int& height) {
+    int channels = 0;
+    stbi_uc* pixels = stbi_load(path.c_str(), &width, &height, &channels, 4);
+    if (!pixels) return false;
+    out.assign(pixels, pixels + size_t(width) * size_t(height) * 4);
+    stbi_image_free(pixels);
+    return true;
+}
+
 std::shared_ptr<Texture> Texture::load(GraphicsDevice& device, const std::string& path, TextureFormat format, bool mipmaps) {
     int width = 0, height = 0, channels = 0;
     int wanted = format == TextureFormat::R8 ? 1 : 4;

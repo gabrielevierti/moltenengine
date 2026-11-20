@@ -22,5 +22,7 @@ bool moveToTrash(const std::string& path);
 void revealInFinder(const std::string& path);
 /// Opens a file with the program macOS uses for it: an image editor, Xcode.
 void openWithDefaultApplication(const std::string& path);
+/// Opens a web address in the browser.
+void openWebPage(const std::string& address);
 
 }  // namespace molten::editor::platform

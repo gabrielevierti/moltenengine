@@ -228,3 +228,12 @@ TEST(project_keeps_its_file_when_renamed) {
     std::optional<Project> loaded = Project::load(project->directory);
     CHECK(loaded.has_value() && loaded->name == "Second Name");
 }
+
+TEST(project_remembers_the_splash_setting) {
+    Project project;
+    CHECK(project.showsSplash);
+    CHECK(Project::fromText(project.toText())->showsSplash);         // on unless it says otherwise
+    project.showsSplash = false;
+    CHECK(!Project::fromText(project.toText())->showsSplash);
+    CHECK(AssetDatabase::typeOfExtension(".graph") == AssetType::Graph);
+}

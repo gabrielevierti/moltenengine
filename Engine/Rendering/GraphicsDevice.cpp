@@ -45,6 +45,7 @@ GraphicsDevice::GraphicsDevice() {
 
     MTL::Device* device = device_.get();
     materialSampler_ = makeSampler(device, MTL::SamplerMinMagFilterLinear, MTL::SamplerMipFilterLinear, MTL::SamplerAddressModeRepeat, 8, false);
+    pixelSampler_ = makeSampler(device, MTL::SamplerMinMagFilterNearest, MTL::SamplerMipFilterLinear, MTL::SamplerAddressModeRepeat, 1, false);
     linearClampSampler_ = makeSampler(device, MTL::SamplerMinMagFilterLinear, MTL::SamplerMipFilterLinear, MTL::SamplerAddressModeClampToEdge, 1, false);
     pointClampSampler_ = makeSampler(device, MTL::SamplerMinMagFilterNearest, MTL::SamplerMipFilterNotMipmapped, MTL::SamplerAddressModeClampToEdge, 1, false);
     shadowSampler_ = makeSampler(device, MTL::SamplerMinMagFilterLinear, MTL::SamplerMipFilterNotMipmapped, MTL::SamplerAddressModeClampToEdge, 1, true);

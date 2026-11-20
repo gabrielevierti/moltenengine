@@ -265,7 +265,8 @@ Window::Window(const std::string&, int width, int height, bool, MTL::Device* dev
     layer.device = (__bridge id<MTLDevice>)(void*)device;
     layer.pixelFormat = (MTLPixelFormat)kPixelFormat;
     layer.framebufferOnly = YES;
-    layer_ = (__bridge CA::MetalLayer*)(void*)layer;
+    // The Objective-C object as a plain pointer first (that is the bridge), then as metal-cpp's name for it.
+    layer_ = static_cast<CA::MetalLayer*>((__bridge void*)layer);
     isFullscreen_ = true;
 }
 
@@ -322,6 +323,7 @@ void Window::setVSync(bool) {}                  // the display link is the displ
 void Window::setFullscreen(bool) {}
 void Window::setCursorCaptured(bool) {}
 void Window::setTitle(const std::string&) {}
+void Window::setIcon(const std::string&) {}
 
 double Window::now() {
     return CACurrentMediaTime();

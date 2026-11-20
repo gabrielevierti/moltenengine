@@ -22,3 +22,13 @@ extern "C" void* mmAttachMetalLayer(GLFWwindow* window, void* device, unsigned l
     nsWindow.contentView.layer = layer;                 // the view keeps the layer alive
     return (__bridge void*)layer;
 }
+
+/// Shows a picture as the program's icon in the Dock while it runs. A program that is an
+/// application bundle has its icon from the bundle; one started as a plain executable (the
+/// editor from its build folder, a game played from the editor's folder) has none but this.
+extern "C" void mmSetDockIcon(const char* picturePath) {
+    @autoreleasepool {
+        NSImage* image = [[NSImage alloc] initWithContentsOfFile:[NSString stringWithUTF8String:picturePath]];
+        if (image) [NSApp setApplicationIconImage:image];
+    }
+}

@@ -17,6 +17,18 @@ struct MaterialSample {
     float metallic;
     float roughness;
     float occlusion;
+    float water;            // above zero: water, and how fine its waves are
+    float waveHeight;
+#if MOLTEN_EXTRAS
+    float mirror;           // how much of the sky a smooth surface may mirror: 1 unless a traced ray says it is hidden
+    float3 mirrored;        // and the light of what hides it, to mirror in its place
+    float3 bounced;         // light that reaches the surface from what is around it: one bounce
+    float fogSun;           // how much of the fog in front of it is in sunlight
+#endif
+#if MOLTEN_CUSTOM
+    float custom;           // above zero: which hand-written surface shader the material uses
+    float4 customValues[8]; // and its properties
+#endif
 };
 
 static MaterialSample sampleMaterial(MeshVertexOut in, bool isFrontFacing,
@@ -45,8 +57,27 @@ static MaterialSample sampleMaterial(MeshVertexOut in, bool isFrontFacing,
     result.metallic = saturate(material.metallic * metallicRoughness.b);
     result.occlusion = 1.0 + material.occlusionStrength * (occlusionTexture.sample(materialSampler, uv).r - 1.0);
     result.emissive = material.emissive * emissiveTexture.sample(materialSampler, uv).rgb;
+    result.water = material.water;
+    result.waveHeight = material.waveHeight;
+#if MOLTEN_EXTRAS
+    result.mirror = 1.0;
+    result.mirrored = float3(0.0);
+    result.bounced = float3(0.0);
+    result.fogSun = 1.0;
+#endif
+#if MOLTEN_CUSTOM
+    result.custom = material.customShader;
+    for (int i = 0; i < 8; i++) {
+        result.customValues[i] = material.custom[i];
+    }
+#endif
     return result;
 }
+
+// Surface shaders written by hand (`.shader` assets) are put here by the engine, each in a
+// namespace of its own, with `moltenCustomSurface` to run the one a material names.
+// See Engine/Rendering/SurfaceShader.hpp. The next line is where; do not change it.
+// MOLTEN_CUSTOM_SURFACES
 
 // `sunVisibility` is how much of the sun reaches this pixel, 0 to 1: from the shadow
 // maps or from tracing rays, whichever the entry point used.
@@ -55,6 +86,62 @@ static float4 shadePixel(MeshVertexOut in, MaterialSample m,
                          float sunLight, texturecube<float> irradianceMap,
                          texturecube<float> prefilteredMap, texture2d<float> brdfLUT,
                          texture2d<float> ambientOcclusion, sampler linearSampler) {
+#if MOLTEN_CUSTOM
+    // The material's own shader has its say first: what it returns is what is lit.
+    if (m.custom > 0.5) {
+        m = moltenCustomSurface(m, in, pass.cameraPosition, pass.time);
+    }
+#endif
+    // Water is part of every variant of the shaders: it needs nothing the plainest lacks.
+    if (m.water > 0.0) {
+        // Water: a level surface whose slope is a handful of waves crossing one another,
+        // each moving at its own speed. Seen from above one looks into it; at a glancing
+        // angle it is a mirror of the sky.
+        float2 p = in.worldPosition.xz * m.water;
+        float t = pass.time;
+        float2 slope = float2(0.0);
+        slope += float2(0.80, 0.60) * (cos(dot(p, float2(0.80, 0.60)) * 0.9 + t * 0.9) * 0.050);
+        slope += float2(-0.50, 0.86) * (cos(dot(p, float2(-0.50, 0.86)) * 2.3 + t * 1.5) * 0.040);
+        slope += float2(0.30, -0.95) * (cos(dot(p, float2(0.30, -0.95)) * 5.7 + t * 2.4) * 0.028);
+        slope += float2(-0.90, -0.40) * (cos(dot(p, float2(-0.90, -0.40)) * 12.1 + t * 3.7) * 0.018);
+        slope += float2(0.10, 0.99) * (cos(dot(p, float2(0.10, 0.99)) * 27.0 + t * 5.9) * 0.010);
+        slope *= m.waveHeight;
+        // The ripples are laid on the swell: a Water component moves the mesh itself, and its
+        // normals lean with the large waves; on a flat sheet they point straight up.
+        float3 swell = normalize(in.normal);
+        m.normal = normalize(float3(swell.x - slope.x, max(swell.y, 0.05), swell.z - slope.y));
+        // Water is shaded here, by itself, from what the frame says of the sun and the sky:
+        // it does not go through the surface model below, which treats it as a dark
+        // surface and leaves it black where it mirrors nothing.
+        float3 toEye = normalize(pass.cameraPosition - in.worldPosition);
+        float facing = saturate(dot(m.normal, toEye));
+        float mirror = 0.02 + 0.98 * pow(saturate(1.0 - facing), 5.0);
+        // Where waves break, white: a moving sheet says how much in its texture coordinate, from 2 up.
+        float foam = saturate(in.uv.x - 2.0);
+        foam = saturate(foam * 1.4 - 0.15 + foam * 0.3 * sin(dot(p, float2(31.0, 17.0)) + t));
+
+        // The sky it mirrors: the horizon's color at a glancing angle, the zenith's from above.
+        float3 mirrored = reflect(-toEye, m.normal);
+        float height = saturate(abs(mirrored.y));
+        float3 sky = mix(frame.skyHorizonColor, frame.skyZenithColor, pow(height, 0.6)) * frame.skyIntensity;
+        // The light inside it: the sky's from all around and the sun's from above, in the water's own color.
+        float3 skyAround = (frame.skyZenithColor + frame.skyHorizonColor * 2.0) / 3.0 * frame.skyIntensity * frame.environmentIntensity;
+        float3 toSun = normalize(-frame.sunDirection);
+        float3 sun = frame.sunColor * sunLight;
+        float3 body = m.baseColor.rgb * (skyAround * 1.5 + sun * (0.25 + 0.35 * saturate(dot(m.normal, toSun))));
+        // The sun's glitter on the ripples.
+        float glint = pow(saturate(dot(mirrored, toSun)), 600.0) * 6.0 + pow(saturate(dot(mirrored, toSun)), 60.0) * 0.25;
+        float3 water = mix(body, sky * frame.environmentIntensity, mirror) + sun * glint;
+        float3 white = float3(0.86, 0.9, 0.92) * (skyAround + sun * 0.3);
+        water = mix(water, white, foam);
+        float opacity = saturate(mix(mix(m.baseColor.a, 1.0, mirror), 1.0, foam));
+        // Whatever went wrong on the way (a normal of no length, a number out of range), it is still water.
+        if (any(isnan(water)) || any(isinf(water))) {
+            water = m.baseColor.rgb * (skyAround + frame.sunColor * 0.3);
+            opacity = 1.0;
+        }
+        return float4(applyFog(water, in.viewDepth, frame), opacity);
+    }
     Surface surface;
     surface.position = in.worldPosition;
     surface.normal = m.normal;
@@ -79,9 +166,24 @@ static float4 shadePixel(MeshVertexOut in, MaterialSample m,
         }
         color += reflectedLight(surface, light.direction, light.radiance);
     }
+#if MOLTEN_EXTRAS
+    // Where a traced ray found the mirrored sky hidden, a smooth surface gets its rough
+    // share of the sky's light only: the part that does not depend on the direction.
+    float3 sky = environmentLight(surface, frame, irradianceMap, prefilteredMap, brdfLUT, linearSampler);
+    float smoothness = 1.0 - surface.roughness;
+    color += sky * mix(1.0, m.mirror, smoothness * smoothness);
+    // What a traced ray found in the mirrored direction, as strongly as this surface mirrors at this angle.
+    float3 mirrorColor = mix(float3(0.04), m.baseColor.rgb, m.metallic);
+    float glancing = pow(1.0 - saturate(dot(m.normal, normalize(pass.cameraPosition - in.worldPosition))), 5.0);
+    color += m.mirrored * (mirrorColor + (1.0 - mirrorColor) * glancing) * (smoothness * smoothness);
+    // And the light bounced to it from its surroundings, taken up by what is not metal in it.
+    color += m.bounced * m.baseColor.rgb * (1.0 - m.metallic) * m.occlusion;
+    return float4(applyFogAlong(color, in.worldPosition, pass.cameraPosition, m.fogSun, frame), m.baseColor.a);
+#else
     color += environmentLight(surface, frame, irradianceMap, prefilteredMap, brdfLUT, linearSampler);
 
     return float4(applyFog(color, in.viewDepth, frame), m.baseColor.a);
+#endif
 }
 
 // ---------------------------------------------------------------- entry points
@@ -108,6 +210,9 @@ fragment float4 fragment_pbr(MeshVertexOut in [[stage_in]],
     MaterialSample m = sampleMaterial(in, isFrontFacing, material, baseColorTexture, normalTexture,
                                       metallicRoughnessTexture, occlusionTexture, emissiveTexture, materialSampler);
     float sunLight = sunVisibility(in.worldPosition, normalize(in.normal), in.viewDepth, frame, shadowMap, shadowSampler);
+#if MOLTEN_EXTRAS
+    m.fogSun = fogInSunlight(in.worldPosition, pass.cameraPosition, in.viewDepth, in.position.xy, frame, shadowMap, shadowSampler);
+#endif
     return shadePixel(in, m, pass, frame, lights, sunLight, irradianceMap, prefilteredMap, brdfLUT,
                       ambientOcclusion, linearSampler);
 }
@@ -142,6 +247,9 @@ fragment float4 fragment_pbr_masked(MeshVertexOut in [[stage_in]],
     }
     m.baseColor.a = 1.0;
     float sunLight = sunVisibility(in.worldPosition, normalize(in.normal), in.viewDepth, frame, shadowMap, shadowSampler);
+#if MOLTEN_EXTRAS
+    m.fogSun = fogInSunlight(in.worldPosition, pass.cameraPosition, in.viewDepth, in.position.xy, frame, shadowMap, shadowSampler);
+#endif
     return shadePixel(in, m, pass, frame, lights, sunLight, irradianceMap, prefilteredMap, brdfLUT,
                       ambientOcclusion, linearSampler);
 }
@@ -162,6 +270,9 @@ fragment float4 fragment_pbr_traced(MeshVertexOut in [[stage_in]],
                              texture2d<float> occlusionTexture [[texture(MMTextureOcclusion)]],
                              texture2d<float> emissiveTexture [[texture(MMTextureEmissive)]],
                              raytracing::instance_acceleration_structure tracedScene [[buffer(MMBufferAccelerationStructure)]],
+#if MOLTEN_EXTRAS
+                             constant TracedSurface *tracedSurfaces [[buffer(MMBufferTracedSurfaces)]],
+#endif
                              texturecube<float> irradianceMap [[texture(MMTextureIrradiance)]],
                              texturecube<float> prefilteredMap [[texture(MMTexturePrefiltered)]],
                              texture2d<float> brdfLUT [[texture(MMTextureBRDF)]],
@@ -171,6 +282,17 @@ fragment float4 fragment_pbr_traced(MeshVertexOut in [[stage_in]],
     MaterialSample m = sampleMaterial(in, isFrontFacing, material, baseColorTexture, normalTexture,
                                       metallicRoughnessTexture, occlusionTexture, emissiveTexture, materialSampler);
     float sunLight = sunVisibilityTraced(in.worldPosition, normalize(in.normal), -frame.sunDirection, in.viewDepth, in.position.xy, frame, tracedScene);
+#if MOLTEN_EXTRAS
+    float4 around = ambientTraced(in.worldPosition, normalize(in.normal), in.viewDepth, in.position.xy, frame, tracedScene, tracedSurfaces, irradianceMap, linearSampler);
+    m.occlusion *= around.a;
+    m.bounced = around.rgb;
+    if (m.roughness < 0.5) {
+        float4 seen = reflectionTraced(in.worldPosition, m.normal, normalize(pass.cameraPosition - in.worldPosition), m.roughness, in.viewDepth, in.position.xy, frame,
+                                       tracedScene, tracedSurfaces, irradianceMap, linearSampler);
+        m.mirror = 1.0 - seen.a * 0.88;
+        m.mirrored = seen.rgb;
+    }
+#endif
     return shadePixel(in, m, pass, frame, lights, sunLight, irradianceMap, prefilteredMap, brdfLUT,
                       ambientOcclusion, linearSampler);
 }
@@ -188,6 +310,9 @@ fragment float4 fragment_pbr_masked_traced(MeshVertexOut in [[stage_in]],
                                     texture2d<float> occlusionTexture [[texture(MMTextureOcclusion)]],
                                     texture2d<float> emissiveTexture [[texture(MMTextureEmissive)]],
                                     raytracing::instance_acceleration_structure tracedScene [[buffer(MMBufferAccelerationStructure)]],
+#if MOLTEN_EXTRAS
+                             constant TracedSurface *tracedSurfaces [[buffer(MMBufferTracedSurfaces)]],
+#endif
                                     texturecube<float> irradianceMap [[texture(MMTextureIrradiance)]],
                                     texturecube<float> prefilteredMap [[texture(MMTexturePrefiltered)]],
                                     texture2d<float> brdfLUT [[texture(MMTextureBRDF)]],
@@ -201,6 +326,17 @@ fragment float4 fragment_pbr_masked_traced(MeshVertexOut in [[stage_in]],
     }
     m.baseColor.a = 1.0;
     float sunLight = sunVisibilityTraced(in.worldPosition, normalize(in.normal), -frame.sunDirection, in.viewDepth, in.position.xy, frame, tracedScene);
+#if MOLTEN_EXTRAS
+    float4 around = ambientTraced(in.worldPosition, normalize(in.normal), in.viewDepth, in.position.xy, frame, tracedScene, tracedSurfaces, irradianceMap, linearSampler);
+    m.occlusion *= around.a;
+    m.bounced = around.rgb;
+    if (m.roughness < 0.5) {
+        float4 seen = reflectionTraced(in.worldPosition, m.normal, normalize(pass.cameraPosition - in.worldPosition), m.roughness, in.viewDepth, in.position.xy, frame,
+                                       tracedScene, tracedSurfaces, irradianceMap, linearSampler);
+        m.mirror = 1.0 - seen.a * 0.88;
+        m.mirrored = seen.rgb;
+    }
+#endif
     return shadePixel(in, m, pass, frame, lights, sunLight, irradianceMap, prefilteredMap, brdfLUT,
                       ambientOcclusion, linearSampler);
 }

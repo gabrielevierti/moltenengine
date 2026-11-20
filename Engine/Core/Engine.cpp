@@ -4,6 +4,8 @@
 #include "Core/Paths.hpp"
 #include "Game/Component.hpp"
 #include "Rendering/Particles.hpp"
+#include "Kit/Kit.hpp"
+#include "Script/Runtime.hpp"
 
 #include <stb_image_write.h>
 
@@ -77,8 +79,13 @@ Engine::Engine(const EngineConfig& config) : config_(config) {
     }
     renderer_ = std::make_unique<Renderer>(device_, root + "/Shaders");
     assets_ = std::make_unique<Assets>(device_, root + "/Assets");
+    // The engine's own icon, until a game says it has one of its own.
+    if (window_) window_->setIcon(root + "/Assets/Branding/icon.png");
+    renderer_->surfaceShaders().pathOf = [this](const std::string& name) { return assets_->path(name); };
     audio_ = std::make_unique<Audio>(!isCapturing);
     setFont(assets_->font("Fonts/Default"));
+    script::registerStandardNodes();        // visual scripts: the nodes, and with them the VisualScript component
+    kit::registerKit();                     // the ready-made gameplay components
 }
 
 Engine::~Engine() {
@@ -134,6 +141,7 @@ bool Engine::frame() {
             renderer_->renderToImage(scene, canvas_, pixelWidth, pixelHeight, time.elapsed);
         }
         input.endFrame();
+        applyPendingScene();
         capturedFrames_++;
         return capturedFrames_ < config_.captureFrames;
     }
@@ -158,6 +166,7 @@ bool Engine::frame() {
         pendingScreenshot_.clear();
     }
     input.endFrame();
+    applyPendingScene();                    // a component asked for another scene: now that the frame is over
     return isRunning_ && !window_->shouldClose();
 }
 
@@ -171,12 +180,19 @@ int Engine::end() {
 
 void Engine::simulate(Game& game, double realDelta) {
     // Physics and the game's fixedUpdate advance in steps of constant length.
+    // What was created or moved since the last frame (by an editor, by code between frames)
+    // has its place in the world before any component asks for it.
+    scene.updateTransforms();
     int steps = time.beginFrame(realDelta);
     for (int i = 0; i < steps; i++) {
         game.fixedUpdate(*this, time.fixedDelta);
         runBehaviors(true, time.fixedDelta);
         runComponents(true, time.fixedDelta);
-        if (!isSimulationPaused) physics.step(scene, time.fixedDelta);
+        if (!isSimulationPaused) {
+            prepareMeshColliders();
+            physics.step(scene, time.fixedDelta);
+            dispatchPhysicsEvents();        // components hear about collisions and triggers
+        }
         scene.flushDestroyed();
     }
     // Show bodies where they are between the last two steps, for smooth motion at any frame rate.
@@ -187,10 +203,22 @@ void Engine::simulate(Game& game, double realDelta) {
     runComponents(false, time.delta);
     scene.flushDestroyed();
     scene.updateTransforms();
-    updateParticles(scene, time.delta);
+    runComponents(false, time.delta, true);     // lateUpdate: cameras that follow, with everything where it will be drawn
+    scene.updateTransforms();
+    updateParticles(scene, time.delta, renderer_->settings.wind, renderer_->settings.windGustiness, time.elapsed);
 
-    canvas_.begin(screenSize(), window_ ? window_->contentScale() : float(config_.captureScale));
+    // The canvas covers the screen, or, in an editor that shows the game in a view of its
+    // own, that view: the game's interface is part of the picture of the game.
+    float pixelsPerPoint = window_ ? window_->contentScale() : float(config_.captureScale);
+    Vec2 canvasSize = screenSize();
+    int canvasView = renderer_->canvasView;
+    if (canvasView >= 0 && size_t(canvasView) < renderer_->views.size() && renderer_->views[size_t(canvasView)].width > 0) {
+        const Renderer::SceneView& view = renderer_->views[size_t(canvasView)];
+        canvasSize = Vec2{float(view.width), float(view.height)} / pixelsPerPoint;
+    }
+    canvas_.begin(canvasSize, pixelsPerPoint);
     game.draw(*this, canvas_);
+    drawComponents(canvas_);                // the interface components draw: score, health, messages
     if (showsColliders) drawColliders();
     if (showsStatistics) drawStatistics();
 }
@@ -208,36 +236,72 @@ void Engine::runBehaviors(bool isFixedStep, float dt) {
     }
 }
 
-/// Runs the code of the components a game declared (Game/Component.hpp).
-void Engine::runComponents(bool isFixedStep, float dt) {
-    if (!runsComponents) return;
-    // By index and by name: a component's code may load a game module or declare types,
-    // which moves the list.
-    for (size_t i = 0; i < ComponentRegistry::instance().types().size(); i++) {
-        ComponentType type = ComponentRegistry::instance().types()[i];
-        if (!type.hasCode()) continue;
-        // As with behaviors: first note who has one, then look each up again, because the
-        // code may create or destroy entities and components, its own included.
-        behaviorEntities_.clear();
-        type.collect(scene, behaviorEntities_);
-        std::unordered_set<uint64_t>& started = startedComponents_[type.name];
-        std::vector<Entity> entities = behaviorEntities_;
-        for (Entity entity : entities) {
-            void* component = type.get(scene, entity);
-            if (!component) continue;
-            uint64_t key = (uint64_t(entity.index) << 32) | entity.generation;
-            if (started.insert(key).second && type.start) {
-                type.start(component, *this, entity);
-                component = type.get(scene, entity);        // start() may have moved it
-                if (!component) continue;
-            }
-            if (isFixedStep) {
-                if (type.fixedUpdate) type.fixedUpdate(component, *this, entity, dt);
-            } else if (type.update) {
-                type.update(component, *this, entity, dt);
-            }
-        }
+// ---------------------------------------------------------------- what a World leaves to an engine
+
+void Engine::playSound(const std::string& name, float volume) {
+    if (!audio_) return;
+    if (std::shared_ptr<AudioClip> clip = assets_->sound(name)) {
+        PlayOptions options;
+        options.volume = volume;
+        audio_->play(clip, options);
     }
+}
+
+std::string Engine::assetPath(const std::string& name) const {
+    return assets_->path(name);
+}
+
+bool Engine::writeImage(const std::string& path, const std::vector<uint8_t>& pixels, int width, int height) {
+    if (pixels.size() < size_t(width) * size_t(height) * 4) return false;
+    return stbi_write_png(path.c_str(), width, height, 4, pixels.data(), width * 4) != 0;
+}
+
+uint32_t Engine::beginSound(const std::string& name, float volume, float pitch, bool loops) {
+    std::shared_ptr<AudioClip> clip = assets_->sound(name);
+    if (!clip) return 0;
+    PlayOptions options;
+    options.volume = volume;
+    options.pitch = pitch;
+    options.loops = loops;
+    return audio_->play(clip, options);
+}
+
+void Engine::adjustSound(uint32_t sound, float volume, float pitch) {
+    audio_->mixer().setVolume(sound, volume);
+    audio_->mixer().setPitch(sound, pitch);
+}
+
+void Engine::endSound(uint32_t sound) {
+    audio_->stop(sound);
+}
+
+void Engine::showMesh(Entity entity, const MeshData& data) {
+    MeshRenderer* renderer = scene.get<MeshRenderer>(entity);
+    if (!renderer || data.indices.empty()) return;
+    // The first time, a mesh of the entity's own; after that the same one with its vertices moved.
+    if (!renderer->mesh || !renderer->mesh->isDynamic || !renderer->mesh->update(data)) {
+        auto mesh = std::make_shared<Mesh>(device_, data);
+        mesh->name = renderer->mesh ? renderer->mesh->name : std::string();     // so that the scene still names the file it came from
+        mesh->isDynamic = true;
+        renderer->mesh = mesh;
+    }
+}
+
+std::shared_ptr<Material> Engine::loadMaterial(const std::string& name) {
+    return assets_->material(name);
+}
+
+std::shared_ptr<Mesh> Engine::loadMesh(const std::string& name) {
+    return assets_->mesh(name);
+}
+
+std::shared_ptr<Texture> Engine::loadTexture(const std::string& name, TextureFormat format) {
+    return assets_->texture(name, format);
+}
+
+/// A scene says how it wants to be rendered: sky, fog, shadows, exposure.
+void Engine::sceneWasLoaded(const std::string&) {
+    renderer_->settings = sceneSettings();
 }
 
 // ---------------------------------------------------------------- conveniences
@@ -319,6 +383,8 @@ void Engine::drawColliders() {
         Vec4 color = collider.isTrigger ? Vec4{1.0f, 0.85f, 0.2f, 1} : Vec4{0.3f, 1.0f, 0.4f, 1};
         Vec3 center = transform.position + rotate(transform.rotation, collider.offset);
         switch (collider.shape) {
+            case ColliderShape::Mesh:
+                break;                  // its triangles are the model's own: nothing more to outline
             case ColliderShape::Sphere:
                 lines.sphere(center, collider.radius, color);
                 break;

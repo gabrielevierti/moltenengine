@@ -42,6 +42,7 @@ struct Light {
     float innerConeAngle = radians(20.0f); // spot: full brightness inside this half-angle
     float outerConeAngle = radians(30.0f); // spot: darkness outside this half-angle
     bool castsShadows = false;             // honored for the first directional light (the sun)
+    bool isEnabled = true;                 // off: it is there, and gives no light
 };
 
 /// Game logic attached to one entity. `update` runs once per frame, `fixedUpdate` once

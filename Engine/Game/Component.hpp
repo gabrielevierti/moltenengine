@@ -9,10 +9,13 @@
 //         float turnsPerSecond = 0.5f;
 //         molten::Vec3 axis{0, 1, 0};
 //
-//         // Any of these three, if the component does something:
+//         // Any of these, if the component does something:
 //         void start(molten::Engine& engine, molten::Entity self);
 //         void update(molten::Engine& engine, molten::Entity self, float dt);
 //         void fixedUpdate(molten::Engine& engine, molten::Entity self, float dt);
+//         void onCollision(molten::Engine& engine, molten::Entity self, molten::Entity other);
+//         void onTriggerEnter(molten::Engine& engine, molten::Entity self, molten::Entity other);
+//         void draw(molten::Engine& engine, molten::Entity self, molten::Canvas& canvas);
 //     };
 //     MOLTEN_COMPONENT(Spinner, MOLTEN_FIELD(turnsPerSecond), MOLTEN_FIELD(axis))
 //
@@ -20,15 +23,18 @@
 // listed still exists; it is just not shown or saved (a timer, a cached pointer).
 #pragma once
 
+#include "Core/World.hpp"
 #include "Scene/Scene.hpp"
 
 #include <functional>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace molten {
 
+class Canvas;
 class Engine;
 
 enum class FieldType : uint8_t { Float, Int, Bool, Vec2, Vec3, Vec4, String };
@@ -56,6 +62,7 @@ struct Field {
     bool isColor = false;               // Vec3 and Vec4 only: edited with a color picker
     std::string tooltip;
 
+    std::vector<std::string> options;   // see choices()
     Field& range(float low, float high) {
         minimum = low;
         maximum = high;
@@ -63,6 +70,12 @@ struct Field {
     }
     Field& color() {
         isColor = true;
+        return *this;
+    }
+    /// For a text field that is one of a few words: the inspector shows a list to choose from.
+    ///     MOLTEN_FIELD(drive).choices({"front", "rear", "all"})
+    Field& choices(std::vector<std::string> words) {
+        options = std::move(words);
         return *this;
     }
     Field& help(std::string text) {
@@ -87,9 +100,23 @@ template <class T, class Member> Field makeField(const char* name, Member T::*me
 }
 
 /// Everything the engine knows about one component type.
+/// The components of an entity that are switched off, by type name: they keep their
+/// values and their place, and their code does not run.
+struct DisabledComponents {
+    std::vector<std::string> names;
+    bool has(const std::string& name) const {
+        for (const std::string& disabled : names) {
+            if (disabled == name) return true;
+        }
+        return false;
+    }
+};
+
 struct ComponentType {
     std::string name;
     std::vector<Field> fields;
+    /// Where the editor's Add Component menu puts it: "Scripts" for a game's own, unless it says otherwise.
+    std::string category = "Scripts";
     /// Which game module declared it; nullptr for types built into the program.
     const void* module = nullptr;
 
@@ -101,11 +128,15 @@ struct ComponentType {
     void (*collect)(Scene&, std::vector<Entity>& out) = nullptr;    // every entity that has one
 
     // The component's own code; nullptr where the struct has no such function.
-    void (*start)(void* component, Engine&, Entity) = nullptr;
-    void (*update)(void* component, Engine&, Entity, float dt) = nullptr;
-    void (*fixedUpdate)(void* component, Engine&, Entity, float dt) = nullptr;
+    void (*start)(void* component, World&, Entity) = nullptr;
+    void (*update)(void* component, World&, Entity, float dt) = nullptr;
+    void (*fixedUpdate)(void* component, World&, Entity, float dt) = nullptr;
+    void (*lateUpdate)(void* component, World&, Entity, float dt) = nullptr;     // after every update(), with everything where it will be drawn
+    void (*onCollision)(void* component, World&, Entity self, Entity other) = nullptr;
+    void (*onTriggerEnter)(void* component, World&, Entity self, Entity other) = nullptr;
+    void (*draw)(void* component, World&, Entity, Canvas&) = nullptr;
 
-    bool hasCode() const { return start || update || fixedUpdate; }
+    bool hasCode() const { return start || update || fixedUpdate || lateUpdate || onCollision || onTriggerEnter || draw; }
     const Field* findField(const std::string& fieldName) const;
 };
 
@@ -119,8 +150,14 @@ public:
     void remove(const std::string& name);
     /// Removes every type a game module declared.
     void removeModule(const void* module);
+    /// Types built into the program that a game module replaced with its own of the same name: they return when the module goes.
+    std::vector<ComponentType> replaced;
 
     const ComponentType* find(const std::string& name) const;
+    /// Files a type under a category of the Add Component menu. Does nothing if there is no such type.
+    void setCategory(const std::string& name, const std::string& category);
+    /// "PlayerMover" -> "Player Mover": a type's name as people read it.
+    static std::string displayName(const std::string& typeName);
     const std::vector<ComponentType>& types() const { return types_; }
 
     /// While a game module is being loaded, the module: types declared meanwhile belong to it.
@@ -158,17 +195,44 @@ template <class T> struct ComponentRegistration {
         type.collect = [](Scene& scene, std::vector<Entity>& out) {
             scene.each<T>([&out](Entity entity, T&) { out.push_back(entity); });
         };
-        if constexpr (requires(T& component, Engine& engine, Entity self) { component.start(engine, self); }) {
-            type.start = [](void* component, Engine& engine, Entity self) { static_cast<T*>(component)->start(engine, self); };
-        }
-        if constexpr (requires(T& component, Engine& engine, Entity self, float dt) { component.update(engine, self, dt); }) {
-            type.update = [](void* component, Engine& engine, Entity self, float dt) { static_cast<T*>(component)->update(engine, self, dt); };
-        }
-        if constexpr (requires(T& component, Engine& engine, Entity self, float dt) { component.fixedUpdate(engine, self, dt); }) {
-            type.fixedUpdate = [](void* component, Engine& engine, Entity self, float dt) {
-                static_cast<T*>(component)->fixedUpdate(engine, self, dt);
-            };
-        }
+        // Each function a component may have, in either of its two forms: taking a World
+        // (works with or without a screen) or an Engine (the World plus renderer, assets,
+        // sound). The second kind is simply not called in a World that is not an Engine.
+#define MOLTEN_HOOK(member, name, ...)                                                                                    \
+    if constexpr (requires(T& c, World& w) { c.name(w, __VA_ARGS__); }) {                                                  \
+        type.member = [](void* component, World& world, MOLTEN_HOOK_PARAMS) { static_cast<T*>(component)->name(world, MOLTEN_HOOK_ARGS); }; \
+    } else if constexpr (requires(T& c, Engine& e) { c.name(e, __VA_ARGS__); }) {                                          \
+        type.member = [](void* component, World& world, MOLTEN_HOOK_PARAMS) {                                              \
+            if (Engine* engine = world.asEngine()) static_cast<T*>(component)->name(*engine, MOLTEN_HOOK_ARGS);            \
+        };                                                                                                                \
+    }
+        Entity self{}, other{};
+        float dt = 0;
+        (void)self, (void)other, (void)dt;
+#define MOLTEN_HOOK_PARAMS Entity self_
+#define MOLTEN_HOOK_ARGS self_
+        MOLTEN_HOOK(start, start, self)
+#undef MOLTEN_HOOK_PARAMS
+#undef MOLTEN_HOOK_ARGS
+#define MOLTEN_HOOK_PARAMS Entity self_, float dt_
+#define MOLTEN_HOOK_ARGS self_, dt_
+        MOLTEN_HOOK(update, update, self, dt)
+        MOLTEN_HOOK(fixedUpdate, fixedUpdate, self, dt)
+        MOLTEN_HOOK(lateUpdate, lateUpdate, self, dt)
+#undef MOLTEN_HOOK_PARAMS
+#undef MOLTEN_HOOK_ARGS
+#define MOLTEN_HOOK_PARAMS Entity self_, Entity other_
+#define MOLTEN_HOOK_ARGS self_, other_
+        MOLTEN_HOOK(onCollision, onCollision, self, other)
+        MOLTEN_HOOK(onTriggerEnter, onTriggerEnter, self, other)
+#undef MOLTEN_HOOK_PARAMS
+#undef MOLTEN_HOOK_ARGS
+#define MOLTEN_HOOK_PARAMS Entity self_, Canvas& canvas_
+#define MOLTEN_HOOK_ARGS self_, canvas_
+        MOLTEN_HOOK(draw, draw, self, std::declval<Canvas&>())
+#undef MOLTEN_HOOK_PARAMS
+#undef MOLTEN_HOOK_ARGS
+#undef MOLTEN_HOOK
         ComponentRegistry::instance().add(std::move(type));
     }
 };

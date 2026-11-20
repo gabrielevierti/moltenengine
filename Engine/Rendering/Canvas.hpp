@@ -85,6 +85,11 @@ public:
 
     /// `pixelsPerPoint` is 2 on a Retina display: the canvas needs it to make edges one pixel soft.
     void begin(Vec2 sizeInPoints, float pixelsPerPoint = 1.0f);
+    /// Until endArea, drawing happens in a part of the screen as if it were all of it:
+    /// size() is the area's, (0, 0) is its top left corner, and nothing shows outside.
+    /// The editor uses it to keep a game's interface inside the scene view.
+    void beginArea(Vec2 origin, Vec2 size);
+    void endArea();
     void setFont(const FontMetrics* metrics, const Texture* atlas);
     const std::vector<gpu::CanvasVertex>& vertices() const { return vertices_; }
     const std::vector<Batch>& batches() const { return batches_; }
@@ -107,6 +112,10 @@ private:
     };
     Vec2 size_{0, 0};
     float pixelSize_ = 1.0f;
+    Vec2 areaOrigin_{0, 0}, sizeOutsideArea_{0, 0};
+    size_t areaFirstVertex_ = 0, areaFirstBatch_ = 0;
+    bool isInArea_ = false;
+    bool startsNewBatch_ = false;           // the next shape does not join the batch before it
     std::vector<Clip> clips_;
     bool isClipEmpty_ = false;              // the current clip has no area: nothing can be drawn
     std::vector<Vec2> path_, inner_, outer_;    // scratch space, kept to avoid allocating per shape

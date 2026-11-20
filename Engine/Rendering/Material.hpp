@@ -7,6 +7,8 @@
 #include "Rendering/Texture.hpp"
 
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace molten {
 
@@ -31,6 +33,40 @@ struct Material {
     AlphaMode alphaMode = AlphaMode::Opaque;
     bool isDoubleSided = false;         // do not cull back faces
     bool isUnlit = false;               // base color and emissive only, no lighting
+    bool isWater = false;               // a surface of water: moving waves, a mirror at a glancing angle, clear from above
+    float waveScale = 1.0f;             // water: larger numbers make smaller waves
+    float waveHeight = 1.0f;            // water: how steep they are
+
+    /// A shader written by hand: the name of a `.shader` file in Assets (see
+    /// Rendering/SurfaceShader.hpp), or empty for the engine's own. It is given the surface
+    /// as everything above made it, and returns what is lit.
+    std::string shader;
+    /// What the material says for that shader's properties, by name. A property it does
+    /// not mention has the value the shader file gives it.
+    struct ShaderValue {
+        std::string name;
+        Vec4 value{0, 0, 0, 0};
+    };
+    std::vector<ShaderValue> shaderValues;
+    const Vec4* shaderValue(const std::string& name) const {
+        for (const ShaderValue& item : shaderValues) {
+            if (item.name == name) return &item.value;
+        }
+        return nullptr;
+    }
+    void setShaderValue(const std::string& name, Vec4 value) {
+        for (ShaderValue& item : shaderValues) {
+            if (item.name == name) {
+                item.value = value;
+                return;
+            }
+        }
+        shaderValues.push_back(ShaderValue{name, value});
+    }
+
+    /// The material's file in Assets ("Materials/Brick.material") when it is an asset that
+    /// scenes share; empty for one that belongs to a single scene or was made in code.
+    std::string assetName;
 
     std::shared_ptr<Texture> baseColorTexture;          // sRGB
     std::shared_ptr<Texture> normalTexture;             // tangent space, green up

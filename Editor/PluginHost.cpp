@@ -62,6 +62,11 @@ void EditorContext::notify(const std::string& message, ConsoleMessage::Level lev
     }
 }
 
+void EditorContext::editGraph(const std::string& path) {
+    graphToEdit = path;
+    if (Panel* panel = registry.findPanel("Visual Script")) panel->isOpen = true;
+}
+
 bool ViewportInfo::worldToScreen(Vec3 world, ImVec2& screen) const {
     Vec4 clip = projection * view * vec4(world, 1);
     if (clip.w <= 0.001f) return false;

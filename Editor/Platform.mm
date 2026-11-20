@@ -74,4 +74,11 @@ void openWithDefaultApplication(const std::string& path) {
     }
 }
 
+void openWebPage(const std::string& address) {
+    @autoreleasepool {
+        NSURL* url = [NSURL URLWithString:toNSString(address)];
+        if (url) [[NSWorkspace sharedWorkspace] openURL:url];
+    }
+}
+
 }  // namespace molten::editor::platform

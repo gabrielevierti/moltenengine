@@ -4,7 +4,6 @@
 #   cmake -B build -DCMAKE_BUILD_TYPE=Release
 #   cmake --build build -j
 #   ./build/molten                  the editor
-#   ./build/marble                  a sample game
 #   ctest --test-dir build -L unit
 #
 # For iPhone and iPad (makes an Xcode project; see Docs/iOS.md):
@@ -20,7 +19,7 @@ else()
     set(MOLTEN_IOS OFF)
     set(CMAKE_OSX_DEPLOYMENT_TARGET 13.0 CACHE STRING "Oldest macOS the programs run on")
 endif()
-project(MoltenMetalEngine VERSION 0.1.0 LANGUAGES C CXX OBJC OBJCXX)
+project(MoltenMetalEngine VERSION 1.0.0 LANGUAGES C CXX OBJC OBJCXX)
 
 if(NOT APPLE)
     message(FATAL_ERROR "Metal only exists on Apple platforms: Molten builds on macOS, for macOS and iOS.")
@@ -33,7 +32,6 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-option(MOLTEN_BUILD_SAMPLES "Build the sample games (Marble, FPV)" ON)
 option(MOLTEN_BUILD_PLUGINS "Build the example editor plugin" ON)
 option(MOLTEN_BUILD_TESTS "Build the unit tests" ON)
 
@@ -111,11 +109,12 @@ if(MOLTEN_IOS)
     set(MOLTEN_IOS_BUNDLE_ID "com.example.moltenplayer" CACHE STRING "The application's bundle identifier")
     set(MOLTEN_IOS_TEAM "" CACHE STRING "Your Apple developer team identifier, for signing")
     set(MOLTEN_IOS_NAME "Molten" CACHE STRING "The name under the application's icon")
+    set(MOLTEN_IOS_ICON "${CMAKE_SOURCE_DIR}/Assets/Branding/icon.png" CACHE FILEPATH "A square picture for the application's icon")
 
     set(MOLTEN_IOS_GAME_SOURCES "")
     set(MOLTEN_IOS_RESOURCES ${CMAKE_SOURCE_DIR}/Shaders ${CMAKE_SOURCE_DIR}/Assets)
     if(MOLTEN_IOS_PROJECT)
-        file(GLOB_RECURSE MOLTEN_IOS_GAME_SOURCES CONFIGURE_DEPENDS ${MOLTEN_IOS_PROJECT}/Source/*.cpp)
+        file(GLOB_RECURSE MOLTEN_IOS_GAME_SOURCES CONFIGURE_DEPENDS ${MOLTEN_IOS_PROJECT}/Source/*.cpp ${MOLTEN_IOS_PROJECT}/Assets/Scripts/*.cpp)
         # The project as the player expects to find it: a folder called Project with the
         # .molten file and Assets. Copied when CMake runs: run it again after changing assets.
         set(MOLTEN_IOS_STAGING ${CMAKE_BINARY_DIR}/staging/Project)
@@ -126,7 +125,23 @@ if(MOLTEN_IOS)
         list(APPEND MOLTEN_IOS_RESOURCES ${MOLTEN_IOS_STAGING})
     endif()
 
-    add_executable(MoltenPlayer MACOSX_BUNDLE Player/Main.cpp ${MOLTEN_IOS_GAME_SOURCES} ${MOLTEN_IOS_RESOURCES})
+    # The icon, in the sizes a phone and a tablet ask for, made from one picture when CMake runs.
+    set(MOLTEN_IOS_ICONS "")
+    if(EXISTS "${MOLTEN_IOS_ICON}")
+        set(MOLTEN_IOS_ICON_FOLDER ${CMAKE_BINARY_DIR}/icons)
+        file(MAKE_DIRECTORY ${MOLTEN_IOS_ICON_FOLDER})
+        foreach(ICON "AppIcon60x60@2x.png;120" "AppIcon60x60@3x.png;180" "AppIcon76x76@2x~ipad.png;152" "AppIcon83.5x83.5@2x~ipad.png;167")
+            list(GET ICON 0 ICON_NAME)
+            list(GET ICON 1 ICON_SIZE)
+            execute_process(COMMAND sips -z ${ICON_SIZE} ${ICON_SIZE} "${MOLTEN_IOS_ICON}" --out "${MOLTEN_IOS_ICON_FOLDER}/${ICON_NAME}" OUTPUT_QUIET ERROR_QUIET)
+            if(EXISTS "${MOLTEN_IOS_ICON_FOLDER}/${ICON_NAME}")
+                list(APPEND MOLTEN_IOS_ICONS "${MOLTEN_IOS_ICON_FOLDER}/${ICON_NAME}")
+            endif()
+        endforeach()
+    endif()
+
+    add_executable(MoltenPlayer MACOSX_BUNDLE Player/Main.cpp ${MOLTEN_IOS_GAME_SOURCES} ${MOLTEN_IOS_RESOURCES} ${MOLTEN_IOS_ICONS})
+    set_source_files_properties(${MOLTEN_IOS_ICONS} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     target_link_libraries(MoltenPlayer PRIVATE moltenengine)
     if(MOLTEN_IOS_PROJECT)
         target_include_directories(MoltenPlayer PRIVATE ${MOLTEN_IOS_PROJECT}/Source)
@@ -214,26 +229,13 @@ if(MOLTEN_BUILD_PLUGINS)
     molten_add_editor_plugin(SceneTools Plugins/SceneTools/SceneTools.cpp)
 endif()
 
-# ---------------------------------------------------------------- sample games
-if(MOLTEN_BUILD_SAMPLES)
-    file(GLOB MOLTEN_MARBLE_SOURCES CONFIGURE_DEPENDS Samples/Marble/*.cpp Samples/Marble/*.hpp)
-    add_executable(marble ${MOLTEN_MARBLE_SOURCES})
-    target_link_libraries(marble PRIVATE moltenengine)
-
-    file(GLOB MOLTEN_FPV_SOURCES CONFIGURE_DEPENDS Samples/FPV/*.cpp Samples/FPV/*.hpp)
-    add_executable(fpv ${MOLTEN_FPV_SOURCES})
-    target_include_directories(fpv PRIVATE Samples)
-    target_link_libraries(fpv PRIVATE moltenengine)
-endif()
-
 # ---------------------------------------------------------------- tests
 #   ctest --test-dir build -L unit     the unit tests: no GPU needed
 #   ctest --test-dir build -L gpu      whole programs on the GPU, without a window
 if(MOLTEN_BUILD_TESTS)
     enable_testing()
     file(GLOB MOLTEN_TEST_SOURCES CONFIGURE_DEPENDS Tests/*.cpp Tests/*.hpp)
-    add_executable(moltentests ${MOLTEN_TEST_SOURCES} Samples/FPV/FlightModel.cpp Samples/FPV/Track.cpp)
-    target_include_directories(moltentests PRIVATE Samples)
+    add_executable(moltentests ${MOLTEN_TEST_SOURCES})
     target_link_libraries(moltentests PRIVATE moltenengine)
     add_test(NAME unit COMMAND moltentests)
     set_tests_properties(unit PROPERTIES LABELS unit)
@@ -241,10 +243,4 @@ if(MOLTEN_BUILD_TESTS)
     set_tests_properties(editor-starts PROPERTIES LABELS gpu TIMEOUT 600)
     add_test(NAME player-plays-the-sample-scene COMMAND molten-player --capture ${CMAKE_BINARY_DIR}/player.png --frames 30)
     set_tests_properties(player-plays-the-sample-scene PROPERTIES LABELS gpu TIMEOUT 600)
-    if(MOLTEN_BUILD_SAMPLES)
-        add_test(NAME marble-demo COMMAND marble --demo --capture ${CMAKE_BINARY_DIR}/marble-demo.png --frames 2400)
-        set_tests_properties(marble-demo PROPERTIES LABELS gpu TIMEOUT 600)
-        add_test(NAME fpv-starts-a-race COMMAND fpv --race --capture ${CMAKE_BINARY_DIR}/fpv-race.png --frames 240)
-        set_tests_properties(fpv-starts-a-race PROPERTIES LABELS gpu TIMEOUT 600)
-    endif()
 endif()

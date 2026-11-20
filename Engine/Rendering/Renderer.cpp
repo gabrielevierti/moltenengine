@@ -65,6 +65,33 @@ std::vector<uint8_t> Renderer::renderToImage(Scene& scene, const Canvas& canvas,
     return pixels;
 }
 
+std::vector<uint8_t> Renderer::readView(size_t index, int& width, int& height) {
+    width = height = 0;
+    MTL::Texture* texture = viewTexture(index);
+    if (!texture) return {};
+    width = int(texture->width());
+    height = int(texture->height());
+    size_t bytesPerRow = size_t(width) * 4;
+    auto buffer = NS::TransferPtr(device_.device()->newBuffer(bytesPerRow * size_t(height), MTL::ResourceStorageModeShared));
+    MTL::CommandBuffer* commandBuffer = device_.queue()->commandBuffer();
+    MTL::BlitCommandEncoder* blit = commandBuffer->blitCommandEncoder();
+    blit->copyFromTexture(texture, 0, 0, MTL::Origin(0, 0, 0), MTL::Size(NS::UInteger(width), NS::UInteger(height), 1), buffer.get(), 0, bytesPerRow,
+                          bytesPerRow * size_t(height));
+    blit->endEncoding();
+    commandBuffer->commit();
+    commandBuffer->waitUntilCompleted();
+    // The texture stores blue first; image files want red first.
+    std::vector<uint8_t> pixels(bytesPerRow * size_t(height));
+    const uint8_t* source = static_cast<const uint8_t*>(buffer->contents());
+    for (size_t i = 0; i < pixels.size(); i += 4) {
+        pixels[i] = source[i + 2];
+        pixels[i + 1] = source[i + 1];
+        pixels[i + 2] = source[i];
+        pixels[i + 3] = 255;
+    }
+    return pixels;
+}
+
 // ---------------------------------------------------------------- render targets
 
 void Renderer::ensureTargets(int width, int height) {
@@ -131,9 +158,14 @@ Renderer::View Renderer::findView(Scene& scene, float aspect) const {
     bool found = false;
     bool hasOverride = scene.has<Camera>(cameraOverride) && scene.has<Transform>(cameraOverride);
     scene.each<Camera, Transform>([&](Entity entity, Camera& camera, Transform& transform) {
+        if (!transform.isActiveInHierarchy) return;
         if (found || (hasOverride ? entity != cameraOverride : !camera.isActive)) return;
         found = true;
-        view.world = transform.world;
+        // Where the camera is and which way it faces; its scale says nothing about what it sees.
+        Vec3 position, scale;
+        Quat rotation;
+        decompose(transform.world, position, rotation, scale);
+        view.world = compose(position, rotation, Vec3{1, 1, 1});
         view.fovY = camera.fovY;
         view.nearPlane = camera.nearPlane;
         view.farPlane = camera.farPlane;
@@ -152,6 +184,7 @@ Renderer::View Renderer::findView(Scene& scene, float aspect) const {
 
 void Renderer::collectItems(Scene& scene, const View& view, std::vector<DrawItem>& items) const {
     scene.each<MeshRenderer, Transform>([&](Entity, MeshRenderer& renderer, Transform& transform) {
+        if (!transform.isActiveInHierarchy) return;
         if (!renderer.isVisible || !renderer.mesh) return;
         DrawItem item;
         item.mesh = renderer.mesh.get();
@@ -172,6 +205,8 @@ int Renderer::collectLights(Scene& scene, gpu::LightData* lights, gpu::FrameUnif
     sunCastsShadows = false;
 
     scene.each<Light, Transform>([&](Entity, Light& light, Transform& transform) {
+        if (!transform.isActiveInHierarchy) return;
+        if (!light.isEnabled) return;
         gpu::LightData data{};
         data.position = transform.worldPosition();
         data.range = std::max(light.range, 0.001f);
@@ -282,6 +317,7 @@ Renderer::Rect Renderer::sceneRect(MTL::Texture* target) const {
 bool Renderer::buildSceneAccelerationStructure(MTL::CommandBuffer* commandBuffer, const std::vector<DrawItem>& items) {
     tracedMeshes_.clear();
     std::vector<MTL::AccelerationStructureInstanceDescriptor> instances;
+    std::vector<gpu::TracedSurface> surfaces;       // what a ray that hits each instance sees
     for (const DrawItem& item : items) {
         const MTL::AccelerationStructure* meshStructure = item.mesh->accelerationStructure();
         // Glass and other blended materials let light through: they cast no shadow here either.
@@ -301,10 +337,15 @@ bool Renderer::buildSceneAccelerationStructure(MTL::CommandBuffer* commandBuffer
         instance.intersectionFunctionTableOffset = 0;
         instance.accelerationStructureIndex = meshIndex;
         instances.push_back(instance);
+        gpu::TracedSurface surface{};
+        surface.baseColor = item.material->baseColor * item.tint;
+        surface.emissive = Vec4{item.material->emissive.x, item.material->emissive.y, item.material->emissive.z, 0};
+        surfaces.push_back(surface);
     }
     if (instances.empty()) return false;
 
     FrameAllocator::Allocation instanceBuffer = allocator().copyArray(instances.data(), instances.size());
+    tracedSurfaces_ = allocator().copyArray(surfaces.data(), surfaces.size());
     auto descriptor = NS::TransferPtr(MTL::InstanceAccelerationStructureDescriptor::alloc()->init());
     descriptor->setInstancedAccelerationStructures(
         NS::Array::array(reinterpret_cast<const NS::Object* const*>(tracedMeshes_.data()), tracedMeshes_.size()));
@@ -334,6 +375,23 @@ bool Renderer::buildSceneAccelerationStructure(MTL::CommandBuffer* commandBuffer
     return true;
 }
 
+void Renderer::swapTargets(size_t slot) {
+    if (targetSets_.size() <= slot) targetSets_.resize(slot + 1);
+    TargetSet& kept = targetSets_[slot];
+    std::swap(kept.width, targetWidth_);
+    std::swap(kept.height, targetHeight_);
+    std::swap(kept.samples, targetSamples_);
+    std::swap(kept.hasOcclusion, targetHasOcclusion_);
+    std::swap(kept.colorMultisample, sceneColorMultisample_);
+    std::swap(kept.depth, sceneDepth_);
+    std::swap(kept.color, sceneColor_);
+    std::swap(kept.prepassDepth, prepassDepth_);
+    std::swap(kept.prepassNormal, prepassNormal_);
+    std::swap(kept.occlusionRaw, occlusionRaw_);
+    std::swap(kept.occlusion, occlusion_);
+    std::swap(kept.bloom, bloom_);
+}
+
 void Renderer::render(Scene& scene, const Canvas& canvas, const RenderTarget& target, double time) {
     if (!target.texture) return;
 
@@ -343,9 +401,67 @@ void Renderer::render(Scene& scene, const Canvas& canvas, const RenderTarget& ta
     allocator().reset();
     frameNumber_++;
     stats = RenderStats{};
+    hasSceneStructureThisFrame_ = false;
+    // What was replaced during the last frame has been drawn with for the last time.
+    retiredTextures_.clear();
 
     if (frameNumber_ % 30 == 0 && shaders_.reloadIfChanged()) environment_.invalidate();
+    // Surface shaders written for the game: compiled in when a material first names one,
+    // and again when one of their files is saved.
+    if ((frameNumber_ % 30 == 0 || surfaceShaders_.all().size() != size_t(compiledSurfaceShaders_)) && surfaceShaders_.takeChanges()) {
+        compiledSurfaceShaders_ = int(surfaceShaders_.all().size());
+        if (shaders_.setSurfaceCode(surfaceShaders_.code())) environment_.invalidate();
+    }
 
+    MTL::CommandBuffer* commandBuffer = device_.queue()->commandBuffer();
+
+    if (views.empty()) {
+        // The usual case: one picture, straight into the target.
+        swapTargets(0);
+        drawsDebugLines_ = true;
+        renderView(commandBuffer, scene, canvas, target, time, true);
+        swapTargets(0);
+    } else {
+        // An editor: each view into its own texture, then the interface over the target.
+        static const Canvas noCanvas;
+        const Entity cameraBefore = cameraOverride;
+        const Rect viewportBefore = sceneViewport;
+        sceneViewport = Rect{};             // a view fills its texture
+        viewColors_.resize(views.size());
+        for (size_t i = 0; i < views.size(); i++) {
+            const SceneView& wanted = views[i];
+            if (wanted.width < 1 || wanted.height < 1) continue;
+            NS::SharedPtr<MTL::Texture>& color = viewColors_[i];
+            if (!color || int(color->width()) != wanted.width || int(color->height()) != wanted.height) {
+                // Whoever was handed the old texture (an interface drawn earlier in this
+                // frame) may still draw with it: it is kept until the next frame.
+                if (color) retiredTextures_.push_back(color);
+                color = device_.makeRenderTarget(MTL::PixelFormatBGRA8Unorm_sRGB, wanted.width, wanted.height);
+            }
+            RenderTarget viewTarget;
+            viewTarget.texture = color.get();
+            cameraOverride = wanted.camera;
+            drawsDebugLines_ = wanted.showsDebugLines;
+            swapTargets(i + 1);
+            renderView(commandBuffer, scene, int(i) == canvasView ? canvas : noCanvas, viewTarget, time, false);
+            swapTargets(i + 1);
+        }
+        cameraOverride = cameraBefore;
+        sceneViewport = viewportBefore;
+        drawsDebugLines_ = true;
+        bool canvasIsInAView = canvasView >= 0 && size_t(canvasView) < views.size() && views[size_t(canvasView)].width > 0;
+        renderInterface(commandBuffer, canvasIsInAView ? noCanvas : canvas, target);
+    }
+    debug.clear();
+
+    if (target.drawable) commandBuffer->presentDrawable(target.drawable);
+    dispatch_semaphore_t semaphore = frameSemaphore_;
+    commandBuffer->addCompletedHandler([semaphore](MTL::CommandBuffer*) { dispatch_semaphore_signal(semaphore); });
+    commandBuffer->commit();
+}
+
+void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const Canvas& canvas, const RenderTarget& target, double time,
+                          bool withOverlay) {
     Rect area = sceneRect(target.texture);
     int width = std::max(1, int(float(area.width) * settings.renderScale));
     int height = std::max(1, int(float(area.height) * settings.renderScale));
@@ -362,7 +478,7 @@ void Renderer::render(Scene& scene, const Canvas& canvas, const RenderTarget& ta
     bool sunCastsShadows = false;
     int lightCount = collectLights(scene, lights, frame, sunCastsShadows);
     frame.lightCount = uint32_t(lightCount);
-    stats.lights = lightCount;
+    stats.lights = std::max(stats.lights, lightCount);
 
     // Ray-traced sun shadows replace the shadow maps where they are available and asked for.
     bool wantsTracedShadows = settings.shadowsEnabled && sunCastsShadows && settings.rayTracedShadows && canTraceRays();
@@ -392,7 +508,11 @@ void Renderer::render(Scene& scene, const Canvas& canvas, const RenderTarget& ta
     frame.sunDiskSize = std::cos(settings.sky.sunAngularRadius);
     frame.fogColor = settings.fogColor;
     frame.fogDensity = settings.fogDensity;
+    frame.fogHeightFalloff = std::max(settings.fogHeightFalloff, 0.0f);
+    frame.fogSunScatter = std::max(settings.fogSunScatter, 0.0f);
     frame.cloudCoverage = settings.sky.cloudCoverage;
+    frame.volumetricClouds = settings.sky.cloudsHaveDepth ? 1u : 0u;
+    frame.fogShaftSteps = settings.fogDensity > 0 ? uint32_t(std::clamp(settings.fogShaftSteps, 0, 48)) : 0u;
     frame.cloudScale = settings.sky.cloudScale;
     frame.cloudOffset = settings.sky.cloudSpeed * float(time);
     frame.sunAngularRadius = settings.sky.sunAngularRadius;
@@ -416,12 +536,16 @@ void Renderer::render(Scene& scene, const Canvas& canvas, const RenderTarget& ta
     std::vector<Batch> transparent = makeBatches(transparentItems, false);
 
     // ---- the passes
-    MTL::CommandBuffer* commandBuffer = device_.queue()->commandBuffer();
 
     // The structure rays are traced against holds everything that casts a shadow, seen
     // by the camera or not: what is behind the camera still shades what is in front.
-    tracesRaysThisFrame_ = wantsTracedShadows && buildSceneAccelerationStructure(commandBuffer, items);
+    // It is the same for every picture of a frame: built for the first that wants it.
+    if (wantsTracedShadows && !hasSceneStructureThisFrame_) hasSceneStructureThisFrame_ = buildSceneAccelerationStructure(commandBuffer, items);
+    tracesRaysThisFrame_ = wantsTracedShadows && hasSceneStructureThisFrame_;
     frame.shadowRayCount = tracesRaysThisFrame_ ? uint32_t(std::clamp(settings.shadowRayCount, 1, 16)) : 0u;
+    frame.occlusionRayCount = tracesRaysThisFrame_ && settings.rayTracedOcclusion ? uint32_t(std::clamp(settings.occlusionRayCount, 1, 16)) : 0u;
+    frame.tracesReflections = tracesRaysThisFrame_ && settings.rayTracedReflections ? 1u : 0u;
+    frame.bounceIntensity = tracesRaysThisFrame_ && settings.rayTracedOcclusion && settings.rayTracedBounce ? std::max(settings.bounceIntensity, 0.0f) : 0.0f;
 
     FrameAllocator::Allocation passUniforms = allocator().copy(
         makePassUniforms(view.view, view.projection, view.position, width, height, view.nearPlane, view.farPlane, time));
@@ -433,13 +557,7 @@ void Renderer::render(Scene& scene, const Canvas& canvas, const RenderTarget& ta
     if (settings.ambientOcclusionEnabled) renderOcclusion(commandBuffer, opaque, view, passUniforms);
     renderScene(commandBuffer, scene, opaque, transparent, view, passUniforms, frameUniforms, lightBuffer);
     renderBloom(commandBuffer);
-    renderFinal(commandBuffer, canvas, target);
-    debug.clear();
-
-    if (target.drawable) commandBuffer->presentDrawable(target.drawable);
-    dispatch_semaphore_t semaphore = frameSemaphore_;
-    commandBuffer->addCompletedHandler([semaphore](MTL::CommandBuffer*) { dispatch_semaphore_signal(semaphore); });
-    commandBuffer->commit();
+    renderFinal(commandBuffer, canvas, target, withOverlay);
 }
 
 }  // namespace molten

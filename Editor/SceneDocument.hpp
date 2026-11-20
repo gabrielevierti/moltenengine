@@ -62,6 +62,12 @@ public:
 
     Entity create(Primitive kind, Entity parent = Entity{});
     Entity createFromMesh(const std::string& meshName, Vec3 position);
+    /// Writes an entity and everything under it to a prefab file: a piece of scene that
+    /// can be put in any scene, or spawned by the game while it runs.
+    bool savePrefab(Entity root, const std::string& absolutePath);
+    /// Adds a prefab's entities to the scene, the root at `position`. `assetName` is the
+    /// prefab's path in Assets. Returns the root.
+    Entity instantiatePrefab(const std::string& assetName, Vec3 position);
     /// Copies an entity and everything under it. Returns the copy.
     Entity duplicate(Entity entity);
     void duplicateSelection();
@@ -92,6 +98,16 @@ public:
     bool isPaused() const { return isPlaying_ && engine_.isSimulationPaused; }
     void setPlaying(bool playing);
     void setPaused(bool paused);
+    /// While paused: lets the game run for one frame, then pauses again.
+    void stepFrame();
+    /// The camera the game is seen through: the scene's own active one. Invalid if it has none.
+    Entity gameCamera() const;
+
+    /// Puts the selected entities where the view's camera is, facing the way it faces
+    /// (the way to aim a camera or a light: look, then align).
+    void alignSelectionWithView();
+    /// The reverse: the view goes to where the selected entity is and looks its way.
+    void alignViewWithSelection();
     /// Runs `swap`, which replaces the game module, with the scene safely out of the way.
     void reloadGameCode(const std::function<void()>& swap);
 
@@ -117,6 +133,7 @@ private:
     void createCamera();
     void syncCamera();
     std::string snapshot();
+    bool stepIsRunning_ = false;
     void resetHistory();
     void copyComponents(Entity from, Entity to);
     Entity duplicateTree(Entity entity, Entity newParent);

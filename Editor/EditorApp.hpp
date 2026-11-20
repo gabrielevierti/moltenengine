@@ -2,6 +2,12 @@
 // The editor as the engine sees it: a Game whose "gameplay" is editing the scene it shows.
 #pragma once
 
+#include "DeviceExport.hpp"
+#include "ProjectWindow.hpp"
+
+#include <filesystem>
+#include <unordered_map>
+
 #include "Editor.hpp"
 
 namespace molten::editor {
@@ -23,6 +29,7 @@ private:
     void openSceneNow(const std::string& absolutePath);
     void saveScene(bool asNewFile);
     bool buildGame();
+    void drawNewScriptDialog();
     void exportGame();
     void runPendingAction();
     void handleShortcuts();
@@ -35,8 +42,20 @@ private:
     void buildDefaultLayout(ImGuiID dockSpace);
     void drawPanels();
     void drawProjectList();
+    void saveProjectPreview();
+    void makeMissingTemplatePreviews();
+    ImTextureID pictureAt(const std::string& path);
+    void drawPlayBar();
+    void drawLayoutItems();
+    void drawSaveLayoutDialog();
+    void applyPendingLayout();
+    std::string layoutsDirectory() const;
+    std::vector<std::string> savedLayouts() const;
+    void chooseAndOpenProject();
+    void chooseAndOpenScene();
     void drawUnsavedChangesDialog();
     void drawAboutDialog();
+    void drawBuildWindow();
     void updateTitle();
 
     Engine* engine_ = nullptr;
@@ -47,16 +66,41 @@ private:
     RecentProjects recent_;
     std::string recentFile_;
 
+    // Scripts written as code.
+    uint64_t builtSignature_ = 0;       // of the Source folder when it was last built
+    double nextSourceCheck_ = 0;
+    bool showsNewScript_ = false;
+    std::string newScriptName_ = "PlayerController";
+    std::string newScriptError_;
+
+    float splashSeconds_ = 0;           // how long the splash has been up
+    std::shared_ptr<Texture> emptyScenePicture_;        // what an empty project starts with, for the project window
     bool needsDefaultLayout_ = false;
     bool showsAbout_ = false;
-    bool showsDemo_ = false;
+    bool showsBuild_ = false;           // the Build and Export window
+    int buildPlatform_ = 0;             // 0 Mac, 1 iPhone and iPad
+    bool lastBuildFailed_ = false;
+    DeviceExport deviceExport_;         // the work of putting the game on an iPhone or an iPad
+    std::string appleTeam_;             // the developer team that signs it: the user's, kept with the editor's own settings
+    std::vector<std::string> deviceLines_;      // the last things that work said
     double nextAssetScan_ = 0;
     std::string shownTitle_;
 
     // The project list's "new project" form.
-    std::string newProjectName_ = "My Game";
-    std::string newProjectLocation_;
-    std::string projectError_;
+    ProjectWindow projectWindow_;
+    int frontTabsIn_ = 0;
+    struct Picture {
+        std::shared_ptr<Texture> texture;
+        std::filesystem::file_time_type time;
+    };
+    std::unordered_map<std::string, Picture> pictures_;     // preview images, by path
+    std::string layoutName_ = "Default";       // what the layout menu shows as current
+    std::string pendingLayout_;                 // asked for; applied between frames
+    std::string newLayoutName_;
+    bool showsSaveLayout_ = false;
+    bool wasPlaying_ = false;
+    bool showsSceneTab_ = false;
+    std::vector<ProjectTemplate> templates_;     // what a new project can start from
 
     // An action waiting for the answer to "save your changes?".
     std::string confirmAction_, confirmArgument_;

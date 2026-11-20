@@ -33,7 +33,7 @@ Why a fixed step: physics that advances by a different amount each frame gives d
 
 `Scene/Scene` is a small entity-component system. An entity is an index plus a generation number, so a handle to a destroyed entity can be recognized as stale. Each component type has its own storage, a "sparse set": the components sit back to back in one array, which is what a system walking all of them wants.
 
-A component is any plain struct. The engine defines `Transform`, `Camera`, `Light`, `MeshRenderer`, `RigidBody`, `Collider`, `ParticleEmitter` and `Behavior`; the Marble game adds `Gem`, `MovingPlatform` and `Lifetime` without the engine knowing.
+A component is any plain struct. The engine defines `Transform`, `Camera`, `Light`, `MeshRenderer`, `RigidBody`, `Collider`, `ParticleEmitter` and `Behavior`; a game adds its own.
 
 `destroy` only marks an entity; it disappears at the end of the frame. That makes it safe to destroy things from inside a loop over components or from a collision callback.
 
@@ -110,6 +110,26 @@ Two decisions keep this from ever breaking a frame that does not use it:
 - **A game module** (`Game/GameModule`) is a dynamic library; loading it runs its registrations. Types are tagged with the module that declared them, so they can be withdrawn together. A module is never unloaded, only retired: objects it made may still exist.
 - **Reloading** (`SceneDocument::reloadGameCode` in the editor) is: scene to text, `Scene::clear` and `Scene::dropStorages`, load the new module, text to scene. The containers are dropped because a container of a game's component type was created by the old module's code.
 
+## Several views of one scene
+
+`Renderer::views` asks for pictures of the scene in textures of their own, each through a camera and at a size; with any, the frame's target receives only the background, the canvas and the overlay. Each view runs the whole pipeline (shadows are fitted to its camera) with its own set of working textures, kept between frames (`swapTargets`), so two views of different sizes do not reallocate anything. The acceleration structure for ray tracing is built once per frame. The editor asks for two, Scene (its camera, with the grid and outlines) and Game (the scene's camera, with the canvas), and shows them with `ImGui::Image` in ordinary dockable windows.
+
+## The world, and the kit
+
+`World` (`Engine/Core/World.hpp`) is the part of the engine a game's rules need: the scene, physics, input, time, named shared values, prefabs, and loading scenes. `Engine` derives from it and adds the window, the renderer, assets and sound. A component's functions may take either; one that takes a `World&` also runs in a `World` that is not an `Engine`, which is what makes a game playable in a test (`World::advance`).
+
+Components hear about physics through `onCollision` and `onTriggerEnter`: the physics step collects the contacts and triggers that began, and `World::dispatchPhysicsEvents` tells both entities of each pair afterwards, so the code is free to destroy and spawn. `loadScene` and `reloadScene` only note what was asked; the scene is replaced at the end of the frame. A reload returns to the text the scene was loaded from (or that the editor handed over when Play was pressed), not to a file.
+
+`Engine/Kit` is gameplay written on top of this and nothing else: the ready-made components (`Kit.cpp`) and the effect presets (`Effects.cpp`). The templates in `Templates/` are scenes that use them.
+
+## Visual scripts
+
+`Script/Graph` is a script as data: nodes (a kind, a place on the board, the values typed into unwired inputs) and links between named pins. `NodeLibrary` holds the kinds: each a `NodeDef` with its pins and one or two functions, `execute` for nodes on the white flow wires and `evaluate` for nodes that give values. A script is a text file, `.graph`.
+
+`Script/Runtime` runs it. Once per frame per entity, `runFrame` looks for the event nodes whose event happened and follows the flow wire from each, node by node (`runFlow`). A node that needs an input calls `ExecContext::input_`, which asks the node at the other end of the wire, recursively; nothing is compiled or cached. Both walks are bounded, so a loop of wires ends instead of hanging the game. The `VisualScript` component (declared with `MOLTEN_COMPONENT` like a game's own) holds the script's name and the entity's variables, and reads the file again when it changes on disk, which is all that live editing is.
+
+The editor's drawing board (`Editor/GraphEditor`) depends only on Dear ImGui and `Script/Graph`, so it can be driven without a window by a program that feeds ImGui a pretend mouse.
+
 ## Physics
 
 `Physics/Collision` answers one question exactly: do these two shapes overlap, and if so, along which direction and how deep? It handles every pair of sphere, oriented box and capsule. `Physics/Physics` builds the simulation on top: integrate, find overlapping pairs (sort and sweep along x), resolve velocities with impulses over a few iterations, then push bodies apart.
@@ -120,7 +140,7 @@ It is an arcade model on purpose. Bodies do not spin from impacts, there are no 
 
 `Audio/Mixer` is the whole audio engine: a list of playing voices and a function that fills a block of samples by reading each voice's clip at its pitch, scaling by volume and pan, and adding. It knows nothing about sound cards. `Audio/Audio` connects it to one through miniaudio, which calls `Mixer.render` from the audio thread.
 
-`Audio/AudioClip` can also synthesize clips from a waveform, a pitch and a duration, which is how Marble has sound effects without shipping audio files.
+`Audio/AudioClip` can also synthesize clips from a waveform, a pitch and a duration, which is how a game has sound effects without shipping audio files.
 
 ## The window layer
 
@@ -142,16 +162,9 @@ On iOS `Platform/iOS/PlatformiOS.mm` implements the same `Window` class over a `
 - **Scene files** (`Scene/SceneFile`) are text, one statement per line, starting with `molten-scene 1`: settings, then materials, then entities with one line per component. Meshes and textures are stored by name (`Mesh.name`, `Texture.name`, set by `Assets`), never as data. Unknown lines are skipped. Numbers are written in the shortest form that reads back to the same float, so saving an unchanged scene changes nothing in the file.
 - **The Gui** (`UI/Gui`) is immediate-mode: a control is a function call that draws it and returns what the user did. It needs only a `Canvas` and an `Input`. A panel clips its rows with the canvas, so they scroll smoothly under its edges; rows entirely outside are skipped and do not react. Sections fold and remember it under an id made from their title. Icons are drawn by code from lines and arcs. Besides the controls laid out in panels there are free ones (`bar`, `card`, `button`, `iconButton` with a position), which is what tool bars are made of. The pop-up of a list and the tooltip are drawn in `end()`, on top of everything; a pop-up's choice reaches the control one frame later.
 
-## FPV
-
-`Samples/FPV` is the second sample game, and a different kind of one: its physics is its own. `FlightModel` is a rigid body with four motors, integrated 480 times per second inside the engine's 60 fixed steps, and it knows nothing about the engine beyond its math types. Each step runs, in order: the rates the sticks ask for, a PID loop per axis, a mixer, motors that lag and sag with the battery, propellers whose thrust depends on the air moving through them, drag, and the battery itself. The gains of the PID loops are computed from the airframe (mass, inertia, arm length, motor response), so that different drones answer alike.
-
-The game around it uses the engine for everything else. The ground is a height function, which the game asks directly; other obstacles are engine colliders, found with `overlapSphere`, and a ray along the last piece of the path gives the surface to bounce off. The radio link is a distance and a raycast from where the pilot stands. The onboard look is four render settings (lens distortion, color fringes, grain, interference), and the last one is driven by the link.
-
 ## Testing
 
 - **Unit tests** cover everything that does not need a GPU: math, the scene, input, time, meshes, collision (including a test that tries thousands of random shape pairs and checks that the reported contact really separates them), physics, cascades, particles, the synthesizer, the mixer, shader file handling, fonts, the canvas, the Gui (by feeding it mouse and key events), scene files (write, read, write again, compare), projects and the asset database (on real folders, in a temporary place), and FPV's flight model: hover throttle, the response to a stick, top speed, battery sag and endurance, and control at every throttle.
-- **The autopilot** (`--demo`) rolls the marble through the whole course. Combined with `--capture`, it runs unattended and exits with an error if the marble does not reach the goal. It tests the game loop, the physics, the triggers and the level together.
 
 ## The editor
 

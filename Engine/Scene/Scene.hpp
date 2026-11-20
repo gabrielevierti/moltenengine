@@ -43,6 +43,11 @@ struct Transform {
     Vec3 scale{1, 1, 1};
     Entity parent{};
     Mat4 world = identity();
+    /// Off: the entity, and everything under it, is not drawn, does not collide, and its
+    /// components do not run. It stays in the scene, ready to be switched on.
+    bool isActive = true;
+    /// This entity and all its parents are active. Filled in by Scene::updateTransforms().
+    bool isActiveInHierarchy = true;
     uint32_t stamp = 0;            // internal: the update that last computed `world`
 
     Mat4 localMatrix() const { return compose(position, rotation, scale); }
@@ -50,6 +55,13 @@ struct Transform {
     Vec3 right() const { return rotate(rotation, Vec3{1, 0, 0}); }
     Vec3 up() const { return rotate(rotation, Vec3{0, 1, 0}); }
     Vec3 worldPosition() const { return xyz(world.columns[3]); }
+};
+
+/// What kind of thing an entity is to the game ("Player", "Enemy"), and the layer it is on.
+/// Many entities share a tag; code asks for them by it, whatever they are called.
+struct Tag {
+    std::string value = "Untagged";
+    int layer = 0;                  // 0 to 31: what it collides with, see Collider
 };
 
 struct Name {

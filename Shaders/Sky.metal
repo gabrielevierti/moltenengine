@@ -36,6 +36,36 @@ static float cloudNoise(float2 p) {
     return sum;
 }
 
+#if MOLTEN_EXTRAS
+// The same noise in three dimensions: two slices of it, one above the other, blended.
+static float cloudNoise3(float3 p, int layers) {
+    float sum = 0.0, strength = 0.5;
+    for (int i = 0; i < layers; i++) {
+        float level = floor(p.y);
+        float lower = cloudValueNoise(p.xz + level * 37.0);
+        float upper = cloudValueNoise(p.xz + (level + 1.0) * 37.0);
+        sum += strength * mix(lower, upper, smoothstep(0.0, 1.0, p.y - level));
+        p = p * 2.03 + float3(11.3, 5.7, 3.1);
+        strength *= 0.5;
+    }
+    return sum / (1.0 - strength * 2.0);                        // as if all the layers were there: 0 to 1 whatever their number
+}
+
+// How much cloud there is at a place: none below the layer's base or above its top, most
+// in its lower middle, where clouds are flat underneath and heaped above.
+static float cloudAmount(float3 at, float base, float top, constant FrameUniforms &frame, int layers) {
+    float height = (at.y - base) / (top - base);
+    if (height <= 0.0 || height >= 1.0) {
+        return 0.0;
+    }
+    float3 p = float3(at.x * 0.00042 * frame.cloudScale + frame.cloudOffset.x, at.y * 0.0011, at.z * 0.00042 * frame.cloudScale + frame.cloudOffset.y);
+    float shape = cloudNoise3(p, layers);
+    float profile = smoothstep(0.0, 0.12, height) * smoothstep(1.0, 0.45, height);
+    float threshold = 0.74 - 0.47 * frame.cloudCoverage;
+    return saturate((shape - threshold) * 4.0) * profile;
+}
+#endif
+
 static float3 skyRadiance(float3 direction, constant FrameUniforms &frame, bool withSunDisk) {
     float3 d = normalize(direction);
     float3 toSun = -frame.sunDirection;
@@ -54,6 +84,45 @@ static float3 skyRadiance(float3 direction, constant FrameUniforms &frame, bool 
     // perspective of looking along a ceiling: clouds get smaller and closer together
     // toward the horizon.
     float cover = 0.0;
+#if MOLTEN_EXTRAS
+    if (frame.volumetricClouds != 0 && withSunDisk && frame.cloudCoverage > 0.0 && d.y > 0.015) {
+        // Clouds with depth: a layer a kilometer thick, walked through along the line of
+        // sight. At each step, how much cloud is there, and how much light reaches it from
+        // the sun through the cloud above it.
+        const float base = 1500.0, top = 2700.0;
+        float enter = base / d.y, leave = min(top / d.y, enter + 12000.0);
+        const int steps = 16;
+        float stride = (leave - enter) / float(steps);
+        float t = enter + stride * cloudHash(d.xz * 4096.0);
+        float through = 1.0;                                    // how much of what is behind still shows
+        float3 gathered = float3(0.0);
+        float3 skyLight = frame.skyHorizonColor * 0.7 + frame.skyZenithColor * 0.5;
+        float toward = max(dot(d, toSun), 0.0);
+        for (int i = 0; i < steps && through > 0.03; i++) {
+            float3 at = d * t;
+            float amount = cloudAmount(at, base, top, frame, 4);
+            if (amount > 0.001) {
+                // Toward the sun, three steps: the more cloud in the way, the darker here.
+                float above = 0.0;
+                for (int k = 1; k <= 3; k++) {
+                    above += cloudAmount(at + toSun * (float(k) * 130.0), base, top, frame, 2);
+                }
+                float sunReaching = exp(-above * 130.0 * 0.012);
+                // Light scattered in a cloud mostly goes on forward: brightest looking toward the sun, through thin cloud.
+                float forward = 0.55 + 1.6 * pow(toward, 8.0);
+                float3 light = frame.sunColor * (sunReaching * forward * 0.32) + skyLight * 0.55;
+                float taken = 1.0 - exp(-amount * stride * 0.012);
+                gathered += light * taken * through;
+                through *= 1.0 - taken;
+            }
+            t += stride;
+        }
+        // Far away they sink into the haze of the horizon.
+        float haze = exp(-enter * 0.00006);
+        cover = (1.0 - through) * haze;
+        color = color * (1.0 - cover) + gathered * haze;
+    } else
+#endif
     if (frame.cloudCoverage > 0.0 && d.y > 0.0) {
         float2 p = d.xz / (d.y + 0.1) * frame.cloudScale + frame.cloudOffset;
         float density = cloudNoise(p);

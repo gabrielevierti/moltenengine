@@ -20,6 +20,7 @@
 #include "Platform/Application.hpp"
 #include "Project/Project.hpp"
 
+#include <algorithm>
 #include <filesystem>
 
 using namespace molten;
@@ -47,7 +48,10 @@ public:
         std::optional<Project> project = projectPath.empty() ? std::nullopt : Project::load(projectPath, &error);
         if (project) {
             engine.assets().setProjectDirectory(project->assetsDirectory());
-            if (Window* window = engine.window()) window->setTitle(project->name);
+            if (Window* window = engine.window()) {
+                window->setTitle(project->name);
+                if (!project->icon.empty()) window->setIcon(project->assetsDirectory() + "/" + project->icon);
+            }
             // The project's code: packed beside the project, or where the editor builds it.
             fs::path library = isPacked ? fs::path(root) / "Game.dylib" : fs::path(project->libraryDirectory()) / "Game" / "Game.dylib";
             if (fs::exists(library, code) && !module_.load(library.string(), &error)) {
@@ -59,18 +63,42 @@ public:
         }
 
         // The scene: the project's first one, or the engine's sample when there is no project.
-        std::string sceneFile = project && !scenePath.empty() ? project->assetsDirectory() + "/" + scenePath
-                                                              : engine.assets().path("Scenes/demo.scene");
-        if (!loadSceneFile(sceneFile, engine.scene, materials_, engine.renderer().settings, sceneAssets(engine.assets()))) {
-            logError("no scene to play: %s could not be read", sceneFile.c_str());
+        // Loaded by name, as the game itself loads scenes: it can then start this one over
+        // (reloadScene) or go on to the next (loadScene).
+        std::string sceneName = project && !scenePath.empty() ? scenePath : std::string("Scenes/demo.scene");
+        if (!engine.loadSceneNow(sceneName)) logError("no scene to play: %s could not be read", sceneName.c_str());
+        // The splash first, unless the project turned it off or nobody is watching.
+        bool wantsSplash = engine.window() != nullptr && !engine.config().hasArgument("--no-splash") && (!project || project->showsSplash);
+        splashSeconds_ = wantsSplash ? 0.0f : Splash::kDuration;
+        subtitle_ = project ? project->name : std::string();
+        engine.runsComponents = !wantsSplash;
+        engine.isSimulationPaused = wantsSplash;        // the game waits behind the splash
+    }
+
+    void draw(Engine& engine, Canvas& canvas) override {
+        if (Splash::isOver(splashSeconds_)) return;
+        if (!logo_ && !triedLogo_) {
+            triedLogo_ = true;
+            logo_ = engine.assets().texture("Branding/logo.png");
         }
-        engine.runsComponents = true;
-        engine.restartComponents();
+        Splash::draw(canvas, splashSeconds_, subtitle_, logo_.get());
+        splashSeconds_ += std::min(engine.time.unscaledDelta, 0.1f);
+        // A key, a click or a tap is "I have seen it".
+        bool skipped = engine.input.wasPressed(MouseButton::Left) || engine.input.wasPressed(Key::Space) ||
+                       engine.input.wasPressed(Key::Enter) || engine.input.wasPressed(Key::Escape);
+        if (skipped) splashSeconds_ = std::max(splashSeconds_, Splash::kDuration - 0.5f);
+        if (Splash::isOver(splashSeconds_) || skipped) {
+            engine.runsComponents = true;
+            engine.isSimulationPaused = false;
+        }
     }
 
 private:
+    std::shared_ptr<Texture> logo_;
+    bool triedLogo_ = false;
     GameModule module_;
-    std::vector<NamedMaterial> materials_;
+    float splashSeconds_ = Splash::kDuration;
+    std::string subtitle_;
 };
 
 }  // namespace

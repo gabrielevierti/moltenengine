@@ -9,6 +9,7 @@
 
 // Defined in MetalLayerBridge.mm.
 extern "C" void* mmAttachMetalLayer(GLFWwindow* window, void* device, unsigned long pixelFormat);
+extern "C" void mmSetDockIcon(const char* picturePath);
 
 namespace molten {
 
@@ -137,6 +138,21 @@ void Window::pollGamepad(Input& input) {
         state.axes[size_t(GamepadAxis::RightTrigger)] = pad.axes[GLFW_GAMEPAD_AXIS_RIGHT_TRIGGER] * 0.5f + 0.5f;
     }
     input.handleGamepad(state);
+
+    // And the first joystick that is not laid out like a controller: a radio, a flight stick.
+    JoystickState joystick;
+    for (int id = GLFW_JOYSTICK_1; id <= GLFW_JOYSTICK_LAST && !joystick.connected; id++) {
+        if (!glfwJoystickPresent(id) || glfwJoystickIsGamepad(id)) continue;
+        int axisCount = 0, buttonCount = 0;
+        const float* axes = glfwGetJoystickAxes(id, &axisCount);
+        const unsigned char* buttons = glfwGetJoystickButtons(id, &buttonCount);
+        if (!axes || axisCount <= 0) continue;
+        joystick.connected = true;
+        if (const char* name = glfwGetJoystickName(id)) joystick.name = name;
+        joystick.axes.assign(axes, axes + axisCount);
+        for (int i = 0; buttons && i < buttonCount; i++) joystick.buttons.push_back(buttons[i] == GLFW_PRESS);
+    }
+    input.handleJoystick(std::move(joystick));
 }
 
 CA::MetalDrawable* Window::nextDrawable() {
@@ -189,6 +205,10 @@ void Window::setCursorCaptured(bool captured) {
     glfwSetInputMode(window_, GLFW_CURSOR, captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
     if (glfwRawMouseMotionSupported()) glfwSetInputMode(window_, GLFW_RAW_MOUSE_MOTION, captured ? GLFW_TRUE : GLFW_FALSE);
     hasMousePosition_ = false;          // the pointer jumps when the mode changes: do not report that as movement
+}
+
+void Window::setIcon(const std::string& picturePath) {
+    mmSetDockIcon(picturePath.c_str());
 }
 
 void Window::setTitle(const std::string& title) {

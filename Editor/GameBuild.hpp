@@ -5,6 +5,7 @@
 
 #include "Project/Project.hpp"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,14 @@ struct BuildResult {
 
 /// The .cpp files in the project's Source folder, in every subfolder.
 std::vector<std::string> gameSourceFiles(const Project& project);
+
+/// A number that changes whenever a file of the Source folder is added, removed or saved.
+uint64_t gameSourceSignature(const Project& project);
+
+/// Makes Source/<name>.cpp with a component called `name` in it, ready to be filled in.
+/// The name must be usable in C++: letters, digits and _, not starting with a digit.
+/// Returns the new file's path, or "" with the reason in `error`.
+std::string createScriptFile(const Project& project, const std::string& name, std::string* error = nullptr);
 
 /// Compiles the project's Source folder into Library/Game/Game-<number>.dylib (a new
 /// file each time: a library that is loaded cannot be replaced on disk) and copies it

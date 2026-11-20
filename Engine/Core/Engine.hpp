@@ -16,6 +16,7 @@
 #include "Audio/Audio.hpp"
 #include "Core/Game.hpp"
 #include "Core/Time.hpp"
+#include "Core/World.hpp"
 #include "Input/Input.hpp"
 #include "Physics/Physics.hpp"
 #include "Platform/Window.hpp"
@@ -60,7 +61,7 @@ struct EngineConfig {
     static EngineConfig fromArguments(int argc, char** argv);
 };
 
-class Engine {
+class Engine : public World {
 public:
     explicit Engine(const EngineConfig& config = EngineConfig());
     ~Engine();
@@ -81,18 +82,28 @@ public:
 
     // ---- the parts. A game uses them directly.
 
-    Scene scene;
-    Physics physics;
-    Input input;
-    Time time;
 
     Renderer& renderer() { return *renderer_; }
     Assets& assets() { return *assets_; }
     Audio& audio() { return *audio_; }
+    /// Writes pixels (four bytes each: red, green, blue, alpha; rows from the top) as a PNG file.
+    bool writeImage(const std::string& path, const std::vector<uint8_t>& pixels, int width, int height);
     /// Lines in 3D for the next frame: engine.debug().line(a, b, color).
     DebugDraw& debug() { return renderer_->debug; }
     /// nullptr when running without a window (EngineConfig::capturePath).
     Window* window() { return window_.get(); }
+
+    // ---- what a World leaves to an engine
+    void playSound(const std::string& name, float volume = 1.0f) override;
+    std::string assetPath(const std::string& name) const override;
+    std::shared_ptr<Mesh> loadMesh(const std::string& name) override;
+    std::shared_ptr<Material> loadMaterial(const std::string& name) override;
+    void showMesh(Entity entity, const MeshData& data) override;
+    uint32_t beginSound(const std::string& name, float volume, float pitch, bool loops) override;
+    void adjustSound(uint32_t sound, float volume, float pitch) override;
+    void endSound(uint32_t sound) override;
+    std::shared_ptr<Texture> loadTexture(const std::string& name, TextureFormat format) override;
+    Engine* asEngine() override { return this; }
 
     // ---- conveniences
 
@@ -114,24 +125,15 @@ public:
     /// Saves the next frame to a PNG file.
     void saveScreenshot(const std::string& path) { pendingScreenshot_ = path; }
 
-    /// While true, physics stands still: bodies keep the place their Transform gives them.
-    /// An editor sets this while a scene is being edited.
-    bool isSimulationPaused = false;
 
-    /// While true, the components a game declared with MOLTEN_COMPONENT run: start() once
-    /// per component, then update() every frame and fixedUpdate() every physics step.
-    /// An editor turns this off while a scene is being edited.
-    bool runsComponents = true;
-    /// Makes every component start() again: call it when a scene is loaded or play begins.
-    void restartComponents() { startedComponents_.clear(); }
 
     bool showsStatistics = false;       // F1
     bool showsColliders = false;        // F2
 
 private:
     void simulate(Game& game, double realDelta);
+    void sceneWasLoaded(const std::string& sceneText) override;
     void runBehaviors(bool isFixedStep, float dt);
-    void runComponents(bool isFixedStep, float dt);
     void handleDeveloperKeys();
     void drawStatistics();
     void drawColliders();
@@ -147,7 +149,6 @@ private:
     std::shared_ptr<Font> font_;
     std::string pendingScreenshot_;
     std::vector<Entity> behaviorEntities_;
-    std::unordered_map<std::string, std::unordered_set<uint64_t>> startedComponents_;   // by type name: the entities whose start() ran
     Game* game_ = nullptr;              // between begin() and end()
     double previousTime_ = 0;
     int capturedFrames_ = 0;

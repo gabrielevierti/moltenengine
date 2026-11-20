@@ -23,37 +23,6 @@ const char* const kGitIgnore =
     "Settings/\n"
     ".DS_Store\n";
 
-/// What a new project's Source folder starts with: one component that does something
-/// visible, with every part of a component in it.
-const char* const kFirstSourceFile = R"(// The game's code. Every .cpp file in this folder is built into the game: in the editor
-// with Game > Build Game Code (Cmd+B), and again when the game is exported.
-#include "MoltenMetal.hpp"
-
-using namespace molten;
-
-// A component is a plain struct. Add it to an entity in the editor with Add Component.
-struct Spinner {
-    float turnsPerSecond = 0.25f;
-    Vec3 axis{0, 1, 0};
-
-    // Called every frame while the game plays. `self` is the entity this component is on.
-    void update(Engine& engine, Entity self, float dt) {
-        if (Transform* transform = engine.scene.get<Transform>(self)) {
-            Quat turn = axisAngle(safeNormalize(axis), turnsPerSecond * 2.0f * kPi * dt);
-            transform->rotation = simd::normalize(turn * transform->rotation);
-        }
-    }
-
-    // Also available, with the same arguments:
-    //   void start(Engine& engine, Entity self);                    once, when play begins
-    //   void fixedUpdate(Engine& engine, Entity self, float dt);    every physics step
-};
-
-// This line makes the component known to the editor and to scene files. The fields
-// listed here are the ones shown in the inspector and saved.
-MOLTEN_COMPONENT(Spinner, MOLTEN_FIELD(turnsPerSecond).range(-4, 4), MOLTEN_FIELD(axis))
-)";
-
 }  // namespace
 
 std::string Project::fileNameFor(const std::string& name) {
@@ -75,6 +44,8 @@ std::string Project::toText() const {
     if (!startScene.empty()) out += "startScene " + text::quote(startScene) + "\n";
     out += "version " + text::quote(version) + "\n";
     if (!identifier.empty()) out += "identifier " + text::quote(identifier) + "\n";
+    if (!showsSplash) out += "splash 0\n";
+    if (!icon.empty()) out += "icon " + text::quote(icon) + "\n";
     return out;
 }
 
@@ -89,6 +60,8 @@ std::optional<Project> Project::fromText(const std::string& contents) {
         else if (words[0] == "startScene") project.startScene = words[1];
         else if (words[0] == "version") project.version = words[1];
         else if (words[0] == "identifier") project.identifier = words[1];
+        else if (words[0] == "splash") project.showsSplash = words[1] != "0";
+        else if (words[0] == "icon") project.icon = words[1];
     }
     return project;
 }
@@ -127,7 +100,8 @@ std::optional<Project> Project::load(const std::string& path, std::string* error
     return project;
 }
 
-std::optional<Project> Project::create(const std::string& parentDirectory, const std::string& name, std::string* error) {
+std::optional<Project> Project::create(const std::string& parentDirectory, const std::string& name, std::string* error,
+                                       const std::string& templateDirectory) {
     std::string trimmed = name;
     while (!trimmed.empty() && trimmed.back() == ' ') trimmed.pop_back();
     while (!trimmed.empty() && trimmed.front() == ' ') trimmed.erase(trimmed.begin());
@@ -145,7 +119,7 @@ std::optional<Project> Project::create(const std::string& parentDirectory, const
     Project project;
     project.name = trimmed;
     project.directory = directory.lexically_normal().string();
-    for (const char* folder : {"Assets/Scenes", "Assets/Models", "Assets/Textures", "Assets/Audio", "Source", "Plugins", "Settings", "Library"}) {
+    for (const char* folder : {"Assets/Scenes", "Assets/Models", "Assets/Textures", "Assets/Audio", "Assets/Scripts", "Plugins", "Settings", "Library"}) {
         fs::create_directories(directory / folder, code);
         if (code) {
             fail(error, "Cannot create " + (directory / folder).string() + ": " + code.message());
@@ -153,7 +127,24 @@ std::optional<Project> Project::create(const std::string& parentDirectory, const
         }
     }
     text::writeFile((directory / ".gitignore").string(), kGitIgnore);
-    text::writeFile((directory / "Source" / "Game.cpp").string(), kFirstSourceFile);
+    // An empty project has no scripts: its Scripts folder is for the ones its maker writes
+    // (Game > New Script, or + New > Script in the Explorer).
+    if (!templateDirectory.empty()) {
+        // The template's own files: what it is made of, not what the editor keeps about it.
+        std::optional<Project> source = load(templateDirectory, error);
+        if (!source) return std::nullopt;
+        for (const char* folder : {"Assets", "Source", "Plugins"}) {
+            fs::path from = fs::path(source->directory) / folder;
+            if (!fs::is_directory(from, code)) continue;
+            fs::copy(from, directory / folder, fs::copy_options::recursive | fs::copy_options::overwrite_existing, code);
+            if (code) {
+                fail(error, "Cannot copy " + from.string() + ": " + code.message());
+                return std::nullopt;
+            }
+        }
+        project.startScene = source->startScene;
+        project.showsSplash = source->showsSplash;
+    }
     project.file = project.filePath();
     if (!project.save(error)) return std::nullopt;
     return project;
@@ -163,6 +154,28 @@ bool Project::save(std::string* error) const {
     if (text::writeFile(filePath(), toText())) return true;
     fail(error, "Cannot write " + filePath());
     return false;
+}
+
+// ---------------------------------------------------------------- templates
+
+std::vector<ProjectTemplate> projectTemplates(const std::string& templatesDirectory) {
+    std::vector<ProjectTemplate> found;
+    std::error_code code;
+    for (const fs::directory_entry& entry : fs::directory_iterator(templatesDirectory, code)) {
+        if (!entry.is_directory(code)) continue;
+        std::optional<Project> project = Project::load(entry.path().string());
+        if (!project) continue;
+        ProjectTemplate item;
+        item.name = project->name;
+        item.directory = project->directory;
+        if (std::optional<std::string> description = text::readFile((entry.path() / "template.txt").string())) {
+            item.description = *description;
+            while (!item.description.empty() && (item.description.back() == '\n' || item.description.back() == ' ')) item.description.pop_back();
+        }
+        found.push_back(std::move(item));
+    }
+    std::sort(found.begin(), found.end(), [](const ProjectTemplate& a, const ProjectTemplate& b) { return a.name < b.name; });
+    return found;
 }
 
 // ---------------------------------------------------------------- recent projects

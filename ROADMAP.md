@@ -15,7 +15,7 @@ Milestones are not dated. A few of them are large enough that they will take mon
 
 *What is in the repository now.*
 
-- One engine, C++ only. The Swift twin of the tutorial engine is gone; Marble and FPV are samples.
+- One engine, C++ only. The Swift twin of the tutorial engine is gone; Marble and FPV were its samples (since removed: the example projects took their place).
 - Projects: create, open, recent list, settings, a folder structure made for version control.
 - Asset database with identifiers that survive renames (`.meta` files); asset browser with import, move, rename, Trash.
 - Hierarchy with drag-and-drop parenting, multi-selection, search, rename.
@@ -24,6 +24,8 @@ Milestones are not dated. A few of them are large enough that they will take mon
 - Undo for everything, play mode in place, dockable layout.
 - Editor plugins in C++: panels, menus, component editors, create entries, viewport overlays.
 - **Game code in the project**: components declared in C++ with their fields, shown, saved and run; rebuilt and reloaded from the editor; a player; export of a Mac application. *(The first part of 0.3.)*
+- **Scripts**: New Script and rebuild-on-save for C++; **visual scripting** with a node editor, about forty nodes and live editing during play. *(Ahead of 0.3 and of "after 1.0".)*
+- A splash screen for the editor and for exported games.
 - **iPhone and iPad**: the platform layer, touch, and the player as an iOS application built with Xcode. *(The first part of 0.7.)*
 - **Ray tracing**: acceleration structures for every mesh and for the scene, and ray-traced sun shadows with soft edges. *(The first part of 0.8.)*
 
@@ -51,6 +53,10 @@ Milestones are not dated. A few of them are large enough that they will take mon
 - ✅ **The game module.** A project's `Source/` folder builds into a dynamic library the editor loads; components are declared with one macro.
 - ✅ **Reflection.** Fields declared once appear in the inspector, are saved in scenes, and are undoable.
 - ✅ **Reload of game code** in the editor: rebuild, and the scene continues with the new code.
+- ✅ **A game without code.** Ready-made components for moving, following, collecting, health and damage, shooting, spawning, score and goals; collision and trigger events for components and visual scripts; shared values; scene changes and restart.
+- ✅ **Prefabs**: save part of a scene, place it, spawn it while the game runs. Still to come: placed copies that follow their prefab, overrides, nesting.
+- ✅ **Project templates**, each played start to finish by the tests without a screen.
+- **Visual scripts, next**: undo on the board, multi-selection, copy and paste, zoom, comments; nodes for other entities, collisions, timers, loops and sound; scripts as functions of other scripts.
 - Field types still to come: references to entities, assets and prefabs; enumerations; lists.
 - Building in the background, with the editor responsive and errors that jump to the line.
 - Keeping the running state across a rebuild while playing (today a rebuild stops play).
@@ -138,6 +144,7 @@ Milestones are not dated. A few of them are large enough that they will take mon
 
 *Done when: a boat rides waves under a storm, a fire spreads smoke the wind carries, and none of it is an animation.*
 
+- ✅ A first step: a global wind with gusts that particles follow, and ready-made fire, smoke, sparks, explosions, rain and snow built on the CPU particle system. What follows replaces them with simulation.
 - **Wind** as a field the whole engine reads: global direction and gusts plus local sources; vegetation, cloth, particles, smoke and water all respond to it.
 - **Water**: ocean from a wave spectrum (FFT), rivers and lakes with shallow-water flow, buoyancy, foam, refraction, caustics, underwater rendering; reflections from the ray tracer where available.
 - **Fire and smoke**: fluid simulation on a GPU grid in compute, rendered through the volume system, lighting the scene around it.
@@ -146,7 +153,7 @@ Milestones are not dated. A few of them are large enough that they will take mon
 
 ## After 1.0
 
-Terrain with sculpting and layers, foliage and procedural placement, world streaming for large maps, a visual scripting layer over the C++ API, networking, localization, accessibility helpers, an asset store format. Their order will follow what the people making games with Molten need first.
+Terrain with sculpting and layers, foliage and procedural placement, world streaming for large maps, networking, localization, accessibility helpers, an asset store format. Their order will follow what the people making games with Molten need first.
 
 ---
 
@@ -154,3 +161,83 @@ Terrain with sculpting and layers, foliage and procedural placement, world strea
 
 - **Other platforms.** No Vulkan, no DirectX, no abstraction layer in case there is one some day. Every design decision may assume a tile-based Apple GPU with unified memory.
 - **Other languages for the engine.** C++ throughout, Objective-C++ only where a system API demands it, Metal Shading Language for shaders.
+
+## The long list
+
+What a modern engine has, and where Molten stands. `[x]` is there and tested, `[~]` is there in part, `[ ]` is not.
+Work goes down this list in the order of the section "Next".
+
+### Next
+1. [x] Bodies that turn, contacts at points, joints (ball, hinge, fixed, distance and rope, breaking)
+2. [~] glTF import (.gltf, .glb): meshes, materials' factors, skeletons, animations played by `Animator` with easing between clips.
+   Still to do: its textures, blend shapes, state machines and blend trees, IK, skinning on the GPU
+3. [~] Ray traced reflections that show what is reflected (in its color and light, without its textures or its true facing);
+   global illumination as one traced bounce per pixel. Never yet compiled on a Mac. Still to do: a denoiser, probes for scenes without ray tracing
+4. [~] Water from an FFT ocean: a moving surface with sharp crests, foam where waves break, things that float on the waves.
+   Still to do: refraction and depth colour (they need a copy of the picture behind the water), shore, wakes, underwater, an endless sea that follows the camera
+5. [~] Fog walked through from the eye, lit where the shadow maps say the sun reaches: shafts of light. Clouds with depth,
+   marched through and lit from the sun's side. Never yet compiled on a Mac. Still to do: fog in froxels (shared by all pixels and
+   lit by every light), shafts with ray traced shadows and against the sky, local volumes of smoke and gas, clouds that shade the ground
+6. [~] Liquids made of drops (position based fluids) that fill what holds them and pour. [ ] Particles on the GPU, an effects editor
+7. [~] Mesh colliders: solid hills, tracks and models as they are shaped (the Flying project's hills are one). [ ] Convex ones, and mesh against mesh.
+8. [~] Shaders written by hand as assets (`.shader`: a surface function and its properties), chosen in a material beside Lit, Unlit and Water,
+   compiled with the engine's own and again when saved; a mistake is reported and costs nothing else. Not yet seen compiling on a Mac.
+   [ ] Their own textures, a vertex stage, unlit and transparent variants, the preview ball drawn with them
+9. [~] Import settings for pictures, models and sounds, kept in the file's `.meta` and changed in the Viewer (pictures: color or data, largest size,
+   sharp pixels, mipmaps, upside down; models: scale, Z up, centered, smooth normals, faces turned; sounds: mono, rate, normalized, volume).
+   [ ] Compressed textures, wrap modes, per-platform settings, glTF materials and animations chosen at import
+10. [~] Effects: emitters with shapes (sphere, box, ring), a middle color and size, repeating bursts, a duration, turbulence, bouncing; nine to start
+    from (fire, smoke, sparks, explosion, dust, rain, snow, magic, fountain); `.effect` files; an effect editor in the Viewer with a running preview.
+    [ ] Particles simulated on the GPU, textured and turning particles, trails, sub-emitters
+11. [~] An interface made of pieces (text, button, panel, image, bar, touch stick, touch button) created from the Hierarchy and laid out by
+    dragging in the Game view, with anchors; all of them work with the mouse as with a finger. A Build and Export window in steps.
+    [ ] Layout groups, lists and scrolling, sliders and text fields, fonts chosen per text, pieces inside pieces
+    [~] Exporting for iPhone and iPad from the editor without a terminal; an icon for the editor and one per game, chosen in the Build
+    window (the engine's until then), made into `.icns` for the Mac and the icon sizes of iOS. Not yet seen on a Mac. [ ] Orientation and safe areas
+12. [~] A glTF file's parts by material as meshes of their own (`Models/car.glb#3`), so each takes its own material.
+    The Driving project rebuilt on them: a circuit with curbs, walls, a paddock and lamps, a timed lap, headlights and brake lights,
+    exhaust and tyre smoke, brakes shared by the load on each wheel, a dashboard and touch controls
+
+### Rendering
+- [~] Ray tracing: sun shadows, ambient occlusion, reflections of objects, one bounce of light. [ ] shadows of point and spot lights, denoiser, textures in reflections
+- [~] Global illumination: one traced bounce. [ ] baked lightmaps, probes, DDGI, path tracer for reference
+- [ ] Many lights (clustered), [ ] GPU-driven rendering, occlusion culling, automatic LOD
+- [~] Shadows: cascades. [ ] contact shadows, virtual shadow maps
+- [ ] Temporal upscaling (MetalFX), TAA, dynamic resolution
+- [~] Post: bloom, tone mapping, vignette, ambient occlusion. [ ] motion blur, depth of field, colour grading LUT, auto exposure
+- [~] Materials: lit, unlit, water. [ ] shader graph, subsurface, clear coat, anisotropy, cloth, hair, refraction, decals, parallax
+- [~] Sky, clouds flat or with depth, fog with height and shafts of light. [ ] physical atmosphere, day and night, weather
+- [ ] Terrain: heightmap, layers, sculpting, streaming
+- [ ] Vegetation: instancing, grass, wind, impostors
+- [~] Water: FFT ocean with foam, floating. [ ] refraction, rivers, shore, underwater
+- [~] Effects: CPU particles with presets. [ ] GPU particles, node editor, trails, ribbons
+
+### Animation
+- [x] Skeletons, skinning (on the CPU), clips with easing between them. [ ] blend shapes, state machines, blend trees, root motion, IK, ragdoll, timeline
+
+### Physics
+- [x] Rotation, joints, stacking. [~] Vehicles from parts. [x] Buoyancy at a level
+- [x] Liquids made of drops. [ ] Convex and mesh colliders, continuous detection, character controller, cloth, soft bodies, ropes with links, fracture
+
+### Audio
+- [~] Looping voices with pitch and volume, layered engines. [ ] HRTF, occlusion, reverb zones, mixer buses, streaming, adaptive music
+
+### Gameplay
+- [ ] Navmesh and pathfinding, behaviour trees, save games, localization
+
+### Game interface
+- [~] Text and shapes on a canvas that follows the screen's shape. [ ] visual editor with anchors, rich text, gamepad navigation
+
+### Editor
+- [x] Scene and Game views, layouts, Explorer with previews, Viewer, tags and layers, joystick input, screen shapes
+- [~] Prefabs. [ ] variants and overrides, nested prefabs
+- [ ] Profiler, frame debugger, version control, packages
+
+### Assets
+- [~] OBJ, glTF, PNG, WAV. [ ] FBX, USD, compressed textures and audio, streaming, bundles
+
+### Platforms and network
+- [~] macOS; iOS in part. [ ] visionOS, tvOS, signing and App Store packaging, haptics, multiplayer, Game Center
+
+### Architecture
+- [ ] Job system, data-oriented ECS for large scenes, additive scenes and world streaming

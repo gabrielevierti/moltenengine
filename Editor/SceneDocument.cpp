@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <unordered_map>
 
 namespace molten::editor {
 
@@ -41,7 +42,9 @@ void SceneDocument::createCamera() {
     camera.farPlane = 2000.0f;
     engine_.scene.add(camera_, camera);
     engine_.scene.add(camera_, EditorOnly{});
-    engine_.renderer().cameraOverride = isPlaying_ ? Entity{} : camera_;
+    // The editor's camera is the scene view's alone (see Renderer::views): the game never looks through it.
+    engine_.scene.get<Camera>(camera_)->isActive = false;
+    engine_.renderer().cameraOverride = Entity{};
 }
 
 void SceneDocument::syncCamera() {
@@ -364,9 +367,72 @@ Entity SceneDocument::createFromMesh(const std::string& meshName, Vec3 position)
     return entity;
 }
 
+bool SceneDocument::savePrefab(Entity root, const std::string& absolutePath) {
+    Scene& scene = engine_.scene;
+    if (!scene.isAlive(root)) return false;
+    std::vector<Entity> tree;
+    scene.each<Transform>([&](Entity entity, Transform&) {
+        if (entity == root || isDescendant(entity, root)) tree.push_back(entity);
+    });
+    // In the file the root sits at the origin: where a prefab goes is decided when it is used.
+    Transform* transform = scene.get<Transform>(root);
+    Vec3 position = transform->position;
+    transform->position = Vec3{0, 0, 0};
+    std::string text = writeScene(scene, materials, RenderSettings{}, &tree);
+    scene.get<Transform>(root)->position = position;
+    return text::writeFile(absolutePath, text);
+}
+
+Entity SceneDocument::instantiatePrefab(const std::string& assetName, Vec3 position) {
+    std::optional<std::string> contents = text::readFile(engine_.assets().path(assetName));
+    if (!contents) return Entity{};
+    std::vector<NamedMaterial> prefabMaterials;
+    RenderSettings ignored;
+    std::vector<Entity> created;
+    if (!readScene(*contents, engine_.scene, prefabMaterials, ignored, sceneAssets(engine_.assets()), &created) || created.empty()) return Entity{};
+    // The prefab's materials join the scene's. One the scene already has by that name is
+    // used instead, so putting the same prefab in twice does not make two of each.
+    for (const NamedMaterial& named : prefabMaterials) {
+        std::shared_ptr<Material> kept;
+        for (const NamedMaterial& existing : materials) {
+            if (existing.name == named.name) kept = existing.material;
+        }
+        if (!kept) {
+            materials.push_back(named);
+            continue;
+        }
+        for (Entity entity : created) {
+            MeshRenderer* renderer = engine_.scene.get<MeshRenderer>(entity);
+            if (renderer && renderer->material == named.material) renderer->material = kept;
+        }
+    }
+    Entity root = created.front();
+    for (Entity entity : created) {
+        const Transform* transform = engine_.scene.get<Transform>(entity);
+        if (transform && !engine_.scene.isAlive(transform->parent)) {
+            root = entity;
+            break;
+        }
+    }
+    if (Transform* transform = engine_.scene.get<Transform>(root)) transform->position = position;
+    for (Entity entity : created) entities_.push_back(entity);
+    engine_.scene.updateTransforms();
+    select(root);
+    markChanged();
+    return root;
+}
+
 void SceneDocument::copyComponents(Entity from, Entity to) {
     Scene& scene = engine_.scene;
     // Components are plain values: copying an entity is copying each one.
+    if (const Tag* c = scene.get<Tag>(from)) {
+        Tag value = *c;
+        scene.add(to, value);
+    }
+    if (const DisabledComponents* c = scene.get<DisabledComponents>(from)) {
+        DisabledComponents value = *c;
+        scene.add(to, value);
+    }
     if (const MeshRenderer* c = scene.get<MeshRenderer>(from)) scene.add(to, *c);
     if (const Light* c = scene.get<Light>(from)) scene.add(to, *c);
     if (const Camera* c = scene.get<Camera>(from)) {
@@ -451,6 +517,13 @@ void SceneDocument::setWorldMatrix(Entity entity, const Mat4& world) {
     if (const Transform* parent = scene.get<Transform>(transform->parent)) local = simd::inverse(parent->world) * world;
     decompose(local, transform->position, transform->rotation, transform->scale);
     transform->world = world;
+    // While the game runs, physics decides where a body is: tell it, or the entity would
+    // snap back on the next step.
+    if (RigidBody* body = scene.get<RigidBody>(entity); body && isPlaying_) {
+        body->position = transform->position;
+        body->previousPosition = transform->position;
+        body->velocity = Vec3{0, 0, 0};
+    }
 }
 
 bool SceneDocument::reparent(Entity child, Entity newParent) {
@@ -514,6 +587,15 @@ void SceneDocument::redo() {
 
 // ---------------------------------------------------------------- play
 
+Entity SceneDocument::gameCamera() const {
+    Entity found;
+    Scene& scene = engine_.scene;
+    scene.each<Camera, Transform>([&](Entity entity, Camera& camera, Transform&) {
+        if (!found.isValid() && camera.isActive && !scene.has<EditorOnly>(entity)) found = entity;
+    });
+    return found;
+}
+
 /// Play runs the scene: physics starts and the scene's own camera takes over. Stop puts
 /// everything back exactly as it was, from the text the scene was written to in memory.
 void SceneDocument::setPlaying(bool playing) {
@@ -524,23 +606,62 @@ void SceneDocument::setPlaying(bool playing) {
         beforePlay_ = snapshot();
         isPlaying_ = true;
         engine_.physics.reset();
-        // Without a camera of its own the scene is watched through the editor's.
-        bool hasCamera = false;
-        Entity editorCamera = camera_;
-        scene.each<Camera>([&](Entity entity, Camera& camera) {
-            hasCamera = hasCamera || (entity != editorCamera && camera.isActive);
-        });
-        engine_.renderer().cameraOverride = hasCamera ? Entity{} : camera_;
-        if (Camera* own = scene.get<Camera>(camera_)) own->isActive = !hasCamera;
+        // The game may start the scene over, or go to another: it returns to what is open
+        // here, saved or not, and the editor's camera is put back into whatever it loads.
+        engine_.noteScene(filePath.empty() ? std::string("Untitled") : std::filesystem::path(filePath).filename().string(), beforePlay_);
+        stepIsRunning_ = false;
+        engine_.onSceneLoaded = [this] {
+            if (!isPlaying_) return;
+            createCamera();
+            selection_.clear();
+        };
         engine_.isSimulationPaused = false;
         engine_.restartComponents();        // every component's start() runs again
         engine_.runsComponents = true;
     } else {
         isPlaying_ = false;
+        engine_.onSceneLoaded = nullptr;
+        engine_.clearValues();              // the score of one run is not the next one's
+        engine_.stopSounds();               // nor its engines and music
         engine_.isSimulationPaused = true;
         engine_.runsComponents = false;
         restore(beforePlay_);
     }
+}
+
+void SceneDocument::stepFrame() {
+    if (!isPlaying_) return;
+    setPaused(false);
+    stepIsRunning_ = true;                  // beginFrame pauses again once the frame has run
+}
+
+void SceneDocument::alignSelectionWithView() {
+    if (selection_.empty()) return;
+    engine_.scene.updateTransforms();
+    for (Entity entity : selection_) {
+        const Transform* transform = engine_.scene.get<Transform>(entity);
+        if (!transform) continue;
+        // Its size stays; where it is and which way it faces become the view's.
+        Vec3 position, scale;
+        Quat rotation;
+        decompose(transform->world, position, rotation, scale);
+        setWorldMatrix(entity, compose(cameraPosition, cameraRotation(), scale));
+    }
+    engine_.scene.updateTransforms();
+    markChanged();
+}
+
+void SceneDocument::alignViewWithSelection() {
+    const Transform* transform = engine_.scene.get<Transform>(primary());
+    if (!transform) return;
+    Vec3 position, scale;
+    Quat rotation;
+    decompose(transform->world, position, rotation, scale);
+    Vec3 angles = toEulerAngles(rotation);  // pitch, yaw, roll: the view has no roll
+    cameraPosition = position;
+    cameraPitch = std::clamp(angles.x, -1.55f, 1.55f);
+    cameraYaw = angles.y;
+    syncCamera();
 }
 
 void SceneDocument::setPaused(bool paused) {
@@ -553,15 +674,51 @@ void SceneDocument::setPaused(bool paused) {
 /// down to its containers (they were made by the old code), `swap` loads the new code,
 /// and the text is read back: components come back by name, with the fields the new
 /// code has. Undo history is text too, so it survives.
+///
+/// A field that was left as the code gave it follows the code: change `float speed = 0;`
+/// to `= 1` in a script and every component that still had 0 has 1. A field the scene set
+/// to something else keeps what the scene says.
 void SceneDocument::reloadGameCode(const std::function<void()>& swap) {
     if (isPlaying_) setPlaying(false);
     engine_.scene.updateTransforms();
     std::string text = snapshot();
+    // What each field starts as, by type and field name, as the code of the moment says.
+    using Defaults = std::unordered_map<std::string, std::unordered_map<std::string, std::string>>;
+    auto defaultsNow = [] {
+        Defaults all;
+        Scene scratch;
+        Entity holder = scratch.create("defaults");
+        for (const ComponentType& type : ComponentRegistry::instance().types()) {
+            if (!type.add || type.fields.empty()) continue;
+            void* component = type.add(scratch, holder);
+            if (!component) continue;
+            for (const Field& field : type.fields) all[type.name][field.name] = field.valueText(component);
+        }
+        scratch.clear();
+        scratch.dropStorages();         // made by the code that is about to go
+        return all;
+    };
+    Defaults before = defaultsNow();
     engine_.scene.clear();
     engine_.scene.dropStorages();
     engine_.physics.reset();
     swap();
     restore(text);
+    Defaults after_ = defaultsNow();
+    for (const ComponentType& type : ComponentRegistry::instance().types()) {
+        auto was = before.find(type.name), is = after_.find(type.name);
+        if (was == before.end() || is == after_.end() || !type.collect || !type.get) continue;
+        std::vector<Entity> holders;
+        type.collect(engine_.scene, holders);
+        for (const Field& field : type.fields) {
+            auto old = was->second.find(field.name), fresh = is->second.find(field.name);
+            if (old == was->second.end() || fresh == is->second.end() || old->second == fresh->second) continue;
+            for (Entity entity : holders) {
+                void* component = type.get(engine_.scene, entity);
+                if (component && field.valueText(component) == old->second) field.setValueText(component, fresh->second);
+            }
+        }
+    }
     // What a scene says can change with the code (a field added or removed): that is not an edit.
     std::string after = snapshot();
     if (current_ == saved_) saved_ = after;
@@ -578,7 +735,12 @@ void SceneDocument::beginFrame() {
     });
     selection_.erase(std::remove_if(selection_.begin(), selection_.end(), [&](Entity entity) { return !scene.isAlive(entity); }),
                      selection_.end());
-    if (!isPlaying_) syncCamera();
+    syncCamera();
+    // A single step has had its frame.
+    if (stepIsRunning_) {
+        stepIsRunning_ = false;
+        setPaused(true);
+    }
 }
 
 void SceneDocument::endFrame(bool interacting) {

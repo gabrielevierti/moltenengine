@@ -1,3 +1,0 @@
-/Users/gabrielevierti/Desktop/Metal Game Engine/MoltenMetalEngine/build/_deps/stb-subbuild/CMakeFiles/stb-populate.dir
-/Users/gabrielevierti/Desktop/Metal Game Engine/MoltenMetalEngine/build/_deps/stb-subbuild/CMakeFiles/edit_cache.dir
-/Users/gabrielevierti/Desktop/Metal Game Engine/MoltenMetalEngine/build/_deps/stb-subbuild/CMakeFiles/rebuild_cache.dir

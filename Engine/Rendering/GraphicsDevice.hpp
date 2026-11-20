@@ -42,6 +42,7 @@ public:
     bool supportsRayTracing() const { return supportsRayTracing_; }
 
     MTL::SamplerState* materialSampler() const { return materialSampler_.get(); }      // trilinear, anisotropic, repeat
+    MTL::SamplerState* pixelSampler() const { return pixelSampler_.get(); }            // nearest, repeat: pixel art
     MTL::SamplerState* linearClampSampler() const { return linearClampSampler_.get(); }
     MTL::SamplerState* pointClampSampler() const { return pointClampSampler_.get(); }
     MTL::SamplerState* shadowSampler() const { return shadowSampler_.get(); }          // compares, then filters
@@ -60,7 +61,7 @@ private:
     NS::SharedPtr<MTL::CommandQueue> queue_;
     bool supportsMemoryless_ = false;
     bool supportsRayTracing_ = false;
-    NS::SharedPtr<MTL::SamplerState> materialSampler_, linearClampSampler_, pointClampSampler_, shadowSampler_;
+    NS::SharedPtr<MTL::SamplerState> materialSampler_, pixelSampler_, linearClampSampler_, pointClampSampler_, shadowSampler_;
     NS::SharedPtr<MTL::DepthStencilState> depthWrite_, depthReadOnly_, depthOff_;
 };
 

@@ -1,3 +1,0 @@
-/Users/gabrielevierti/Desktop/Metal Game Engine/MoltenMetalEngine/build/_deps/imgui-subbuild/CMakeFiles/imgui-populate.dir
-/Users/gabrielevierti/Desktop/Metal Game Engine/MoltenMetalEngine/build/_deps/imgui-subbuild/CMakeFiles/edit_cache.dir
-/Users/gabrielevierti/Desktop/Metal Game Engine/MoltenMetalEngine/build/_deps/imgui-subbuild/CMakeFiles/rebuild_cache.dir

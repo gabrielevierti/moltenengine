@@ -3,6 +3,8 @@
 // engine's renderer calls it at the end of its last pass (Renderer::overlay).
 #pragma once
 
+#include "Theme.hpp"
+
 #include "MoltenMetal.hpp"
 
 #include <string>
@@ -11,8 +13,9 @@ namespace molten::editor {
 
 class ImGuiLayer {
 public:
-    /// Needs a window: returns false when the engine runs without one (--capture).
-    /// `settingsFile` is where the layout of the windows is remembered.
+    /// `settingsFile` is where the layout of the windows is remembered. Without a window
+    /// (--capture) the interface is still drawn, at the size of the picture, so that a
+    /// capture of the editor shows the editor; nothing is remembered then.
     bool start(Engine& engine, const std::string& settingsFile);
     void shutdown(Engine& engine);
     bool isActive() const { return isActive_; }
@@ -28,12 +31,12 @@ private:
 
     bool isActive_ = false;
     bool hasFrame_ = false;
+    bool hasWindow_ = false;
+    Engine* engine_ = nullptr;
     std::string settingsFile_;
     NS::SharedPtr<MTL::Texture> formatTexture_;             // only tells ImGui which pixel format it draws into
     NS::SharedPtr<MTL::RenderPassDescriptor> formatPass_;
 };
 
-/// Molten's look: dark, quiet, one warm accent.
-void applyTheme(float scale);
 
 }  // namespace molten::editor
