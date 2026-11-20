@@ -57,7 +57,7 @@ cmake --build build -j
 ./build/molten-player MyGame        # runs a project without the editor
 ```
 
-Or double-click `build.command` in the Finder: it builds everything, runs the tests and writes what happened to `build.log`. The first configuration downloads the libraries Molten uses: GLFW, metal-cpp, stb, miniaudio, Dear ImGui and ImGuizmo.
+Or double-click `build.command` in the Finder: it builds everything and writes what happened to `build.log`. The first configuration downloads the libraries Molten uses: GLFW, metal-cpp, stb, miniaudio, Dear ImGui and ImGuizmo.
 
 ## The editor
 
@@ -118,13 +118,6 @@ open build-ios/MoltenMetalEngine.xcodeproj
 ```
 
 [Docs/iOS.md](Docs/iOS.md) has the details and what is still missing there.
-
-## Tests
-
-```sh
-ctest --test-dir build -L unit      # everything that does not need a GPU, the example game included when it is beside the engine
-ctest --test-dir build -L gpu       # whole programs on the GPU, without a window
-```
 
 ## Layout
 

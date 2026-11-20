@@ -21,8 +21,8 @@ vertex ParticleOut vertex_particle(uint vertexID [[vertex_id]],
     // The camera's right and up axes in world space are the first two rows of the view matrix.
     float3 right = float3(pass.view[0][0], pass.view[1][0], pass.view[2][0]);
     float3 up = float3(pass.view[0][1], pass.view[1][1], pass.view[2][1]);
-    float half = particle.positionAndSize.w * 0.5;
-    float3 world = particle.positionAndSize.xyz + (right * corner.x + up * corner.y) * half;
+    float radius = particle.positionAndSize.w * 0.5;
+    float3 world = particle.positionAndSize.xyz + (right * corner.x + up * corner.y) * radius;
 
     // A streak: as long as the way it goes in `stretch` seconds, its width across the view.
     float3 velocity = particle.velocityAndStretch.xyz;
@@ -37,7 +37,7 @@ vertex ParticleOut vertex_particle(uint vertexID [[vertex_id]],
         float3 across = cross(along, toEye);
         float acrossLength = length(across);
         across = acrossLength > 0.001 ? across / acrossLength : right;
-        world = particle.positionAndSize.xyz + across * (corner.x * half) + along * (corner.y * (half + speed * stretch * 0.5));
+        world = particle.positionAndSize.xyz + across * (corner.x * radius) + along * (corner.y * (radius + speed * stretch * 0.5));
         out.isStreak = 1.0;
     }
     out.position = pass.viewProjection * float4(world, 1.0);

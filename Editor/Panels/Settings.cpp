@@ -272,7 +272,10 @@ public:
 /// which the game ships with; code and components ask for actions by name.
 class InputPanel final : public Panel {
 public:
-    InputPanel() { title = "Input"; }
+    InputPanel() {
+        title = "Input";
+        isOpen = false;                 // opened when wanted (Window > Input): one tab less at the bottom
+    }
 
     void draw(EditorContext& editor) override {
         if (!editor.hasProject) {

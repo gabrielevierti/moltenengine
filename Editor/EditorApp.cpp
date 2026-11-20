@@ -71,7 +71,7 @@ void EditorApp::start(Engine& engine) {
     templates_ = projectTemplates(findRootDirectory() + "/Templates");
     makeMissingTemplatePreviews();
 
-    std::string layoutFile = userData + "/layout-5.ini";
+    std::string layoutFile = userData + "/layout-6.ini";     // a new name when the default changes: it is then laid out afresh
     std::error_code ignored;
     needsDefaultLayout_ = !fs::exists(layoutFile, ignored);
     if (!engine.window()) needsDefaultLayout_ = true;       // a capture shows the editor as it first opens
@@ -1339,9 +1339,10 @@ void EditorApp::buildDefaultLayout(ImGuiID dockSpace) {
         hierarchy = ImGui::DockBuilderSplitNode(strip, ImGuiDir_Left, 0.2f, nullptr, &strip);
         inspector = ImGui::DockBuilderSplitNode(strip, ImGuiDir_Right, 0.36f, nullptr, &bottom);
     } else {
-        // Default, as few places as there can be: the inspector down the right with a small viewer
-        // of the chosen asset under it; the explorer and the console as tabs along the bottom;
-        // the hierarchy on the left; the scene and the game as tabs of one big view in the middle.
+        // Default, as few places as there can be: the inspector down the right (Lighting and
+        // Rendering as its tabs) with a small viewer of the chosen asset under it; the explorer
+        // and the console as tabs along the bottom; the hierarchy on the left; the scene and the
+        // game as tabs of one big view in the middle. Input and Visual Script open when wanted.
         inspector = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.22f, nullptr, &center);
         viewer = ImGui::DockBuilderSplitNode(inspector, ImGuiDir_Down, 0.27f, nullptr, &inspector);
         bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.27f, nullptr, &center);

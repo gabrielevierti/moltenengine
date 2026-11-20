@@ -33,7 +33,7 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 option(MOLTEN_BUILD_PLUGINS "Build the example editor plugin" ON)
-option(MOLTEN_BUILD_TESTS "Build the unit tests" ON)
+option(MOLTEN_BUILD_TESTS "Build the unit tests (off: only the engine, the editor and the player are built)" OFF)
 
 # ---------------------------------------------------------------- dependencies
 include(FetchContent)

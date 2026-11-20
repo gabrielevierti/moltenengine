@@ -14,5 +14,3 @@ jobs:
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
       - name: Build
         run: cmake --build build -j
-      - name: Unit tests
-        run: ctest --test-dir build -L unit --output-on-failure

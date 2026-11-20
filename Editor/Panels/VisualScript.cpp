@@ -19,6 +19,7 @@ class VisualScriptPanel final : public Panel {
 public:
     VisualScriptPanel() {
         title = "Visual Script";
+        isOpen = false;                 // opens with a script (Edit Script, a double-click), or from the Window menu
         isOpen = false;                 // opens when a script is opened
     }
 

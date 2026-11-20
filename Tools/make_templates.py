@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Writes the example projects, which are not part of the engine but a download of their
-own: into ../MoltenProjects, or the folder given as the first argument; with --zip, also
-as MoltenProjects.zip beside that folder. Small, complete games made only of
+own: into ../MoltenProjects, or the folder given as the first argument (Driving; Showcase too
+with --showcase); with --zip, also as MoltenProjects.zip beside that folder. Small, complete games made only of
 what the editor offers (the kit's components, prefabs, a visual script), each a project
 that can be opened as it is. Run from the repository's root:  python3 Tools/make_templates.py
 
@@ -47,6 +47,11 @@ class Scene:
     def entity(self, name, position=(0, 0, 0), rotation=(0, 0, 0, 1), scale=(1, 1, 1)):
         self.lines.append("entity " + q(name))
         self.lines.append("  transform " + n(*position, *rotation, *scale))
+        return self
+
+    def inactive(self):
+        """The entity just added starts switched off: it and everything under it (a menu the game opens)."""
+        self.lines.append("  inactive")
         return self
 
     def mesh(self, mesh, material, shadows=True):
@@ -352,7 +357,7 @@ def add_car(s, folder, layout, start, heading, gates=0, far=3000):
         piece("Weather Now", "HudText", text="{weather:SUN|CLOUDS|RAIN}", anchor=(1, 0), offset=(-28, 30), size=14, color=(1, 1, 1, 0.7))
         piece("Pause Button", "UIButton", label="II", isRound=True, radius=26, anchor=(0, 0), offset=(46, 44), color=(1, 1, 1, 0.45))
         # In the pit lane: the limiter, the stop, and the tyres for it.
-        s.entity("Pit Panel").under(ui)
+        s.entity("Pit Panel").under(ui).inactive()               # shown by Tyres in the pit lane
         pit_panel = s.index()
         def pit_piece(name, component, **fields):
             s.entity(name).under(pit_panel)
@@ -518,7 +523,9 @@ def add_menus(s):
     s.entity("Game").component("GameMenu", showsTitle=True)
     dim, orange = (0.02, 0.022, 0.03, 0.62), (1.0, 0.5, 0.18, 0.95)
     def group(name):
-        s.entity(name)
+        # Off in the scene: the race's interface is what is laid out in the Game view; GameMenu
+        # switches these on when the game opens them. To lay one out, switch it on in the Inspector.
+        s.entity(name).inactive()
         return s.index()
     def piece(parent, name, component, **fields):
         s.entity(name).under(parent)
@@ -1042,7 +1049,8 @@ def showcase():
 
 if __name__ == "__main__":
     driving()
-    showcase()
+    # The showcase of everything is made only on asking: the project worked on is Driving.
+    if "--showcase" in sys.argv: showcase()
     print("wrote the example projects to", os.path.normpath(ROOT))
     if "--zip" in sys.argv:
         import zipfile
