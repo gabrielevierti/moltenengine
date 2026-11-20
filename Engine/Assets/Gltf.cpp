@@ -214,6 +214,12 @@ std::optional<GltfModel> GltfModel::parse(const std::string& jsonText, const std
         if (material["emissiveFactor"].size() == 3) {
             out.emissive = Vec3{float(material["emissiveFactor"][0].asNumber()), float(material["emissiveFactor"][1].asNumber()), float(material["emissiveFactor"][2].asNumber())};
         }
+        int texture = pbr["baseColorTexture"]["index"].asInt(-1);
+        if (texture >= 0) {
+            int image = root["textures"][texture]["source"].asInt(-1);
+            if (image >= 0) out.baseColorTexture = root["images"][image]["uri"].asString();
+            if (out.baseColorTexture.rfind("data:", 0) == 0) out.baseColorTexture.clear();
+        }
         model.materials.push_back(out);
     }
 

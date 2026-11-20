@@ -48,6 +48,9 @@ public:
     /// per component, update() every frame, fixedUpdate() every physics step, and the
     /// events (onCollision, onTriggerEnter). An editor turns this off while editing.
     bool runsComponents = true;
+    /// While components do not run, the interface is still drawn: an editor lays it out there.
+    /// A game's player turns it off, so that nothing of the game shows behind its splash.
+    bool showsInterfaceWhileStopped = true;
     /// Makes every component start() again: when a scene is loaded or play begins.
     void restartComponents() { startedComponents_.clear(); }
 
@@ -151,6 +154,15 @@ public:
     void advance(double realDelta);
     /// Calls draw() on the components that have one. An Engine does this with its own canvas.
     void drawComponents(Canvas& canvas);
+
+    /// The game's interface is laid out for a screen of `interfaceReference` points and drawn
+    /// larger or smaller on others, as Unity's canvas scaler does: by its width (match 0), its
+    /// height (1), or between the two (0.5). `interfaceScale` is what the last frame used, for
+    /// turning where a finger is into the interface's own points.
+    Vec2 interfaceReference{1280, 720};
+    float interfaceMatch = 0.5f;
+    float interfaceScale = 1.0f;
+    static float interfaceScaleFor(Vec2 screen, Vec2 reference, float match);
 
 protected:
     void runComponents(bool isFixedStep, float dt, bool isLate = false);

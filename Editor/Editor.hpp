@@ -36,6 +36,12 @@ void registerCreateEntries(EditorContext& editor);
 /// The entries of the Create menu as menu items. New entities become children of `parent`.
 void drawCreateMenu(EditorContext& editor, Entity parent);
 
+/// A visual script (a .graph among the assets) as a C++ script in Assets/Scripts, which keeps
+/// the graph so that it can go back; and back again, from C++ made that way. Each returns the
+/// path of the file made (relative to Assets), or an empty text after saying why it could not.
+std::string convertGraphToCpp(EditorContext& editor, const std::string& graphPath);
+std::string convertCppToGraph(EditorContext& editor, const std::string& cppPath);
+
 /// A small picture of a texture with a menu to choose, drop or clear it. True if it changed.
 bool textureSlot(EditorContext& editor, const char* name, std::shared_ptr<Texture>& slot, TextureFormat format);
 

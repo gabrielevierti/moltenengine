@@ -57,7 +57,8 @@ void EditorApp::start(Engine& engine) {
 
     logSink() = [](const char* level, const char* message) {
         ConsoleMessage::Level kind = level[0] == 'e' ? ConsoleMessage::Level::Error
-                                   : level[0] == 'w' ? ConsoleMessage::Level::Warning : ConsoleMessage::Level::Info;
+                                   : level[0] == 'w' ? ConsoleMessage::Level::Warning
+                                   : level[0] == 'd' ? ConsoleMessage::Level::Debug : ConsoleMessage::Level::Info;
         std::lock_guard<std::mutex> lock(logQueue().mutex);
         logQueue().waiting.push_back({kind, message});
     };
@@ -70,7 +71,7 @@ void EditorApp::start(Engine& engine) {
     templates_ = projectTemplates(findRootDirectory() + "/Templates");
     makeMissingTemplatePreviews();
 
-    std::string layoutFile = userData + "/layout-4.ini";
+    std::string layoutFile = userData + "/layout-5.ini";
     std::error_code ignored;
     needsDefaultLayout_ = !fs::exists(layoutFile, ignored);
     if (!engine.window()) needsDefaultLayout_ = true;       // a capture shows the editor as it first opens
@@ -898,22 +899,31 @@ void EditorApp::drawBuildWindow() {
     for (Entity entity : editor.scene.entities()) {
         if (stickType && stickType->has(editor.engine.scene, entity)) sticks++;
         if (buttonType && buttonType->has(editor.engine.scene, entity)) buttons++;
+        if (const kit::UIButton* button = editor.engine.scene.get<kit::UIButton>(entity); button && (button->isRound || !button->action.empty())) buttons++;
     }
     step(3, "How it is played", buildPlatform_ == 0 || sticks + buttons > 0);
-    ImGui::TextWrapped("Keys, mouse and controllers are set in the Input window. On a phone or a tablet there are none: a Touch Stick "
-                       "and Touch Buttons (Create > UI) push the same actions from the screen. Drag them into place in the Game view, and try them there with the mouse.");
-    ImGui::TextDisabled("In the open scene: %d touch %s, %d touch %s.", sticks, sticks == 1 ? "stick" : "sticks", buttons, buttons == 1 ? "button" : "buttons");
-    ImGui::BeginDisabled(editor.scene.isPlaying() || !stickType || !buttonType);
+    ImGui::TextWrapped("Keys, mouse and controllers are set in the Input window. On a phone or a tablet there are none: a Stick "
+                       "and Round Buttons (Create > UI) push the same actions from the screen. Drag them into place in the Game view, and try them there with the mouse.");
+    ImGui::TextDisabled("In the open scene: %d %s, %d %s with an action.", sticks, sticks == 1 ? "stick" : "sticks", buttons, buttons == 1 ? "button" : "buttons");
+    ImGui::BeginDisabled(editor.scene.isPlaying() || !stickType);
     if (ImGui::Button("Add a Stick and a Button to the Scene")) {
         Scene& scene = editor.engine.scene;
-        Entity stick = scene.create("Touch Stick");
+        Entity stick = scene.create("Stick");
         scene.add(stick, Transform{});
         stickType->add(scene, stick);
-        Entity button = scene.create("Touch Button");
+        Entity button = scene.create("Round Button");
         scene.add(button, Transform{});
-        buttonType->add(scene, button);
+        kit::UIButton round;
+        round.isRound = true;
+        round.label = "A";
+        round.action = "jump";
+        round.anchor = Vec2{1, 1};
+        round.offset = Vec2{-100, -110};
+        round.color = Vec4{1, 1, 1, 0.6f};
+        round.onlyOnTouchScreens = true;
+        scene.add(button, round);
         editor.scene.markChanged();
-        editor.notify("Added a Touch Stick (moveX, moveZ) and a Touch Button (jump): change what they push in the Inspector");
+        editor.notify("Added a Stick (moveX, moveZ) and a round Button (jump): change what they push in the Inspector");
     }
     ImGui::EndDisabled();
     if (ImGui::SameLine(); ImGui::Button("Open Input")) {
@@ -1106,6 +1116,17 @@ void EditorApp::drawPlayBar() {
             return pressed;
         };
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(6, 0));
+        // What the scene is doing, at the left.
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (keyHeight - ImGui::GetFrameHeight()) * 0.5f);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextDisabled("%s", !isPlaying ? "Editing" : isPaused ? "Held: changes are kept until Stop" : "Running: what you change now is undone at Stop");
+        // The keys at the right end, beside the layout: their widths first, to know where they start.
+        const float layoutWidth = 170;
+        auto keyWidth = [](const char* label) { return 34 + ImGui::CalcTextSize(label).x + 12; };
+        float keysWidth = keyWidth(isPlaying ? "Stop" : "Run") + keyWidth(isPaused ? "Resume" : "Hold") + keyWidth("Frame") + 12;
+        ImGui::SameLine();
+        ImGui::SetCursorPosX(ImGui::GetWindowWidth() - layoutWidth - keysWidth - 22);
+        ImGui::SetCursorPosY(ImGui::GetStyle().WindowPadding.y);
         if (control("##play", isPlaying ? "Stop" : "Run", isPlaying ? Picture::Stop : Picture::Run, isPlaying, true, IM_COL32(255, 122, 47, 255),
                     isPlaying ? "Stop: back to editing, the scene returns to how it was (Cmd+P)" : "Run the scene (Cmd+P)")) {
             scene.setPlaying(!isPlaying);
@@ -1117,14 +1138,11 @@ void EditorApp::drawPlayBar() {
         }
         ImGui::SameLine();
         if (control("##step", "Frame", Picture::Frame, false, isPlaying, 0, "Advance one frame and hold (Alt+Cmd+P)")) scene.stepFrame();
-        ImGui::SameLine(0, 14);
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextDisabled("%s", !isPlaying ? "Editing" : isPaused ? "Held: changes are kept until Stop" : "Running");
         ImGui::PopStyleVar();
 
         // The layout of the windows, at the right end.
-        const float layoutWidth = 150;
-        ImGui::SameLine();
+        ImGui::SameLine(0, 12);
+        ImGui::SetCursorPosY(ImGui::GetStyle().WindowPadding.y + (keyHeight - ImGui::GetFrameHeight()) * 0.5f);
         ImGui::SetCursorPosX(ImGui::GetWindowWidth() - layoutWidth - 10);
         ImGui::SetNextItemWidth(layoutWidth);
         if (ImGui::BeginCombo("##layout", ("Layout: " + layoutName_).c_str(), ImGuiComboFlags_HeightLarge)) {
@@ -1171,6 +1189,33 @@ void EditorApp::drawLayoutItems() {
         bool isBuiltIn = false;
         for (const char* name : kBuiltInLayouts) isBuiltIn = isBuiltIn || layoutName_ == name;
         newLayoutName_ = isBuiltIn ? "My Layout" : layoutName_;
+    }
+    if (ImGui::MenuItem("Export Layout...")) {
+        // The windows as they are now, to a file of your own: to keep, or to give to someone.
+        std::string file = platform::chooseSaveFile("Export the layout of the windows", layoutName_ + ".ini", "ini");
+        if (!file.empty()) {
+            size_t length = 0;
+            const char* settings = ImGui::SaveIniSettingsToMemory(&length);
+            if (text::writeFile(file, std::string(settings, length))) context_->notify("Exported the layout to " + file);
+            else context_->notify("Cannot write " + file, ConsoleMessage::Level::Error);
+        }
+    }
+    if (ImGui::MenuItem("Import Layout...")) {
+        // A layout file from elsewhere becomes one of the saved ones, under its file's name, and is put on.
+        std::vector<std::string> files = platform::chooseFiles("Choose a layout file (.ini)", {"ini"}, false);
+        if (!files.empty()) {
+            std::optional<std::string> settings = text::readFile(files[0]);
+            std::string name = fs::path(files[0]).stem().string();
+            std::error_code code;
+            fs::create_directories(layoutsDirectory(), code);
+            if (settings && settings->find("[Docking]") != std::string::npos &&
+                text::writeFile((fs::path(layoutsDirectory()) / (name + ".ini")).string(), *settings)) {
+                pendingLayout_ = name;
+                context_->notify("Imported the layout " + name);
+            } else {
+                context_->notify(files[0] + " is not a layout of this editor", ConsoleMessage::Level::Error);
+            }
+        }
     }
     if (ImGui::BeginMenu("Delete Layout", !saved.empty())) {
         for (const std::string& name : saved) {
@@ -1272,7 +1317,7 @@ void EditorApp::buildDefaultLayout(ImGuiID dockSpace) {
     ImGui::DockBuilderAddNode(dockSpace, ImGuiDockNodeFlags_DockSpace);
     ImGui::DockBuilderSetNodeSize(dockSpace, viewport->WorkSize);
     ImGuiID center = dockSpace;
-    ImGuiID scene = 0, game = 0, hierarchy = 0, inspector = 0, bottom = 0, console = 0;
+    ImGuiID scene = 0, game = 0, hierarchy = 0, inspector = 0, bottom = 0, console = 0, viewer = 0;
     if (layoutName_ == "2 by 3") {
         // Scene above Game on the left, then the hierarchy, the assets and the inspector as columns.
         inspector = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.24f, nullptr, &center);
@@ -1292,13 +1337,14 @@ void EditorApp::buildDefaultLayout(ImGuiID dockSpace) {
         hierarchy = ImGui::DockBuilderSplitNode(strip, ImGuiDir_Left, 0.2f, nullptr, &strip);
         inspector = ImGui::DockBuilderSplitNode(strip, ImGuiDir_Right, 0.36f, nullptr, &bottom);
     } else {
-        // Default: the inspector down the right with the console under it; the explorer along
-        // the bottom of the rest; above it the hierarchy, then the scene and the game side by side.
-        inspector = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.19f, nullptr, &center);
-        console = ImGui::DockBuilderSplitNode(inspector, ImGuiDir_Down, 0.36f, nullptr, &inspector);
-        bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.34f, nullptr, &center);
-        hierarchy = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.165f, nullptr, &center);
-        game = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.585f, nullptr, &scene);
+        // Default, as few places as there can be: the inspector down the right with a small viewer
+        // of the chosen asset under it; the explorer and the console as tabs along the bottom;
+        // the hierarchy on the left; the scene and the game as tabs of one big view in the middle.
+        inspector = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.22f, nullptr, &center);
+        viewer = ImGui::DockBuilderSplitNode(inspector, ImGuiDir_Down, 0.27f, nullptr, &inspector);
+        bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.27f, nullptr, &center);
+        hierarchy = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.18f, nullptr, &center);
+        scene = game = center;
     }
     ImGui::DockBuilderDockWindow("Scene", scene);
     ImGui::DockBuilderDockWindow("Game", game);
@@ -1306,7 +1352,7 @@ void EditorApp::buildDefaultLayout(ImGuiID dockSpace) {
     ImGui::DockBuilderDockWindow("Inspector", inspector);
     ImGui::DockBuilderDockWindow("Lighting", inspector);
     ImGui::DockBuilderDockWindow("Rendering", inspector);
-    ImGui::DockBuilderDockWindow("Viewer", inspector);
+    ImGui::DockBuilderDockWindow("Viewer", viewer ? viewer : inspector);
     ImGui::DockBuilderDockWindow("Explorer", bottom);
     ImGui::DockBuilderDockWindow("Console", console ? console : bottom);
     ImGui::DockBuilderDockWindow("Input", bottom);

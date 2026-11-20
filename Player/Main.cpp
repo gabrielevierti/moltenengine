@@ -72,6 +72,7 @@ public:
         splashSeconds_ = wantsSplash ? 0.0f : Splash::kDuration;
         subtitle_ = project ? project->name : std::string();
         engine.runsComponents = !wantsSplash;
+        engine.showsInterfaceWhileStopped = false;      // the splash alone, then the game with its interface
         engine.isSimulationPaused = wantsSplash;        // the game waits behind the splash
     }
 

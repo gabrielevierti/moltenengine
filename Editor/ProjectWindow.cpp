@@ -84,6 +84,30 @@ void drawPicture(ImDrawList* drawList, ImVec2 min, ImVec2 max, const std::string
         }
         // Smoke off the front tire.
         for (int i = 0; i < 4; i++) drawList->AddCircleFilled(p(x - 0.3f - float(i) * 0.07f, y + 0.06f - float(i) * 0.012f), height * (0.035f + 0.016f * float(i)), IM_COL32(230, 230, 235, 110 - i * 22), 16);
+    } else if (key == "Showcase") {
+        // The plaza: a chrome ball in the middle that mirrors the sky and the ground, the stations around it.
+        background(IM_COL32(110, 150, 200, 255));
+        drawList->AddRectFilled(p(0, 0.4f), p(1, 0.6f), IM_COL32(170, 186, 204, 255));
+        drawList->AddRectFilled(p(0, 0.58f), p(1, 1), IM_COL32(118, 116, 112, 255));
+        const ImU32 pad = IM_COL32(96, 94, 92, 255);
+        drawList->AddEllipseFilled(p(0.16f, 0.7f), ImVec2(width * 0.14f, height * 0.06f), pad);
+        drawList->AddEllipseFilled(p(0.84f, 0.7f), ImVec2(width * 0.14f, height * 0.06f), pad);
+        drawList->AddRectFilled(p(0.07f, 0.52f), p(0.25f, 0.7f), IM_COL32(58, 60, 66, 255));          // the hall of lights
+        drawList->AddRectFilled(p(0.09f, 0.6f), p(0.23f, 0.61f), IM_COL32(80, 220, 255, 255));
+        drawList->AddRectFilled(p(0.09f, 0.64f), p(0.23f, 0.65f), IM_COL32(255, 80, 200, 255));
+        for (int i = 0; i < 4; i++) {                                                                 // a stack of crates
+            drawList->AddRectFilled(p(0.76f + float(i % 2) * 0.06f, 0.6f - float(i / 2) * 0.08f), p(0.81f + float(i % 2) * 0.06f, 0.67f - float(i / 2) * 0.08f),
+                                    IM_COL32(170, 118, 64, 255));
+        }
+        ImVec2 ball = p(0.5f, 0.55f);
+        float radius = height * 0.2f;
+        drawList->AddEllipseFilled(p(0.5f, 0.78f), ImVec2(width * 0.16f, height * 0.05f), IM_COL32(150, 148, 144, 255));
+        drawList->AddRectFilled(p(0.47f, 0.66f), p(0.53f, 0.78f), IM_COL32(150, 148, 144, 255));
+        drawList->AddCircleFilled(ball, radius, IM_COL32(120, 128, 138, 255), 40);
+        drawList->PathArcTo(ball, radius, 3.4f, 6.0f, 32);                                           // the sky in its upper half
+        drawList->PathFillConvex(IM_COL32(186, 210, 236, 255));
+        drawList->AddCircleFilled(ImVec2(ball.x - radius * 0.35f, ball.y - radius * 0.4f), radius * 0.16f, IM_COL32(255, 255, 255, 220), 16);
+        drawList->AddCircle(ball, radius, IM_COL32(60, 64, 72, 255), 40, 1.5f);
     } else if (key.empty()) {
         // The empty project: a floor that goes to the horizon and one cube on it.
         background(IM_COL32(40, 46, 56, 255));
@@ -306,7 +330,7 @@ ProjectWindow::Result ProjectWindow::draw(const std::vector<std::string>& recent
             // The engine comes with the empty project only: the example games are their own download.
             ImGui::PushStyleColor(ImGuiCol_Text, kDim);
             ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + contentWidth);
-            ImGui::TextUnformatted("The example game (Driving: a Fiat 500 on a little circuit, with touch controls) is a separate download, "
+            ImGui::TextUnformatted("The example projects (Driving, a Fiat 500 on a little circuit; Showcase, a plaza of everything the engine does) are a separate download, "
                                    "MoltenProjects.zip. Unzip it where you keep your projects and open one with \"Open a Project...\".");
             ImGui::PopTextWrapPos();
             ImGui::PopStyleColor();

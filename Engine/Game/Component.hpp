@@ -158,10 +158,15 @@ public:
     void setCategory(const std::string& name, const std::string& category);
     /// "PlayerMover" -> "Player Mover": a type's name as people read it.
     static std::string displayName(const std::string& typeName);
+    /// A name of its own for a type, where its type's name reads badly: "HudText" is "Text".
+    static void setDisplayName(const std::string& typeName, const std::string& shown);
     const std::vector<ComponentType>& types() const { return types_; }
 
     /// While a game module is being loaded, the module: types declared meanwhile belong to it.
     const void* loadingModule = nullptr;
+    /// The module of a game's code linked into the program itself (the iPhone player), where
+    /// there is no module to load: its types are declared before the engine's own, and still win.
+    static inline const char linkedGameModule = 0;
 
 private:
     std::vector<ComponentType> types_;
@@ -182,6 +187,9 @@ template <class T> struct ComponentRegistration {
         type.name = name;
         type.fields = std::move(fields);
         type.module = ComponentRegistry::instance().loadingModule;
+#ifdef MOLTEN_GAME_CODE
+        if (!type.module) type.module = &ComponentRegistry::linkedGameModule;
+#endif
         type.has = [](const Scene& scene, Entity entity) { return scene.has<T>(entity); };
         type.get = [](Scene& scene, Entity entity) -> void* { return scene.get<T>(entity); };
         type.add = [](Scene& scene, Entity entity) -> void* { return &scene.add(entity, T{}); };

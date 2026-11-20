@@ -16,6 +16,10 @@ std::string chooseFolder(const std::string& title, const std::string& startDirec
 std::vector<std::string> chooseFiles(const std::string& title, const std::vector<std::string>& extensions, bool allowMany,
                                      const std::string& startDirectory = {});
 
+/// The standard "save" sheet: where to write a new file, starting from `suggestedName`.
+/// Returns an empty string if the user cancels.
+std::string chooseSaveFile(const std::string& title, const std::string& suggestedName, const std::string& extension);
+
 /// Moves a file or folder to the Trash, where it can be recovered.
 bool moveToTrash(const std::string& path);
 

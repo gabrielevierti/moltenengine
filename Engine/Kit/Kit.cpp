@@ -479,8 +479,13 @@ void registerKit() {
     registry.setCategory("Flicker", "Effects");
     registry.setCategory("HudText", "UI");
     registry.setCategory("TouchStick", "UI");
-    for (const char* name : {"UIPanel", "UIImage", "UIButton", "UIBar"}) registry.setCategory(name, "UI");
-    registry.setCategory("TouchButton", "UI");
+    for (const char* name : {"UIPanel", "UIImage", "UIButton", "UIBar", "UIGauge"}) registry.setCategory(name, "UI");
+    // A touch button is a round Button: kept for scenes that have one, but not offered any more.
+    registry.setCategory("TouchButton", "Hidden");
+    for (auto [type, shown] : {std::pair<const char*, const char*>{"HudText", "Text"}, {"UIPanel", "Panel"}, {"UIImage", "Image"}, {"UIButton", "Button"},
+                               {"UIBar", "Bar"}, {"UIGauge", "Gauge"}, {"TouchStick", "Stick"}}) {
+        ComponentRegistry::setDisplayName(type, shown);
+    }
     registry.setCategory("AudioSource", "Audio");
     for (const char* name : {"VehicleBody", "Bumper", "Wheel", "Suspension", "DeformableTire", "Motor", "Wing", "Hinge", "Propeller", "DriveControls", "FlightControls"}) {
         registry.setCategory(name, "Vehicles");
@@ -522,15 +527,22 @@ struct Finger {
     Vec2 position;
     bool hasBegun;
 };
-std::vector<Finger> fingersOn(const Input& input) {
+/// In the interface's own points: the screen's, divided by the scale it is drawn at.
+std::vector<Finger> fingersOn(const World& world) {
+    const Input& input = world.input;
+    float scale = world.interfaceScale > 1e-3f ? world.interfaceScale : 1.0f;
     std::vector<Finger> fingers;
     for (const Input::Touch& touch : input.touches()) {
-        if (!touch.hasEnded) fingers.push_back(Finger{touch.id, touch.position, touch.hasBegun});
+        if (!touch.hasEnded) fingers.push_back(Finger{touch.id, touch.position / scale, touch.hasBegun});
     }
     if (fingers.empty() && input.isDown(MouseButton::Left)) {
-        fingers.push_back(Finger{~0ull, input.mousePosition(), input.wasPressed(MouseButton::Left)});
+        fingers.push_back(Finger{~0ull, input.mousePosition() / scale, input.wasPressed(MouseButton::Left)});
     }
     return fingers;
+}
+
+Vec2 pointerOn(const World& world) {
+    return world.input.mousePosition() / (world.interfaceScale > 1e-3f ? world.interfaceScale : 1.0f);
 }
 
 Vec2 gScreen{1280, 720};        // the canvas's size the last time something was drawn on it
@@ -539,7 +551,7 @@ Vec2 gScreen{1280, 720};        // the canvas's size the last time something was
 
 void TouchStick::update(World& world, Entity, float) {
     Input& input = world.input;
-    std::vector<Finger> fingers = fingersOn(input);
+    std::vector<Finger> fingers = fingersOn(world);
     Vec2 base = placeOnScreen(gScreen, anchor, offset);
     if (isHeld) {
         // Follow the finger that took it; let go when that finger is gone.
@@ -585,7 +597,7 @@ void TouchStick::draw(World& world, Entity, Canvas& canvas) {
 void TouchButton::update(World& world, Entity, float) {
     Vec2 middle = place(gScreen);
     bool pressed = false;
-    for (const Finger& finger : fingersOn(world.input)) {
+    for (const Finger& finger : fingersOn(world)) {
         if (simd::length(finger.position - middle) <= radius * 1.25f) pressed = true;      // a little generous: thumbs are not pointers
     }
     isHeld = pressed;
@@ -633,13 +645,17 @@ void UIImage::draw(World& world, Entity, Canvas& canvas) {
 
 void UIButton::update(World& world, Entity, float) {
     Vec2 middle = placeOnScreen(gScreen, anchor, offset);
-    auto isOn = [&](Vec2 point) { return std::abs(point.x - middle.x) <= size.x * 0.5f && std::abs(point.y - middle.y) <= size.y * 0.5f; };
+    auto isOn = [&](Vec2 point) {
+        // A round one is a little generous: thumbs are not pointers.
+        if (isRound) return simd::length(point - middle) <= radius * 1.25f;
+        return std::abs(point.x - middle.x) <= size.x * 0.5f && std::abs(point.y - middle.y) <= size.y * 0.5f;
+    };
     bool pressed = false;
-    for (const Finger& finger : fingersOn(world.input)) pressed = pressed || isOn(finger.position);
-    isHovered = isOn(world.input.mousePosition());
+    for (const Finger& finger : fingersOn(world)) pressed = pressed || isOn(finger.position);
+    isHovered = isOn(pointerOn(world));
     // Clicked: let go while still on it, as buttons are everywhere.
     bool letGoOnIt = false;
-    for (const Input::Touch& touch : world.input.touches()) letGoOnIt = letGoOnIt || (touch.hasEnded && isOn(touch.position));
+    for (const Input::Touch& touch : world.input.touches()) letGoOnIt = letGoOnIt || (touch.hasEnded && isOn(touch.position / std::max(world.interfaceScale, 1e-3f)));
     if (world.input.touches().empty() && world.input.wasReleased(MouseButton::Left) && isHovered) letGoOnIt = true;
     wasClicked = isHeld && !pressed && letGoOnIt;
     isHeld = pressed;
@@ -650,8 +666,20 @@ void UIButton::update(World& world, Entity, float) {
     }
 }
 
-void UIButton::draw(World&, Entity, Canvas& canvas) {
+void UIButton::draw(World& world, Entity, Canvas& canvas) {
     gScreen = canvas.size();
+    // Hidden until a finger is seen, but shown while the scene is edited: it has to be seen to be laid out.
+    if (onlyOnTouchScreens && world.runsComponents && !world.input.hasTouched()) return;
+    if (isRound) {
+        Vec2 middle = placeOnScreen(gScreen, anchor, offset);
+        canvas.circle(middle, radius, color * Vec4{1, 1, 1, isHeld ? 0.9f : 0.3f});
+        canvas.ring(middle, radius, 2.0f, color);
+        if (!label.empty()) {
+            float height = radius * 0.7f * std::min(1.0f, 3.2f / float(std::max<size_t>(label.size(), 1)));
+            canvas.text(label, Vec2{middle.x, middle.y - height * 0.6f}, height, Vec4{color.x, color.y, color.z, 0.95f}, TextAlign::Center);
+        }
+        return;
+    }
     Vec2 corner = placeOnScreen(gScreen, anchor, offset) - size * 0.5f;
     Vec4 shade = isHeld ? Vec4{0.75f, 0.75f, 0.75f, 1} : isHovered ? Vec4{1.12f, 1.12f, 1.12f, 1} : Vec4{1, 1, 1, 1};
     canvas.rect(corner, size, color * shade);
@@ -659,6 +687,57 @@ void UIButton::draw(World&, Entity, Canvas& canvas) {
         float height = std::min(size.y * 0.5f, 28.0f);
         canvas.text(label, Vec2{corner.x + size.x * 0.5f, corner.y + (size.y - height * 1.2f) * 0.5f}, height, textColor, TextAlign::Center);
     }
+}
+
+void UIGauge::draw(World& world, Entity, Canvas& canvas) {
+    gScreen = canvas.size();
+    Vec2 middle = placeOnScreen(gScreen, anchor, offset);
+    // While nothing has set the value (the editor, before the game runs) the needle rests at
+    // two thirds, to be seen.
+    float target = world.hasValue(value) ? world.value(value) : most * 0.66f;
+    shown += (target - shown) * std::min(1.0f, world.time.unscaledDelta * 12.0f);
+    float share = most > 0 ? saturate(shown / most) : 0.0f;
+    // The arc runs clockwise from the lower left to the lower right, three quarters of a turn.
+    const float from = kPi * 0.75f, sweep = kPi * 1.5f;
+    canvas.circle(middle, radius + thickness * 0.6f, backColor);
+    canvas.arc(middle, radius - thickness * 0.5f, from, from + sweep, thickness, Vec4{1, 1, 1, 0.1f});
+    if (redFrom > 0 && redFrom < 1) {
+        canvas.arc(middle, radius - thickness * 0.5f, from + sweep * redFrom, from + sweep, thickness, Vec4{0.9f, 0.12f, 0.08f, 0.55f});
+    }
+    if (share > 0.002f) canvas.arc(middle, radius - thickness * 0.5f, from, from + sweep * share, thickness, color);
+    // The marks: long and numbered at each multiple of numbersEvery, short between.
+    if (numbersEvery > 0 && most > 0) {
+        int count = int(most / numbersEvery + 0.5f);
+        float numberSize = std::max(radius * 0.15f, 8.0f);
+        for (int i = 0; i <= count * 2; i++) {
+            float at = float(i) * 0.5f * numbersEvery / most;
+            if (at > 1.0001f) break;
+            float angle = from + sweep * at;
+            Vec2 direction{std::cos(angle), std::sin(angle)};
+            bool isLong = i % 2 == 0;
+            float inner = radius - thickness - (isLong ? radius * 0.13f : radius * 0.07f);
+            canvas.line(middle + direction * inner, middle + direction * (radius - thickness - 1), isLong ? 2.0f : 1.2f, Vec4{1, 1, 1, isLong ? 0.85f : 0.45f});
+            if (isLong) {
+                char number[16];
+                std::snprintf(number, sizeof(number), "%g", double(std::round(float(i / 2) * numbersEvery * numbersScale * 10) / 10));
+                Vec2 place = middle + direction * (inner - numberSize * 0.9f);
+                canvas.text(number, Vec2{place.x, place.y - numberSize * 0.6f}, numberSize, Vec4{1, 1, 1, 0.75f}, TextAlign::Center);
+            }
+        }
+    }
+    // The needle.
+    float angle = from + sweep * share;
+    Vec2 direction{std::cos(angle), std::sin(angle)};
+    canvas.line(middle - direction * radius * 0.12f, middle + direction * (radius - thickness * 1.3f), 2.5f, Vec4{1.0f, 0.3f, 0.15f, 1});
+    canvas.circle(middle, radius * 0.07f + 2, Vec4{0.9f, 0.9f, 0.92f, 1});
+    // The value, and what it is.
+    if (showsValue) {
+        char number[24];
+        std::snprintf(number, sizeof(number), "%d", int(std::round(world.hasValue(value) ? target : 0)));
+        float size = radius * 0.36f;
+        canvas.text(number, Vec2{middle.x, middle.y + radius * 0.22f}, size, Vec4{1, 1, 1, 1}, TextAlign::Center);
+    }
+    if (!label.empty()) canvas.text(label, Vec2{middle.x, middle.y + radius * (showsValue ? 0.62f : 0.32f)}, std::max(radius * 0.14f, 8.0f), Vec4{1, 1, 1, 0.55f}, TextAlign::Center);
 }
 
 void UIBar::draw(World& world, Entity, Canvas& canvas) {
@@ -676,8 +755,16 @@ MOLTEN_COMPONENT(UIPanel, MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIE
 MOLTEN_COMPONENT(UIImage, MOLTEN_FIELD(picture).help("A picture of Assets: Textures/logo.png"), MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(size),
                  MOLTEN_FIELD(tint).color())
 MOLTEN_COMPONENT(UIButton, MOLTEN_FIELD(label), MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(size), MOLTEN_FIELD(color).color(), MOLTEN_FIELD(textColor).color(),
-                 MOLTEN_FIELD(action).help("A button action it holds while pressed: jump, fire"), MOLTEN_FIELD(scene).help("A scene it loads when clicked: Scenes/Level1.scene"),
+                 MOLTEN_FIELD(action).help("A button action it holds while pressed: jump, fire"),
+                 MOLTEN_FIELD(isRound).help("A circle for a thumb, of Radius, instead of a box of Size"), MOLTEN_FIELD(radius).range(12, 150),
+                 MOLTEN_FIELD(onlyOnTouchScreens).help("Hidden until the screen is touched: for a game that also has keys"), MOLTEN_FIELD(scene).help("A scene it loads when clicked: Scenes/Level1.scene"),
                  MOLTEN_FIELD(value).help("A shared value it adds Amount to when clicked"), MOLTEN_FIELD(amount))
+MOLTEN_COMPONENT(UIGauge, MOLTEN_FIELD(value).help("The shared value it shows: speed, rpm, boost"), MOLTEN_FIELD(most),
+                 MOLTEN_FIELD(numbersEvery).help("A numbered mark at each multiple of this; 0 for none"),
+                 MOLTEN_FIELD(numbersScale).help("The numbers as written: 0.001 writes rpm in thousands"),
+                 MOLTEN_FIELD(redFrom).range(0, 1).help("Where the red part of the arc starts, as a share; 0 for none"), MOLTEN_FIELD(label), MOLTEN_FIELD(showsValue),
+                 MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(radius).range(16, 300), MOLTEN_FIELD(thickness).range(1, 40),
+                 MOLTEN_FIELD(color).color(), MOLTEN_FIELD(backColor).color())
 MOLTEN_COMPONENT(UIBar, MOLTEN_FIELD(value).help("The shared value it shows: health"), MOLTEN_FIELD(most), MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(size),
                  MOLTEN_FIELD(color).color(), MOLTEN_FIELD(backColor).color())
 MOLTEN_COMPONENT(TouchStick, MOLTEN_FIELD(horizontal).help("The axis action it pushes left and right"), MOLTEN_FIELD(vertical).help("The axis action it pushes up and down"),

@@ -124,6 +124,14 @@ InputMap InputMap::standard() {
     pause.name = "pause";
     pause.keys = {Key::Escape};
     pause.buttons = {GamepadButton::Start};
+    moveX.joystickAxis = 0;                 // a radio's usual order: aileron, elevator, throttle, rudder
+    moveZ.joystickAxis = 1;
+    map.actions = {moveX, moveZ, jump, fire, pause};
+    return map;
+}
+
+InputMap InputMap::flying() {
+    InputMap map = standard();
     // For things that fly: a rudder, a throttle lever that stays where it is put, flaps, wheel brakes.
     InputAction yaw;
     yaw.name = "yaw";
@@ -149,9 +157,7 @@ InputMap InputMap::standard() {
     brake.name = "brake";
     brake.keys = {Key::B};
     brake.buttons = {GamepadButton::B};
-    moveX.joystickAxis = 0;                 // a radio's usual order: aileron, elevator, throttle, rudder
-    moveZ.joystickAxis = 1;
-    map.actions = {moveX, moveZ, jump, fire, pause, yaw, throttle, lever, flaps, brake};
+    for (const InputAction& action : {yaw, throttle, lever, flaps, brake}) map.actions.push_back(action);
     return map;
 }
 

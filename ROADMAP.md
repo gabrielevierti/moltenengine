@@ -56,7 +56,8 @@ Milestones are not dated. A few of them are large enough that they will take mon
 - ✅ **A game without code.** Ready-made components for moving, following, collecting, health and damage, shooting, spawning, score and goals; collision and trigger events for components and visual scripts; shared values; scene changes and restart.
 - ✅ **Prefabs**: save part of a scene, place it, spawn it while the game runs. Still to come: placed copies that follow their prefab, overrides, nesting.
 - ✅ **Project templates**, each played start to finish by the tests without a screen.
-- **Visual scripts, next**: undo on the board, multi-selection, copy and paste, zoom, comments; nodes for other entities, collisions, timers, loops and sound; scripts as functions of other scripts.
+- ✅ **Visual scripts, the board**: zoom, box and multiple selection, a node search on Space, dots that run along the wires; conversion to C++ and back (for code made from a graph).
+- **Visual scripts, next**: undo on the board, copy and paste, comments; nodes for other entities, collisions, timers, loops and sound; scripts as functions of other scripts.
 - Field types still to come: references to entities, assets and prefabs; enumerations; lists.
 - Building in the background, with the editor responsive and errors that jump to the line.
 - Keeping the running state across a rebuild while playing (today a rebuild stops play).

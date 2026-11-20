@@ -57,6 +57,8 @@ std::string DeviceExport::script(const Project& project, const std::string& engi
     s += "APP=\"$BUILD/Release-iphoneos/\"" + quoted(name + ".app") + "\n";
     s += "if [ ! -d \"$APP\" ]; then APP=$(find \"$BUILD\" -maxdepth 3 -name '*.app' -path '*iphoneos*' | head -1); fi\n";
     s += "if [ ! -d \"$APP\" ]; then echo 'error: the application was built but not found.'; exit 1; fi\n";
+    // The icon is compiled into Assets.car: without it the phone shows a blank square.
+    s += "if [ -f \"$APP/Assets.car\" ]; then echo '== The icon is in the application'; else echo 'warning: the application has no icon (no Assets.car): delete the Build/iOS folder and build again'; fi\n";
     s += "echo '== Looking for a device'\n";
     s += "xcrun devicectl list devices --json-output \"$BUILD/devices.json\" >/dev/null 2>&1\n";
     s += "DEVICE=$(/usr/bin/python3 -c 'import json,sys\n"

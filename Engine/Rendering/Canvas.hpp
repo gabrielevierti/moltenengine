@@ -88,7 +88,9 @@ public:
     /// Until endArea, drawing happens in a part of the screen as if it were all of it:
     /// size() is the area's, (0, 0) is its top left corner, and nothing shows outside.
     /// The editor uses it to keep a game's interface inside the scene view.
-    void beginArea(Vec2 origin, Vec2 size);
+    /// With `scale`, the area is drawn larger or smaller: size() is then size / scale, so that an
+    /// interface laid out for one screen fills another of a different size.
+    void beginArea(Vec2 origin, Vec2 size, float scale = 1.0f);
     void endArea();
     void setFont(const FontMetrics* metrics, const Texture* atlas);
     const std::vector<gpu::CanvasVertex>& vertices() const { return vertices_; }
@@ -113,6 +115,7 @@ private:
     Vec2 size_{0, 0};
     float pixelSize_ = 1.0f;
     Vec2 areaOrigin_{0, 0}, sizeOutsideArea_{0, 0};
+    float areaScale_ = 1.0f, pixelSizeOutsideArea_ = 1.0f;
     size_t areaFirstVertex_ = 0, areaFirstBatch_ = 0;
     bool isInArea_ = false;
     bool startsNewBatch_ = false;           // the next shape does not join the batch before it

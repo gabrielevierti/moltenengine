@@ -6,11 +6,11 @@ A visual script is a behavior drawn instead of written: boxes for what happens, 
 
 **Game > New Visual Script**, or **+ New > Visual Script** in the asset browser. The script is a `.graph` file in the project's `Assets`; double-click it to open the drawing board.
 
-A new script has two nodes on it: **On Start** and **On Update**. Right-click the board to add more.
+A new script has two nodes on it: **On Start** and **On Update**. Press Space over the board (or right-click it) to add more: type a few letters, press Enter.
 
 To make an entity turn:
 
-1. Right-click > Transform > **Rotate**.
+1. Space, type `rot`, Enter: a **Rotate** node.
 2. Drag from the arrow on the right of **On Update** to the arrow on the left of **Rotate**.
 3. Type `90` next to *degrees*.
 4. Select an entity in the scene and press **Use on Selection**.
@@ -37,12 +37,19 @@ An input nothing is wired to shows a field: type the value there. Kinds convert 
 
 | | |
 |---|---|
-| Right-click the board | add a node |
-| Drag a node's title | move it |
+| Space, or right-click the board | search for a node and add it where the pointer is (arrows and Enter choose) |
+| Click a title | select the node; Shift+click adds or takes it out of the selection |
+| Drag on the board | a box that selects every node it touches (Shift keeps what was selected) |
+| Drag a title | move it, with every other selected node |
 | Drag from a pin to another | wire them |
 | Right-click a pin | unplug it |
-| Right-click a title, or select and press Delete | remove the node |
-| Scroll, or drag the board | move around |
+| Delete or Backspace, or right-click a title | remove the selected nodes |
+| Cmd+A | select every node |
+| Scroll, or drag with the middle or right button | move around |
+| Cmd+scroll, or - and + in the toolbar | zoom, about the pointer |
+| F, or Fit | every node in view |
+
+Dots run along the wires the way things go: quick and white on the wires that say what happens next, slower on the wires that carry a value. Zoomed far out, a node shows its values without the boxes to change them.
 
 An arrow leads to one place; wiring it somewhere else moves the wire. An input takes one value; a value can feed many inputs.
 
@@ -107,5 +114,11 @@ A node that does something has a `Flow` input called `in`, a `Flow` output, and 
 
 - Undo on the drawing board (Cmd+Z there does nothing yet; the scene's undo is separate).
 - Nodes that reach other entities (find by name, send a message), collisions as events, loops, timers, sound.
-- Selecting and moving several nodes, copy and paste, comments, zoom.
+- Copy and paste, comments.
 - Functions: a script used as a node in another.
+
+## To C++ and back
+
+**To C++** in the Visual Script toolbar (or **Convert to C++ Script** in the Viewer, or in the Explorer's right-click menu) writes the same behavior as a C++ component in `Assets/Scripts/<Name>.cpp`: each box becomes one call, in the same order, and it is built with the game's code like any script. The file keeps the graph it was made from in a comment at its end.
+
+The way back is **Convert to Visual Script**, offered for a `.cpp` that was made that way (in the Viewer, and in the Explorer's right-click menu): it writes the `.graph` beside it and opens it. If the code was changed after it was made, the graph that comes back is the one it was made from, and the console says that the changes are not in it. Code written by hand has no boxes to go back to: anything code can say that boxes have no shape for (loops of its own, other classes, pointers) has nowhere to go.

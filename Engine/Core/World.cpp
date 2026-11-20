@@ -6,6 +6,7 @@
 #include "Assets/Gltf.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 #include "Core/Log.hpp"
 #include "Core/TextFile.hpp"
@@ -317,20 +318,33 @@ void World::dispatchPhysicsEvents() {
     }
 }
 
+float World::interfaceScaleFor(Vec2 screen, Vec2 reference, float match) {
+    if (screen.x <= 0 || screen.y <= 0 || reference.x <= 0 || reference.y <= 0) return 1.0f;
+    float byWidth = std::log(screen.x / reference.x), byHeight = std::log(screen.y / reference.y);
+    return std::exp(byWidth + (byHeight - byWidth) * std::clamp(match, 0.0f, 1.0f));
+}
+
 void World::drawComponents(Canvas& canvas) {
-    for (size_t i = 0; i < ComponentRegistry::instance().types().size(); i++) {
-        ComponentType type = ComponentRegistry::instance().types()[i];
-        if (!type.draw) continue;
-        // While the game is not running (an editor, between plays) only the interface is
-        // drawn: it has to be seen to be laid out. The rest draws what it does while it runs.
-        if (!runsComponents && type.category != "UI") continue;
-        scratchEntities_.clear();
-        type.collect(scene, scratchEntities_);
-        std::vector<Entity> entities = scratchEntities_;
-        for (Entity entity : entities) {
-            if (!runs(type.name, entity)) continue;
-            if (void* component = type.get(scene, entity)) type.draw(component, *this, entity, canvas);
+    // The interface ("UI" components) last, scaled to the screen as one; everything else as it is.
+    interfaceScale = interfaceScaleFor(canvas.size(), interfaceReference, interfaceMatch);
+    for (int pass = 0; pass < 2; pass++) {
+        bool isInterface = pass == 1;
+        if (isInterface) canvas.beginArea(Vec2{0, 0}, canvas.size(), interfaceScale);
+        for (size_t i = 0; i < ComponentRegistry::instance().types().size(); i++) {
+            ComponentType type = ComponentRegistry::instance().types()[i];
+            if (!type.draw || (type.category == "UI") != isInterface) continue;
+            // While the game is not running (an editor, between plays) only the interface is
+            // drawn: it has to be seen to be laid out. The rest draws what it does while it runs.
+            if (!runsComponents && (type.category != "UI" || !showsInterfaceWhileStopped)) continue;
+            scratchEntities_.clear();
+            type.collect(scene, scratchEntities_);
+            std::vector<Entity> entities = scratchEntities_;
+            for (Entity entity : entities) {
+                if (!runs(type.name, entity)) continue;
+                if (void* component = type.get(scene, entity)) type.draw(component, *this, entity, canvas);
+            }
         }
+        if (isInterface) canvas.endArea();
     }
 }
 

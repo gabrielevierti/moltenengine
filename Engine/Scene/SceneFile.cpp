@@ -236,6 +236,7 @@ std::string writeScene(Scene& scene, const std::vector<NamedMaterial>& materials
         Line("rayTracedShadows").flag(settings.rayTracedShadows).integer(settings.shadowRayCount).to(out);
         Line("rayTracedLighting").flag(settings.rayTracedOcclusion).integer(settings.occlusionRayCount).flag(settings.rayTracedReflections)
             .flag(settings.rayTracedBounce).number(settings.bounceIntensity).to(out);
+        Line("rayTracedReflections").number(settings.reflectionMaxRoughness).number(settings.reflectionStrength).to(out);
         Line("fogShape").number(settings.fogHeightFalloff).number(settings.fogSunScatter).to(out);
         Line("wind").vec(settings.wind).number(settings.windGustiness).to(out);
         Line("ambientOcclusion").flag(settings.ambientOcclusionEnabled).number(settings.ambientOcclusionRadius)
@@ -428,6 +429,9 @@ bool readScene(const std::string& text, Scene& scene, std::vector<NamedMaterial>
                 settings.rayTracedReflections = words.flag(false);
                 settings.rayTracedBounce = words.flag(false);
                 settings.bounceIntensity = words.number(1);
+            } else if (key == "rayTracedReflections") {
+                settings.reflectionMaxRoughness = words.number(0.3f);
+                settings.reflectionStrength = words.number(1);
             } else if (key == "fogShape") {
                 settings.fogHeightFalloff = words.number(0);
                 settings.fogSunScatter = words.number(0);

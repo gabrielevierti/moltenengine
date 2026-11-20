@@ -34,7 +34,7 @@ Entity childCalled(Scene& scene, Entity parent, const char* name) {
 
 /// Something solid pressing against a point of a body that is not a wheel: a wall, the
 /// ground under a car on its roof. A stiff spring out of the surface, and friction along it.
-void pressAgainstScene(World& world, Entity self, Body6& body, Vec3 localPoint, float stiffness, float damping) {
+void pressAgainstScene(World& world, Entity self, Body6& body, Vec3 localPoint, float stiffness, float damping, float dt) {
     Vec3 point = body.worldPoint(localPoint);
     Vec3 toPoint = point - body.position;
     float reach = simd::length(toPoint);
@@ -50,6 +50,10 @@ void pressAgainstScene(World& world, Entity self, Body6& body, Vec3 localPoint, 
     float slide = simd::length(along);
     Vec3 friction = slide > 0.05f ? along * (-std::min(0.6f * push, slide * body.mass * 4.0f) / slide) : Vec3{0, 0, 0};
     body.addForceAt(hit->normal * push + friction, hit->point);
+    // What it presses on is pressed back, if it can move: a crate is shoved, a ball rolls away.
+    if (RigidBody* other = world.scene.get<RigidBody>(hit->entity); other && other->type == BodyType::Dynamic) {
+        other->applyImpulse((hit->normal * push + friction) * -dt, hit->point);
+    }
 }
 
 // ---------------------------------------------------------------- engines
@@ -543,6 +547,22 @@ void VehicleBody::fixedUpdate(World& world, Entity self, float dt) {
             }
         }
 
+        // ---- stability control: a slide past the angle it allows, getting worse, is caught by
+        // turning the car back, and the engine is eased so as not to push it further round.
+        float driveShare = 1.0f;
+        if (stability > 0 && isOnGround) {
+            float along = simd::dot(body.velocity, body.forward()), across = simd::dot(body.velocity, body.right());
+            if (along > 3.0f) {
+                float slip = std::atan2(across, along);                      // above zero: going to the right of where the nose points
+                float yawRate = simd::dot(body.angularVelocity, up);         // above zero: the nose turning left
+                float allowed = radians(driftAngle) * (controls.handbrake > 0.5f ? 1.7f : 1.0f);
+                float past = saturate((std::abs(slip) - allowed) / 0.12f);
+                bool isWorsening = slip * yawRate > 0;
+                if (past > 0 && isWorsening) body.torque += up * (-yawRate * body.inertia.y * stability * 12.0f * past);
+                driveShare = 1.0f - 0.85f * stability * saturate((std::abs(slip) - allowed * 0.6f) / (allowed * 0.6f + 0.02f));
+            }
+        }
+
         // ---- each wheel: spring, then tire
         for (WheelPart& part : parts.wheels) {
             Wheel& wheel = *part.wheel;
@@ -590,7 +610,7 @@ void VehicleBody::fixedUpdate(World& world, Entity self, float dt) {
             state.deflection += (wanted - state.deflection) * std::min(1.0f, h * 30.0f);
             float radius = wheel.radius - state.deflection;
 
-            float torque = wheel.driveTorque;
+            float torque = wheel.driveTorque * driveShare;
             // Traction control: a driven wheel turning much faster than the road passes gets less.
             if (wheel.easesWhenSpinning && wheel.isDriven && state.isOnGround && torque * state.slipRatio > 0) {
                 torque *= 1.0f - saturate((std::abs(state.slipRatio) - kPeakSlipRatio) / (kPeakSlipRatio * 0.8f));
@@ -637,7 +657,7 @@ void VehicleBody::fixedUpdate(World& world, Entity self, float dt) {
                         return;
                     }
                     // One budget of friction for both directions: braking hard leaves little to corner with.
-                    float available = state.load * part.grip * gripAt(combined);
+                    float available = state.load * part.grip * std::max(gripAt(combined), combined > 1.0f ? slideGrip : 0.0f);
                     outLongitudinal = available * x / combined;
                     outLateral = -available * y / combined;
                 };
@@ -700,10 +720,10 @@ void VehicleBody::fixedUpdate(World& world, Entity self, float dt) {
         if (hitsWithItsBox) {
             for (int corner = 0; corner < 8; corner++) {
                 Vec3 local{(corner & 1 ? 0.5f : -0.5f) * size.x, (corner & 2 ? 0.62f : -0.18f) * size.y, (corner & 4 ? 0.5f : -0.5f) * size.z};
-                pressAgainstScene(world, self, body, local, body.mass * 160.0f, body.mass * 9.0f);
+                pressAgainstScene(world, self, body, local, body.mass * 160.0f, body.mass * 9.0f, h);
             }
         }
-        for (const Bumper* bumper : parts.bumpers) pressAgainstScene(world, self, body, bumper->mount, body.mass * 140.0f, body.mass * 10.0f);
+        for (const Bumper* bumper : parts.bumpers) pressAgainstScene(world, self, body, bumper->mount, body.mass * 140.0f, body.mass * 10.0f, h);
         body.integrate(h);
     }
     isOnGround = touches;
@@ -976,9 +996,12 @@ Entity makeAirplane(World& world, Vec3 position) {
 
 namespace molten::kit {
 
-MOLTEN_COMPONENT(VehicleBody, MOLTEN_FIELD(mass).range(50, 20000), MOLTEN_FIELD(size).help("Width, height, length: for how hard it is to turn, and for what it hits"),
+MOLTEN_COMPONENT(VehicleBody, MOLTEN_FIELD(mass).range(50, 20000), MOLTEN_FIELD(size).help("Width, height, length: how hard it is to turn, and the box that hits walls (orange in the Scene view when it is selected)"),
                  MOLTEN_FIELD(inertia).help("Per kilogram about x, y, z. Zero works it out from the size"), MOLTEN_FIELD(dragArea),
                  MOLTEN_FIELD(hitsWithItsBox).help("The corners of a box of its size stop at walls. Off: only its Bumpers do"),
+                 MOLTEN_FIELD(stability).range(0, 1).help("Stability control: catches a slide past Drift Angle, and eases the engine. 0 is off"),
+                 MOLTEN_FIELD(driftAngle).range(2, 45).help("Degrees the car may slide off its line before stability control steps in: a drift"),
+                 MOLTEN_FIELD(slideGrip).range(0, 1).help("Grip a sliding tire keeps, as a share of its best: low is ice, 0.8 a car that can be held in a slide"),
                  MOLTEN_FIELD(startVelocity).help("In its own axes: -z is forward. For starting on the move"))
 MOLTEN_COMPONENT(Bumper, MOLTEN_FIELD(friction).range(0, 1.5f))
 MOLTEN_COMPONENT(Wheel, MOLTEN_FIELD(radius).range(0.05f, 1.5f), MOLTEN_FIELD(grip).range(0.2f, 2), MOLTEN_FIELD(steerAngle).range(-50, 50).help("Degrees at full lock. 0 does not steer"),

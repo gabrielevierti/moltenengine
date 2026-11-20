@@ -2,11 +2,14 @@
 // scales the selection (with snapping), and the lines and icons drawn over the scene.
 #include "Editor.hpp"
 #include "Rendering/Particles.hpp"
+#include "Kit/Vehicles.hpp"
 #include "Panels/Widgets.hpp"
 
 #include <ImGuizmo.h>
+#include <imgui_internal.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cmath>
 #include <filesystem>
 
@@ -44,6 +47,22 @@ Entity pick(EditorContext& editor, const Ray& ray) {
         }
     }
     return best;
+}
+
+/// A view of the scene must not be squeezed to nothing: below this it is held at this size,
+/// docked (its place in the layout grows back) or floating.
+const ImVec2 kLeastViewSize(360, 240);
+
+void keepViewAtLeast() {
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    ImGuiDockNode* node = window ? window->DockNode : nullptr;
+    if (!node) return;
+    ImVec2 size = node->Size;
+    if (size.x >= kLeastViewSize.x && size.y >= kLeastViewSize.y) return;
+    // Only where the layout has room for it: a window smaller than this as a whole is left as it is.
+    ImVec2 whole = ImGui::GetMainViewport()->WorkSize;
+    if (whole.x < kLeastViewSize.x * 2 || whole.y < kLeastViewSize.y * 2) return;
+    ImGui::DockBuilderSetNodeSize(node->ID, ImVec2(std::max(size.x, kLeastViewSize.x), std::max(size.y, kLeastViewSize.y)));
 }
 
 /// Where a ray meets the ground (y = 0), or a point a few meters along it if it never does.
@@ -122,6 +141,25 @@ void drawColliderOf(EditorContext& editor, Entity entity, Vec4 color, int depth)
             }
         }
     }
+    // A vehicle hits walls with the corners of a box of its size, and with its Bumpers: drawn in orange.
+    if (const kit::VehicleBody* vehicle = scene.get<kit::VehicleBody>(entity)) {
+        Quat rotation;
+        Vec3 worldPosition, worldScale;
+        decompose(transform->world, worldPosition, rotation, worldScale);
+        const Vec4 orange{1.0f, 0.55f, 0.15f, color.w};
+        if (vehicle->hitsWithItsBox) {
+            Vec3 low{-0.5f * vehicle->size.x, -0.18f * vehicle->size.y, -0.5f * vehicle->size.z};
+            Vec3 high{0.5f * vehicle->size.x, 0.62f * vehicle->size.y, 0.5f * vehicle->size.z};
+            lines.box(worldPosition + rotate(rotation, (low + high) * 0.5f), (high - low) * 0.5f, rotation, orange);
+            for (int corner = 0; corner < 8; corner++) {
+                Vec3 local{corner & 1 ? high.x : low.x, corner & 2 ? high.y : low.y, corner & 4 ? high.z : low.z};
+                lines.sphere(worldPosition + rotate(rotation, local), 0.05f, orange, 8);
+            }
+        }
+        // Its middle of mass, and where its front is.
+        lines.line(worldPosition, worldPosition + rotate(rotation, Vec3{0, 0, -0.6f * vehicle->size.z}), orange * Vec4{1, 1, 1, 0.7f});
+    }
+    if (scene.get<kit::Bumper>(entity)) lines.sphere(transform->worldPosition(), 0.08f, Vec4{1.0f, 0.55f, 0.15f, color.w}, 10);
     if (depth >= 8) return;
     for (Entity child : editor.scene.children(entity)) drawColliderOf(editor, child, color, depth + 1);
 }
@@ -291,6 +329,11 @@ void drawToolbar(EditorContext& editor) {
         gizmo.space = gizmo.space == GizmoSpace::World ? GizmoSpace::Local : GizmoSpace::World;
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("Handles follow the world's axes or the entity's own (X)");
+    ImGui::SameLine();
+    if (ImGui::Button(gizmo.aroundCenter ? "Center" : "Pivot")) gizmo.aroundCenter = !gizmo.aroundCenter;
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) {
+        ImGui::SetTooltip("With several selected: the handles at the middle of them all, which they turn and scale around (Center),\nor on the last one chosen (Pivot)");
+    }
 
     ImGui::SameLine(0, 14);
     if (toolButton("Snap", gizmo.snapEnabled, "Move, turn and scale in steps. Holding Cmd while dragging does the opposite.")) {
@@ -398,7 +441,23 @@ bool updateGizmo(EditorContext& editor, ViewportInfo& viewport) {
                : settings.operation == GizmoOperation::Scale ? settings.scaleSnap : settings.moveSnap;
     float snapValues[3] = {step, step, step};
 
+    // With several selected, the handles may stand at the middle of them all: what they turn
+    // and scale around. The entities that move with a selected parent are not counted.
     Mat4 before = transform->world;
+    if (settings.aroundCenter && document.selection().size() > 1) {
+        Vec3 sum{0, 0, 0};
+        int count = 0;
+        for (Entity entity : document.selection()) {
+            if (const Transform* other = scene.get<Transform>(entity)) {
+                sum += Vec3{other->world.columns[3].x, other->world.columns[3].y, other->world.columns[3].z};
+                count++;
+            }
+        }
+        if (count > 0) {
+            Vec3 middle = sum / float(count);
+            before.columns[3] = Vec4{middle.x, middle.y, middle.z, 1};
+        }
+    }
     Mat4 world = before;
     ImGuizmo::SetOrthographic(false);
     ImGuizmo::SetDrawlist();
@@ -418,7 +477,7 @@ bool updateGizmo(EditorContext& editor, ViewportInfo& viewport) {
                 if (candidate != entity && document.isDescendant(other->parent, candidate)) movesWithParent = true;
             }
             if (movesWithParent) continue;
-            document.setWorldMatrix(entity, entity == primary ? world : change * other->world);
+            document.setWorldMatrix(entity, change * other->world);
         }
         scene.updateTransforms();
         document.markChanged();
@@ -484,7 +543,10 @@ struct InterfacePiece {
     Vec2* size = nullptr;           // a rectangle's
     float* radius = nullptr;        // a round one's
     float* letters = nullptr;       // a text's: the height of its letters
+    std::vector<float*> lengths;    // what else grows with it: a dial's thickness, a panel's border
     Vec2 min{0, 0}, max{0, 0};      // where it is, in points of the game's picture
+    /// The point it is placed by: its anchor's place on the screen and its offset from there.
+    Vec2 place(Vec2 screen) const { return Vec2{screen.x * anchor->x, screen.y * anchor->y} + *offset; }
 };
 
 std::vector<InterfacePiece> interfacePieces(EditorContext& editor, Vec2 screen) {
@@ -498,6 +560,11 @@ std::vector<InterfacePiece> interfacePieces(EditorContext& editor, Vec2 screen) 
         const Field* size = type.findField("size");
         const Field* radius = type.findField("radius");
         const Field* text = type.findField("text");
+        const Field* round = type.findField("isRound");             // a Button that is a circle
+        std::vector<const Field*> lengths;
+        for (const char* name : {"thickness", "border"}) {
+            if (const Field* field = type.findField(name); field && field->type == FieldType::Float) lengths.push_back(field);
+        }
         for (Entity entity : editor.scene.entities()) {
             void* component = type.get(scene, entity);
             if (!component) continue;
@@ -505,8 +572,10 @@ std::vector<InterfacePiece> interfacePieces(EditorContext& editor, Vec2 screen) 
             piece.entity = entity;
             piece.anchor = static_cast<Vec2*>(anchor->address(component));
             piece.offset = static_cast<Vec2*>(offset->address(component));
+            for (const Field* length : lengths) piece.lengths.push_back(static_cast<float*>(length->address(component)));
             Vec2 middle{screen.x * piece.anchor->x + piece.offset->x, screen.y * piece.anchor->y + piece.offset->y};
-            if (size && size->type == FieldType::Vec2) {
+            bool isRound = round && round->type == FieldType::Bool && *static_cast<bool*>(round->address(component));
+            if (size && size->type == FieldType::Vec2 && !isRound) {
                 piece.size = static_cast<Vec2*>(size->address(component));
                 piece.min = middle - *piece.size * 0.5f;
                 piece.max = middle + *piece.size * 0.5f;
@@ -536,9 +605,27 @@ std::vector<InterfacePiece> interfacePieces(EditorContext& editor, Vec2 screen) 
 /// Lets the pieces of the interface be chosen, dragged into place and resized where the
 /// game is shown: what is seen here is where they are in the game. `at` and `shown` are
 /// where the picture is in the window; `screen` is its size in the game's own points.
+///
+/// Several can be chosen (Shift or Cmd and a click, or a box dragged over them; choosing a
+/// parent in the Hierarchy chooses every piece under it): they move together, and the
+/// corners of the box around them scale them together, from the opposite corner (from the
+/// middle with Alt), each keeping its place among the others. A single rectangle's lower
+/// right corner resizes it freely, as before; with Shift, in proportion.
 void arrangeInterface(EditorContext& editor, ImVec2 at, ImVec2 shown, Vec2 screen, bool isHovered) {
-    static Entity dragged{};
-    static bool isResizing = false, hasMoved = false;
+    // What a piece was when the drag began: scaling starts from it every frame, so nothing drifts.
+    struct Before {
+        Entity entity;
+        Vec2 offset, place, size;
+        float radius = 0, letters = 0;
+        std::vector<float> lengths;
+    };
+    enum class Drag { None, Move, Scale, Resize, Box };
+    static Drag drag = Drag::None;
+    static bool hasMoved = false;
+    static std::vector<Before> before;
+    static Vec2 pivot{0, 0}, grabbed{0, 0}, boxStart{0, 0};
+    static Entity resized{};
+
     if (screen.x <= 0 || shown.x <= 0) return;
     float zoom = shown.x / screen.x;                    // window points for each point of the game
     ImDrawList* drawList = ImGui::GetWindowDrawList();
@@ -546,72 +633,195 @@ void arrangeInterface(EditorContext& editor, ImVec2 at, ImVec2 shown, Vec2 scree
     auto toWindow = [&](Vec2 p) { return ImVec2(at.x + p.x * zoom, at.y + p.y * zoom); };
     Vec2 pointer{(io.MousePos.x - at.x) / zoom, (io.MousePos.y - at.y) / zoom};
     std::vector<InterfacePiece> pieces = interfacePieces(editor, screen);
+    SceneDocument& document = editor.scene;
     const ImU32 orange = IM_COL32(255, 122, 47, 255);
     drawList->PushClipRect(at, ImVec2(at.x + shown.x, at.y + shown.y), true);
+
+    // Chosen: selected, or under something selected (the group a dial is made of).
+    auto isChosen = [&](Entity entity) {
+        for (Entity selected : document.selection()) {
+            if (selected == entity || document.isDescendant(entity, selected)) return true;
+        }
+        return false;
+    };
+    std::vector<const InterfacePiece*> chosen;
+    for (const InterfacePiece& piece : pieces) {
+        if (isChosen(piece.entity)) chosen.push_back(&piece);
+    }
+    Vec2 low{0, 0}, high{0, 0};
+    if (!chosen.empty()) {
+        low = chosen[0]->min, high = chosen[0]->max;
+        for (const InterfacePiece* piece : chosen) {
+            low = simd::min(low, piece->min);
+            high = simd::max(high, piece->max);
+        }
+    }
+    bool isGroup = chosen.size() > 1;
+    const InterfacePiece* single = chosen.size() == 1 ? chosen[0] : nullptr;
+    bool canScale = !chosen.empty() && std::any_of(chosen.begin(), chosen.end(), [](const InterfacePiece* piece) {
+        return piece->size || piece->radius || piece->letters;
+    });
+
+    // The handles: the four corners of a group, the lower right one of a single piece.
+    Vec2 corners[4] = {low, Vec2{high.x, low.y}, high, Vec2{low.x, high.y}};
+    int handle = -1;
+    if (canScale) {
+        for (int i = 0; i < 4; i++) {
+            if (!isGroup && i != 2) continue;
+            if (std::abs(pointer.x - corners[i].x) * zoom < 9 && std::abs(pointer.y - corners[i].y) * zoom < 9) handle = i;
+        }
+    }
 
     // The one under the pointer: the last drawn is on top.
     const InterfacePiece* under = nullptr;
     for (const InterfacePiece& piece : pieces) {
         if (pointer.x >= piece.min.x && pointer.x <= piece.max.x && pointer.y >= piece.min.y && pointer.y <= piece.max.y) under = &piece;
     }
-    const InterfacePiece* chosen = nullptr;
-    for (const InterfacePiece& piece : pieces) {
-        if (editor.scene.isSelected(piece.entity)) chosen = &piece;
-    }
-    bool onHandle = chosen && (chosen->size || chosen->radius || chosen->letters) && std::abs(pointer.x - chosen->max.x) * zoom < 9 && std::abs(pointer.y - chosen->max.y) * zoom < 9;
+
+    auto remember = [&]() {
+        before.clear();
+        for (const InterfacePiece* piece : chosen) {
+            Before was;
+            was.entity = piece->entity;
+            was.offset = *piece->offset;
+            was.place = piece->place(screen);
+            if (piece->size) was.size = *piece->size;
+            if (piece->radius) was.radius = *piece->radius;
+            if (piece->letters) was.letters = *piece->letters;
+            for (float* length : piece->lengths) was.lengths.push_back(*length);
+            before.push_back(was);
+        }
+    };
 
     if (isHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-        if (onHandle) {
-            dragged = chosen->entity;
-            isResizing = true;
-        } else if (under) {
-            editor.scene.select(under->entity);
-            editor.selectedAsset.clear();
-            dragged = under->entity;
-            isResizing = false;
-        }
+        bool adds = io.KeyShift || io.KeySuper || io.KeyCtrl;
         hasMoved = false;
-    }
-    if (dragged.isValid()) {
-        const InterfacePiece* piece = nullptr;
-        for (const InterfacePiece& candidate : pieces) {
-            if (candidate.entity == dragged) piece = &candidate;
+        grabbed = pointer;
+        if (handle >= 0 && !(adds && !isGroup && handle != 2)) {
+            remember();
+            if (single && single->size && !io.KeyShift) {
+                drag = Drag::Resize;                    // one rectangle, freely, as it always did
+                resized = single->entity;
+            } else {
+                drag = Drag::Scale;
+                pivot = io.KeyAlt ? (low + high) * 0.5f : corners[(handle + 2) % 4];
+            }
+        } else if (under) {
+            if (adds) {
+                document.toggleSelection(under->entity);
+                drag = Drag::None;
+            } else {
+                // A piece already among the chosen keeps the others with it.
+                if (!isChosen(under->entity)) document.select(under->entity);
+                editor.selectedAsset.clear();
+                chosen.clear();
+                for (const InterfacePiece& piece : pieces) {
+                    if (isChosen(piece.entity)) chosen.push_back(&piece);
+                }
+                remember();
+                drag = Drag::Move;
+            }
+        } else {
+            drag = Drag::Box;
+            boxStart = pointer;
+            if (!adds) document.select(Entity{});
         }
-        if (!piece || !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-            if (hasMoved) editor.scene.markChanged();        // one step of undo for the whole drag
-            dragged = Entity{};
-        } else if (io.MouseDelta.x != 0 || io.MouseDelta.y != 0) {
-            Vec2 delta{io.MouseDelta.x / zoom, io.MouseDelta.y / zoom};
+    }
+
+    if (drag != Drag::None) {
+        if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+            if (drag == Drag::Box) {
+                Vec2 a = simd::min(boxStart, pointer), b = simd::max(boxStart, pointer);
+                if ((b.x - a.x) * zoom > 3 || (b.y - a.y) * zoom > 3) {
+                    for (const InterfacePiece& piece : pieces) {
+                        bool touches = piece.max.x >= a.x && piece.min.x <= b.x && piece.max.y >= a.y && piece.min.y <= b.y;
+                        if (touches && !document.isSelected(piece.entity)) document.addToSelection(piece.entity);
+                    }
+                }
+            }
+            if (hasMoved) document.markChanged();       // one step of undo for the whole drag
+            drag = Drag::None;
+        } else if (drag != Drag::Box && (pointer.x != grabbed.x || pointer.y != grabbed.y)) {
             hasMoved = true;
-            if (!isResizing) {
-                *piece->offset += delta;
-            } else if (piece->size) {
-                // The corner follows the pointer and the opposite one stays: it grows from its middle by half.
-                *piece->size = Vec2{std::max(piece->size->x + delta.x, 8.0f), std::max(piece->size->y + delta.y, 8.0f)};
-                *piece->offset += delta * 0.5f;
-            } else if (piece->radius) {
-                *piece->radius = std::max(*piece->radius + (delta.x + delta.y) * 0.5f, 8.0f);
-            } else if (piece->letters) {
-                *piece->letters = std::max(*piece->letters + delta.y, 6.0f);
+            auto pieceOf = [&](Entity entity) -> const InterfacePiece* {
+                for (const InterfacePiece& piece : pieces) {
+                    if (piece.entity == entity) return &piece;
+                }
+                return nullptr;
+            };
+            Vec2 delta = pointer - grabbed;
+            if (drag == Drag::Move) {
+                for (const Before& was : before) {
+                    if (const InterfacePiece* piece = pieceOf(was.entity)) *piece->offset = was.offset + delta;
+                }
+            } else if (drag == Drag::Resize) {
+                const Before* was = before.empty() ? nullptr : &before[0];
+                const InterfacePiece* piece = pieceOf(resized);
+                if (was && piece && piece->size) {
+                    // The corner follows the pointer and the opposite one stays: it grows from its middle by half.
+                    Vec2 grown = simd::max(was->size + delta, Vec2{8, 8});
+                    *piece->size = grown;
+                    *piece->offset = was->offset + (grown - was->size) * 0.5f;
+                }
+            } else if (drag == Drag::Scale) {
+                // One factor for everything: how far the pointer is from the pivot, against where it started.
+                Vec2 from = grabbed - pivot;
+                float factor = simd::dot(pointer - pivot, from) / std::max(simd::dot(from, from), 1e-3f);
+                factor = std::clamp(factor, 0.05f, 50.0f);
+                for (const Before& was : before) {
+                    const InterfacePiece* piece = pieceOf(was.entity);
+                    if (!piece) continue;
+                    // Its place moves away from the pivot as everything grows: they keep their places among each other.
+                    Vec2 place = pivot + (was.place - pivot) * factor;
+                    *piece->offset = was.offset + (place - was.place);
+                    if (piece->size) *piece->size = simd::max(was.size * factor, Vec2{4, 4});
+                    if (piece->radius) *piece->radius = std::max(was.radius * factor, 2.0f);
+                    if (piece->letters) *piece->letters = std::max(was.letters * factor, 4.0f);
+                    for (size_t i = 0; i < piece->lengths.size() && i < was.lengths.size(); i++) *piece->lengths[i] = was.lengths[i] * factor;
+                }
             }
         }
     }
 
-    // What is drawn over the picture: a faint outline under the pointer, and the chosen one's frame, handle and anchor.
-    if (under && under != chosen && isHovered && !dragged.isValid()) drawList->AddRect(toWindow(under->min), toWindow(under->max), IM_COL32(255, 255, 255, 110), 0, ImDrawFlags_None, 1.0f);
-    if (chosen) {
-        drawList->AddRect(toWindow(chosen->min), toWindow(chosen->max), orange, 0, ImDrawFlags_None, 1.5f);
-        if (chosen->size || chosen->radius || chosen->letters) {
-            ImVec2 corner = toWindow(chosen->max);
-            drawList->AddRectFilled(ImVec2(corner.x - 5, corner.y - 5), ImVec2(corner.x + 5, corner.y + 5), orange);
-            if (onHandle) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNWSE);
-        }
-        // Its anchor: the point of the screen it keeps its distance from, and the line to it.
-        ImVec2 anchor = toWindow(Vec2{screen.x * chosen->anchor->x, screen.y * chosen->anchor->y});
-        ImVec2 middle = toWindow((chosen->min + chosen->max) * 0.5f);
-        drawList->AddLine(anchor, middle, IM_COL32(255, 122, 47, 120), 1.0f);
+    // What is drawn over the picture: a faint outline under the pointer; the chosen with their
+    // frames, the box around them with its handles, and each one's anchor.
+    if (under && !isChosen(under->entity) && isHovered && drag == Drag::None) {
+        drawList->AddRect(toWindow(under->min), toWindow(under->max), IM_COL32(255, 255, 255, 110), 0, ImDrawFlags_None, 1.0f);
+    }
+    for (const InterfacePiece* piece : chosen) {
+        drawList->AddRect(toWindow(piece->min), toWindow(piece->max), isGroup ? IM_COL32(255, 122, 47, 150) : orange, 0, ImDrawFlags_None, isGroup ? 1.0f : 1.5f);
+        ImVec2 anchor = toWindow(Vec2{screen.x * piece->anchor->x, screen.y * piece->anchor->y});
+        if (!isGroup) drawList->AddLine(anchor, toWindow((piece->min + piece->max) * 0.5f), IM_COL32(255, 122, 47, 120), 1.0f);
         drawList->AddLine(ImVec2(anchor.x - 7, anchor.y), ImVec2(anchor.x + 7, anchor.y), orange, 2.0f);
         drawList->AddLine(ImVec2(anchor.x, anchor.y - 7), ImVec2(anchor.x, anchor.y + 7), orange, 2.0f);
+    }
+    if (isGroup) {
+        ImVec2 a = toWindow(low), b = toWindow(high);
+        drawList->AddRect(ImVec2(a.x - 4, a.y - 4), ImVec2(b.x + 4, b.y + 4), orange, 0, ImDrawFlags_None, 1.5f);
+    }
+    if (canScale) {
+        for (int i = 0; i < 4; i++) {
+            if (!isGroup && i != 2) continue;
+            ImVec2 corner = toWindow(corners[i]);
+            if (isGroup) corner = ImVec2(corner.x + (i == 1 || i == 2 ? 4.0f : -4.0f), corner.y + (i >= 2 ? 4.0f : -4.0f));
+            drawList->AddRectFilled(ImVec2(corner.x - 5, corner.y - 5), ImVec2(corner.x + 5, corner.y + 5), handle == i ? IM_COL32(255, 200, 150, 255) : orange);
+        }
+        if (handle >= 0 || drag == Drag::Scale || drag == Drag::Resize) {
+            ImGui::SetMouseCursor(handle == 0 || handle == 2 || drag == Drag::Resize ? ImGuiMouseCursor_ResizeNWSE : ImGuiMouseCursor_ResizeNESW);
+        }
+    }
+    if (drag == Drag::Box) {
+        ImVec2 a = toWindow(simd::min(boxStart, pointer)), b = toWindow(simd::max(boxStart, pointer));
+        drawList->AddRectFilled(a, b, IM_COL32(255, 122, 47, 30));
+        drawList->AddRect(a, b, IM_COL32(255, 122, 47, 200));
+    }
+    if (drag == Drag::Scale && !before.empty()) {
+        // How much, while it is being done.
+        Vec2 from = grabbed - pivot;
+        float factor = std::clamp(simd::dot(pointer - pivot, from) / std::max(simd::dot(from, from), 1e-3f), 0.05f, 50.0f);
+        char text[24];
+        std::snprintf(text, sizeof(text), "%d%%", int(factor * 100 + 0.5f));
+        drawList->AddText(ImVec2(io.MousePos.x + 14, io.MousePos.y + 10), IM_COL32(255, 255, 255, 230), text);
     }
     drawList->PopClipRect();
 }
@@ -620,11 +830,14 @@ void arrangeInterface(EditorContext& editor, ImVec2 at, ImVec2 shown, Vec2 scree
 /// Choosing one leaves the piece where it is and changes what it keeps its distance from.
 void drawAnchorChoices(EditorContext& editor, Vec2 screen) {
     std::vector<InterfacePiece> pieces = interfacePieces(editor, screen);
-    const InterfacePiece* chosen = nullptr;
-    for (const InterfacePiece& piece : pieces) {
-        if (editor.scene.isSelected(piece.entity)) chosen = &piece;
+    std::vector<InterfacePiece*> chosen;
+    for (InterfacePiece& piece : pieces) {
+        bool isChosen = false;
+        for (Entity selected : editor.scene.selection()) isChosen = isChosen || selected == piece.entity || editor.scene.isDescendant(piece.entity, selected);
+        if (isChosen) chosen.push_back(&piece);
     }
-    if (!chosen) return;
+    if (chosen.empty()) return;
+    const InterfacePiece* primary = chosen.back();
     ImGui::SameLine(0, 14);
     ImGui::AlignTextToFramePadding();
     ImGui::TextDisabled("Anchor");
@@ -638,14 +851,16 @@ void drawAnchorChoices(EditorContext& editor, Vec2 screen) {
         for (int column = 0; column < 3; column++) {
             ImVec2 min(at.x + float(column) * (cell + gap), at.y + float(row) * (cell + gap) + 1), max(min.x + cell, min.y + cell);
             Vec2 anchor{float(column) * 0.5f, float(row) * 0.5f};
-            bool isIt = std::abs(chosen->anchor->x - anchor.x) < 0.01f && std::abs(chosen->anchor->y - anchor.y) < 0.01f;
+            bool isIt = std::abs(primary->anchor->x - anchor.x) < 0.01f && std::abs(primary->anchor->y - anchor.y) < 0.01f;
             bool isOver = ImGui::IsMouseHoveringRect(min, max);
             drawList->AddRectFilled(min, max, isIt ? IM_COL32(255, 122, 47, 255) : isOver ? IM_COL32(200, 205, 215, 255) : IM_COL32(110, 116, 128, 255), 1.5f);
             if (isOver && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-                // The same place on the screen, measured from the new anchor.
-                Vec2 place{screen.x * chosen->anchor->x + chosen->offset->x, screen.y * chosen->anchor->y + chosen->offset->y};
-                *chosen->anchor = anchor;
-                *chosen->offset = place - Vec2{screen.x * anchor.x, screen.y * anchor.y};
+                // The same place on the screen, measured from the new anchor: for every chosen piece.
+                for (InterfacePiece* piece : chosen) {
+                    Vec2 place = piece->place(screen);
+                    *piece->anchor = anchor;
+                    *piece->offset = place - Vec2{screen.x * anchor.x, screen.y * anchor.y};
+                }
                 editor.scene.markChanged();
             }
         }
@@ -661,8 +876,10 @@ void drawAnchorChoices(EditorContext& editor, Vec2 screen) {
 void drawGameView(EditorContext& editor, bool takesCanvas) {
     Engine& engine = editor.engine;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::SetNextWindowSizeConstraints(kLeastViewSize, ImVec2(FLT_MAX, FLT_MAX));
     bool isVisible = ImGui::Begin("Game", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoCollapse);
     ImGui::PopStyleVar();
+    keepViewAtLeast();
     editor.gameViewHasFocus = isVisible && ImGui::IsWindowFocused();
     ImVec2 position = ImGui::GetCursorScreenPos(), size = ImGui::GetContentRegionAvail();
     Entity camera = editor.scene.gameCamera();
@@ -720,6 +937,10 @@ void drawGameView(EditorContext& editor, bool takesCanvas) {
         ImGui::SameLine(0, 10);
         ImGui::AlignTextToFramePadding();
         ImGui::TextDisabled("%d x %d", view.width, view.height);
+        float scale = World::interfaceScaleFor(Vec2{float(view.width), float(view.height)} / pixelsPerPoint(engine), engine.interfaceReference, engine.interfaceMatch);
+        ImGui::SameLine(0, 10);
+        ImGui::TextDisabled("interface at %.0f%%", double(scale * 100));
+        ui::tooltip("The game's interface is laid out for 1280 x 720 and drawn larger or smaller on other screens, so it looks the same on all of them");
     }
     engine.renderer().canvasView = takesCanvas ? int(kGameView) : -1;
     // The game's pointer is where the mouse is in this picture, in the picture's own points:
@@ -731,8 +952,10 @@ void drawGameView(EditorContext& editor, bool takesCanvas) {
     }
     // Not playing, the interface is laid out here: click a piece, drag it, pull its corner.
     if (!editor.scene.isPlaying() && isVisible && screen.x > 0) {
-        drawAnchorChoices(editor, screen);
-        arrangeInterface(editor, at, shown, screen, ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect(at, ImVec2(at.x + shown.x, at.y + shown.y)));
+        // In the interface's own points: it is laid out for its reference screen and scaled to this one.
+        Vec2 laidOut = screen / World::interfaceScaleFor(screen, engine.interfaceReference, engine.interfaceMatch);
+        drawAnchorChoices(editor, laidOut);
+        arrangeInterface(editor, at, shown, laidOut, ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect(at, ImVec2(at.x + shown.x, at.y + shown.y)));
     }
     // While the game runs, it hears the keyboard, the mouse and the controllers only when this
     // window is the one being used: click in it to play, click anywhere else to work, and
@@ -765,8 +988,10 @@ void drawSceneView(EditorContext& editor) {
     ViewportInfo& viewport = editor.viewport;
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::SetNextWindowSizeConstraints(kLeastViewSize, ImVec2(FLT_MAX, FLT_MAX));
     bool isVisible = ImGui::Begin("Scene", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoCollapse);
     ImGui::PopStyleVar();
+    keepViewAtLeast();
     ImVec2 position = ImGui::GetCursorScreenPos(), size = ImGui::GetContentRegionAvail();
     viewport.position = position;
     viewport.size = size;

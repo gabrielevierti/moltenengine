@@ -16,16 +16,19 @@ void Canvas::begin(Vec2 sizeInPoints, float pixelsPerPoint) {
     startsNewBatch_ = false;
 }
 
-void Canvas::beginArea(Vec2 origin, Vec2 size) {
+void Canvas::beginArea(Vec2 origin, Vec2 size, float scale) {
     if (isInArea_) return;
     isInArea_ = true;
     areaOrigin_ = origin;
+    areaScale_ = scale > 1e-3f ? scale : 1.0f;
     sizeOutsideArea_ = size_;
+    pixelSizeOutsideArea_ = pixelSize_;
     areaFirstVertex_ = vertices_.size();
     areaFirstBatch_ = batches_.size();
-    size_ = size;
+    size_ = size / areaScale_;
+    pixelSize_ = pixelSize_ / areaScale_;           // a pixel of the screen, in the area's own points: edges stay one pixel soft
     clips_.clear();
-    pushClip(Vec2{0, 0}, size);
+    pushClip(Vec2{0, 0}, size_);
     startsNewBatch_ = true;
 }
 
@@ -34,14 +37,16 @@ void Canvas::endArea() {
     isInArea_ = false;
     // Everything drawn since beginArea was placed as if the area began at the corner of
     // the screen: move it, and its clip rectangles, to where the area really is.
-    for (size_t i = areaFirstVertex_; i < vertices_.size(); i++) vertices_[i].position += areaOrigin_;
+    for (size_t i = areaFirstVertex_; i < vertices_.size(); i++) vertices_[i].position = areaOrigin_ + vertices_[i].position * areaScale_;
     for (size_t i = areaFirstBatch_; i < batches_.size(); i++) {
-        batches_[i].clipMin += areaOrigin_;
-        batches_[i].clipMax += areaOrigin_;
+        batches_[i].clipMin = areaOrigin_ + batches_[i].clipMin * areaScale_;
+        batches_[i].clipMax = areaOrigin_ + batches_[i].clipMax * areaScale_;
     }
     clips_.clear();
     isClipEmpty_ = false;
     size_ = sizeOutsideArea_;
+    pixelSize_ = pixelSizeOutsideArea_;
+    areaScale_ = 1.0f;
     startsNewBatch_ = true;
 }
 

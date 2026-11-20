@@ -30,13 +30,15 @@ A little Fiat 500 on a small circuit, to lap against the clock, on a Mac with th
 - **A circuit to learn.** 566 meters of corners with curbs and walls, a paddock with pits, a stand and a start gantry, lamps along the straight, in evening light.
 - **Lap times.** Your lap, your last and your best, on a dashboard with speed, gear and revs.
 - **Lights and smoke.** Headlights (L), brake lights that glow when you brake, particle smoke from the exhaust that follows the throttle, and from the rear tires when they let go.
-- **Touch controls.** A steering stick, gas, brake and handbrake, which appear on the first touch. On the Mac, T shows them and the mouse plays the finger.
+- **Touch controls.** Two steering buttons on the left; gas, brake and handbrake on the right. On a phone they are there from the start. On the Mac, T shows them and the mouse plays the finger.
 
 <p align="center">
-  <img src="Docs/driving-iphone.jpg" alt="The same game in iPhone landscape, with a steering stick on the left and gas, brake and handbrake on the right" width="80%">
+  <img src="Docs/driving-iphone.jpg" alt="The same game in iPhone landscape, with steering on the left and gas, brake and handbrake on the right" width="80%">
 </p>
 
-The game is not part of the engine: download **`MoltenProjects.zip`** from the releases, unzip it wherever you keep your projects and open `Driving` from the editor. Everything in it is ordinary: the scene, the materials, the interface laid out in the Game view, and its own scripts in `Assets/Scripts` (`LapTimer.cpp`, `CarLights.cpp`, `Exhaust.cpp`…). The unit tests drive it without a screen: a stop from speed that has to stay straight, and three laps by an autopilot that has to stay on the road.
+The game is not part of the engine: download **`MoltenProjects.zip`** from the releases, unzip it wherever you keep your projects and open `Driving` (or `Showcase`) from the editor. Everything in it is ordinary: the scene, the materials, the interface laid out in the Game view, and its own scripts in `Assets/Scripts` (`LapTimer.cpp`, `CarLights.cpp`, `Exhaust.cpp`…). The unit tests drive it without a screen: a stop from speed that has to stay straight, and three laps by an autopilot that has to stay on the road.
+
+Next to it, the **Showcase** project is a plaza of everything Molten does, to drive around in the same car: materials from smooth to rough, hand-written shaders (a lava lake, a hologram), a hall of colored lights, every particle effect, physics with joints (dominoes, a wrecking ball, a row of hanging balls, gates on hinges), ramps with mesh colliders, a basin of ocean waves with things floating on it, tanks of liquid, and stars to collect, picked up by a visual script.
 
 The car is ["Fiat 500 x Outlaw"](https://sketchfab.com/3d-models/fiat-500-x-outlaw-f412bdec4b494692b9d5d9c03f4178ad) by [Subin](https://sketchfab.com/subink), licensed under [CC-BY-4.0](http://creativecommons.org/licenses/by/4.0/).
 
@@ -59,12 +61,12 @@ Or double-click `build.command` in the Finder: it builds everything, runs the te
 
 `./build/molten` opens the list of projects: make a new one, or open one you have (Cmd+O opens projects and scenes alike).
 
-- **Hierarchy, Scene, Game, Inspector, Explorer, Console**, docked side by side and rearranged by dragging tabs. The game runs in the Game view while the Scene view keeps its own camera; Stop puts everything back as it was. Keys reach the game only while the Game view has focus.
+- **Hierarchy, Scene, Game, Inspector, Explorer, Console**, docked side by side as in Unity and rearranged by dragging tabs; layouts can be saved, exported and imported. The console sorts errors, warnings, info and debug messages, collapses repeats and searches. The game runs in the Game view while the Scene view keeps its own camera; Stop puts everything back as it was. Keys reach the game only while the Game view has focus.
 - **The 3D view.** Move, rotate, scale, or all three (W, E, R, T), in world or local axes, with snapping. Right button and W A S D fly, Alt-drag orbits, F frames the selection. "Colliders" shows what is solid.
 - **Assets.** Folders and tiles with real previews: models, scenes, materials as lit balls. Drag a model into the view to place it; drag a material onto an object (it shows on whatever is under the pointer before you let go) or onto its row in the Hierarchy. Right-click to create anything the + New menu offers.
 - **The Viewer.** Look into an asset before using it: a model turned around, a material and all its maps, a sound with tools to trim, fade, loop and normalize it, a particle effect playing. Import settings for pictures, models and sounds are kept in the file's `.meta`.
 - **Materials and shaders.** A material is an asset: lit, unlit, water, or a shader of your own (`.shader`, a surface function and its properties), compiled when you save it.
-- **Interface pieces.** Text, panels, pictures, bars, buttons, a touch stick and touch buttons, created from the Hierarchy and laid out by dragging in the Game view, with anchors. Choose an iPhone or iPad shape in the Game view to see the layout as it will be there.
+- **Interface pieces.** Text, panels, pictures, bars, dials, buttons (round ones for touch) and a touch stick, scaled with the screen as Unity's Canvas Scaler does, created from the Hierarchy and laid out by dragging in the Game view, with anchors. Choose an iPhone or iPad shape in the Game view to see the layout as it will be there.
 - **Undo for everything**, a console that collects what the engine and the game say, and a layout remembered between sessions.
 - **Build and Export.** One window, in steps: the game's settings and icon, then a Mac application, or an iPhone/iPad build put on your device without leaving the editor.
 
@@ -88,7 +90,7 @@ struct Spinner {
 MOLTEN_COMPONENT(Spinner, MOLTEN_FIELD(degreesPerSecond).range(-720, 720))
 ```
 
-The same behaviors can be drawn instead of written: visual scripts, with about forty nodes for events, movement, physics, input, math and variables. And many things need no code at all: the engine comes with components for a player that moves, a camera that follows, pickups, health and damage, shooting and spawning, a score on screen, and whole vehicles.
+The same behaviors can be drawn instead of written: visual scripts, with about forty nodes for events, movement, physics, input, math and variables, a board that zooms and searches, and a way to C++ and back. And many things need no code at all: the engine comes with components for a player that moves, a camera that follows, pickups, health and damage, shooting and spawning, a score on screen, and whole vehicles.
 
 [Docs/MakingGames.md](Docs/MakingGames.md) is the tour, [Docs/GameCode.md](Docs/GameCode.md) the code, [Docs/VisualScripting.md](Docs/VisualScripting.md) the nodes, [Docs/Plugins.md](Docs/Plugins.md) how to extend the editor.
 

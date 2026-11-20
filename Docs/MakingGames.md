@@ -9,10 +9,28 @@ The example game is **Driving**: a Fiat 500 on a small circuit, to lap against t
 | | |
 | --- | --- |
 | **What it is** | A 566 m circuit with curbs, walls, a paddock and lamps, in evening light. Lap times and a best lap, a dashboard (speed, gear, revs), headlights and brake lights, smoke from the exhaust and from tires that slide, and controls for a touch screen. |
-| **What it shows** | A car simulated from its parts (springs and dampers, tires that grip and slide, seven engines behind a gearbox, brakes shared by the load on each wheel), a glTF model used in parts with a material each, the game's own scripts in `Assets/Scripts`, an interface laid out in the Game view. |
-| **Keys** | W A S D or the arrows to drive, Space for the handbrake, 1 to 7 for the engine, B for ABS, L for the lamps, T for the touch controls. |
+| **What it shows** | A car simulated from its parts (springs and dampers, tires that grip and slide, a turbocharged four-cylinder behind a gearbox, stability control that allows a drift, brakes shared by the load on each wheel), a glTF model used in parts with a material each, the game's own scripts in `Assets/Scripts`, an interface laid out in the Game view. |
+| **Keys** | W A S D or the arrows to drive, Space for the handbrake, B for ABS, L for the lamps, T for the touch controls. On a phone: ← and → on the left steer; GAS, BRAKE and HB on the right. |
 
 It is not part of the engine: it is a separate download, `MoltenProjects.zip`, to unzip anywhere and open as a project (a new project in the editor starts empty). It is written by `Tools/make_templates.py` (the car by `Tools/import_fiat500.py`), and the unit tests (`Tests/TemplateTests.cpp`) drive it without a screen: a full stop from speed, and three laps by an autopilot that has to stay on the road. The car is "Fiat 500 x Outlaw" by Subin, under CC-BY-4.0: see the project's `CREDITS.txt`.
+
+### Showcase
+
+The second project is a plaza of everything the engine does, to drive around in the same car. The interface names the station you are at; eight stars are hidden around the middle, each turned and picked up by a visual script (`Scripts/Star.graph`).
+
+| Station | What is there |
+| --- | --- |
+| **The middle** | A chrome ball in a fountain: ray traced reflections of the whole plaza, and particles that bounce off the basin. |
+| **Materials** | Plastic and gold from smooth to rough, a mirror, glass, a glowing ball, a textured car paint with its normal map, and two of the project's own shaders. |
+| **Shaders** | A lake of lava and a hologram on a column, each a `.shader` file in `Assets/Shaders`: change one, save, and it changes. |
+| **Lights** | A dark hall: red, green and blue spot lights crossing on a statue, braziers that flicker, neon strips that bloom. |
+| **Effects** | The nine particle presets, each on a pedestal, in the wind. |
+| **Physics** | A pyramid of crates, a curve of dominoes that falls by itself, five balls hung in a row, a wrecking ball, two gates on hinges, bowling pins, a chute that never runs out of balls. The car shoves what it hits. |
+| **Jumps** | A table top, whoops and a kicker: models with mesh colliders, solid exactly as they are drawn. |
+| **Water** | A basin of ocean waves, with crates and buoys floating on them. |
+| **Liquids** | Two tanks of particle liquid, water and honey, poured as you watch. |
+
+The scene's settings turn everything on: ray traced shadows, reflections and bounced light, clouds with depth, fog with light shafts, wind. It is the project to open for screenshots, and the heaviest to run.
 
 ## The components that come with the engine
 
@@ -64,6 +82,8 @@ if (world.input.wasPressed("jump")) { ... }
 ```
 
 `PlayerMover` moves by `moveX` and `moveZ` and jumps on `jump`: rebind them in the window and it follows. The bar under each action shows what it reads right now.
+
+The standard list is only what nearly every game uses. A game that flies adds the actions `FlightControls` reads with **+ Flying Actions**: `yaw` (Q E), `throttle` (Shift and Ctrl, or Z X), `throttleLever`, `flaps` (F) and `brake` (B). A Button on the screen can hold an action that is in no list (the Driving example's buttons hold `steerLeft`, `steerRight`, `gas` and `brake`).
 
 ## Playing, and changing things while it plays
 
@@ -123,7 +143,11 @@ In the editor, Play runs the scene as it is open, saved or not, and starting ove
 
 **Project** shows the assets with pictures made from the files: a model as its shape, a material as a lit ball, a sound as its wave, a scene or a prefab as a plan from above, a visual script as its boxes, code as its first lines. **Add Component** in the inspector is sorted as Unity's is (Mesh, Rendering, Physics, Audio, Effects, UI, Vehicles, Gameplay, Scripts) and can be searched; each component's menu has Reset, Copy Values, Paste Values and Remove.
 
-**Layouts.** The menu at the right of the play bar (and Window > Layouts) has four arrangements, Default, 2 by 3, Tall and Wide. Arrange the windows as you like, choose Save Layout, give it a name: it joins the list, on this Mac, for every project.
+**Layouts.** The default is Unity's: Hierarchy at the left, Inspector at the right with a small Viewer under it, Scene and Game as tabs in the middle, and Explorer, Console, Input and Visual Script as tabs along the bottom. Run, Hold and Frame are at the top right, beside the layout menu, which has four arrangements (Default, 2 by 3, Tall and Wide). Arrange the windows as you like and choose Save Layout: it joins the list, on this Mac, for every project. **Export Layout...** writes it to a file to keep or pass on; **Import Layout...** takes one back. The Scene and Game views never get smaller than 360 by 240.
+
+**Explorer.** Right-click anywhere in it (the folder tree, a folder, the empty space, inside any folder) for New with every kind of asset, Import and Reveal. The size slider goes down to a list. **Console** is Unity's: errors, warnings, info and debug messages, each kind shown or hidden by its button with its count; Collapse folds repeats into one row with a count; Clear on Play; a search; click a row for the whole message below, to copy.
+
+In the Scene view, several selected objects move, turn and scale together. **Center** in the toolbar puts the handles at the middle of them all, which they turn and scale around; **Pivot** puts them on the last one chosen.
 
 In the scene view a camera is drawn as the pyramid of what it sees, a directional light as its rays, a spot light as its cone. A camera's scale changes nothing about its picture.
 
@@ -183,8 +207,8 @@ exact resolution. The camera, its outline in the Scene window and the game's int
 
 A joystick that is not laid out like a game controller (a radio for model aircraft plugged in by USB, a flight stick, a wheel) is read by
 its numbered axes. The Input window shows it by name with a bar for each axis: move a stick, see which bar moves, and set that number as
-the **Joystick Axis** of an action. The standard actions start with a radio's usual order: axis 0 `moveX` (roll), 1 `moveZ` (pitch),
-2 `throttleLever`, 3 `yaw`. `throttleLever` is a throttle that says where it is; `FlightControls` uses it instead of the keys when a
+the **Joystick Axis** of an action. The standard actions start with a radio's usual order: axis 0 `moveX` (roll), 1 `moveZ` (pitch); with
+the flying actions added, 2 `throttleLever`, 3 `yaw`. `throttleLever` is a throttle that says where it is; `FlightControls` uses it instead of the keys when a
 joystick is there.
 
 ## A game's own scripts
@@ -196,8 +220,7 @@ scripts were before, is still built.) A script with the name of a component that
 place; if the code does not build, the engine's own is used, so the game still runs. `lateUpdate(World&, Entity, float)` runs after every
 `update`, with everything where it will be drawn: cameras that follow belong there.
 
-A visual script can be written out as C++: select it in the Explorer and press **Convert to C++ Script** in the Viewer. Each box becomes
-one `call("...")`, in the same order, in `Source/<Name>.cpp`. The other way cannot be done in general.
+A visual script can be written out as C++, and C++ made that way can go back to boxes: see [To C++ and back](VisualScripting.md#to-c-and-back).
 
 ## Water, mist and traced light
 
@@ -206,9 +229,12 @@ one `call("...")`, in the same order, in `Source/<Name>.cpp`. The other way cann
   with shafts the fog glows only where the sun reaches it, and what stands in the sun's way casts beams of shadow through the mist
   (with shadow maps, not with ray traced sun shadows).
 - **Clouds Have Depth** (Lighting > Environment > Sky) makes the clouds volumes one looks through, lit from the sun's side.
-- With **ray traced sun shadows** on (Lighting > Shadows): *Ambient Light* hides the sky's light where something is really in the way;
+- **Lighting > Quality** has four levels, Low, Medium, High and Ultra, from shadow maps alone to every traced effect
+  with four rays: choose one to start, then change any setting under it (the level then reads Custom).
+- With **ray traced sun shadows** on: *Ambient Light* hides the sky's light where something is really in the way;
   *Bounced Light* is global illumination, one bounce: the same rays bring back the light of what they hit, so a red wall in the sun
-  tints the floor beside it; *Reflections* makes smooth surfaces mirror what is around them. What a ray hits is seen in its material's
+  tints the floor beside it; *Reflections* makes smooth surfaces mirror what is around them: only those smoother than
+  *Up To Roughness* (0.3 to begin with), fading toward it, and as much as *Strength* says. Rougher surfaces keep the sky's soft reflection. What a ray hits is seen in its material's
   color (not its textures), lit by the sky and the sun. More *Ambient Rays* give less grain: there is no denoiser yet.
 
 These shaders are compiled first with the extras and, if that fails on a system, again without: the console says which.
@@ -331,9 +357,19 @@ changed. In code: `effectPreset("Fire")`, `readEffect(text, emitter)`, `writeEff
 ## The game's interface
 
 **Create > UI** (the + of the Hierarchy) makes a piece of interface: a Text, a Button, a
-Panel, an Image, a Bar, a Touch Stick, a Touch Button. Each is an entity with one component.
+Panel, an Image, a Bar, a Gauge, a Stick, a Round Button. Touch controls are interface like the rest,
+in the same UI category. Each is an entity with one component.
 They are laid out in the **Game** view, where they are seen as the player will see them:
 click a piece to choose it, drag it into place, pull its lower right corner to resize it.
+
+**Several at once.** Shift or Cmd and a click adds a piece to the chosen ones (or takes it
+away); a box dragged over the empty picture chooses every piece it touches; choosing a parent
+in the Hierarchy chooses every piece under it. Dragging any of them moves them all. A box is
+drawn around them with a handle at each corner: pull one and they all grow or shrink together
+from the opposite corner (from the middle with Alt), as one picture: sizes, radii, letters and
+line widths alike, each keeping its place among the others. That is how a whole dashboard (dials,
+the gear, the boost) is made bigger in one go. A single rectangle's corner resizes it freely;
+with Shift, in proportion. The nine anchor squares change the anchor of every chosen piece.
 
 Every piece is placed from an **anchor**, a point of the screen it holds on to (a corner, a
 side, the middle), and an **offset** from there in points: a health bar anchored to the top
@@ -346,9 +382,14 @@ another shape in that list (iPhone portrait, 16:9) to see the layout on that scr
   when clicked it can add to a shared value and load a scene. Scripts can ask `wasClicked`.
 - **Bar**: a shared value as a share of its most: health, fuel.
 - **Panel**, **Image**: a rectangle of color, a picture of Assets.
-- **Touch Stick**, **Touch Button**: for phones and tablets, where there are no keys. The
+- **Gauge**: a shared value as a dial, with numbers, a red zone and a needle: speed, revs, boost.
+- **Stick**, and a **Button** made round: for phones and tablets, where there are no keys. The
   stick pushes two axis actions (`moveX` and `moveZ` unless told otherwise), the button
   holds one (`jump`): a game written for keys is played by touch without changing a line.
+
+The interface is laid out for a 1280 by 720 screen and scaled to the one it is shown on
+(between the width and the height, as Unity's Canvas Scaler does with *Match* 0.5): it keeps
+its proportions as the Game view is made smaller. The Game view says the scale it is drawn at.
 
 All of them work with the mouse as with a finger, so they are tried on a Mac: press Run,
 click in the Game view, and press, drag and click them there. A game that also has keys

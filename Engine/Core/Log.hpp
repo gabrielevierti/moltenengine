@@ -38,6 +38,15 @@ MOLTEN_PRINTF_LIKE inline void logInfo(const char* format, ...) {
     va_end(arguments);
 }
 
+/// For finding out what a game is doing while it is made: shown in the editor's console under
+/// Debug, and easy to hide there.
+MOLTEN_PRINTF_LIKE inline void logDebug(const char* format, ...) {
+    va_list arguments;
+    va_start(arguments, format);
+    logMessage("debug", format, arguments);
+    va_end(arguments);
+}
+
 MOLTEN_PRINTF_LIKE inline void logWarning(const char* format, ...) {
     va_list arguments;
     va_start(arguments, format);

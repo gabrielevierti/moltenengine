@@ -13,11 +13,13 @@
 #include "Script/Convert.hpp"
 #include "Panels/Widgets.hpp"
 #include "Platform.hpp"
+#include "SoftRender.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <future>
 
 namespace molten::editor {
 
@@ -105,6 +107,11 @@ private:
         mesh_.reset();
         clip_.reset();
         parts_.clear();
+        if (job_.valid()) job_.wait();
+        modelTriangles_.reset();
+        thinTriangles_.reset();
+        modelPicture_.reset();
+        shownLook_ = {};
         text_.clear();
         shownCodeFor_.clear();
         zoom_ = 1;
@@ -117,6 +124,14 @@ private:
             if (std::optional<std::string> contents = text::readFile(path)) {
                 mesh_ = MeshData::parseOBJ(*contents);
                 if (mesh_) ImportSettings::load(path).apply(*mesh_);        // shown as the game will have it
+                if (mesh_) {
+                    auto triangles = std::make_shared<std::vector<SoftTriangle>>();
+                    for (size_t t = 0; t + 2 < mesh_->indices.size(); t += 3) {
+                        triangles->push_back({mesh_->positions[mesh_->indices[t]], mesh_->positions[mesh_->indices[t + 1]], mesh_->positions[mesh_->indices[t + 2]],
+                                              Vec3{0.62f, 0.64f, 0.68f}, 0});
+                    }
+                    useTriangles(triangles);
+                }
                 // The parts the file names, and how many faces each has.
                 std::string line;
                 for (size_t at = 0; at <= contents->size(); at++) {
@@ -137,6 +152,24 @@ private:
             if (std::optional<GltfModel> model = GltfModel::load(path)) {
                 mesh_ = model->assembled(model->restPose());
                 ImportSettings::load(path).apply(*mesh_);
+                // What is drawn: each part in its material's color, its picture's color mixed in.
+                auto triangles = std::make_shared<std::vector<SoftTriangle>>();
+                std::vector<Vec3> colors;
+                for (const GltfMaterial& material : model->materials) {
+                    Vec3 color{material.baseColor.x, material.baseColor.y, material.baseColor.z};
+                    if (!material.baseColorTexture.empty()) color = color * averageColorOf((std::filesystem::path(path).parent_path() / material.baseColorTexture).string());
+                    colors.push_back(color);
+                }
+                for (const GltfModel::Part& part : model->parts()) {
+                    MeshData piece = model->part(part);
+                    Vec3 color = part.material >= 0 && size_t(part.material) < colors.size() ? colors[size_t(part.material)] : Vec3{0.62f, 0.64f, 0.68f};
+                    bool isSeenThrough = part.material >= 0 && size_t(part.material) < model->materials.size() && model->materials[size_t(part.material)].baseColor.w < 0.6f;
+                    if (isSeenThrough) continue;                      // glass: what is behind it is what is seen
+                    for (size_t t = 0; t + 2 < piece.indices.size(); t += 3) {
+                        triangles->push_back({piece.positions[piece.indices[t]], piece.positions[piece.indices[t + 1]], piece.positions[piece.indices[t + 2]], color, 0});
+                    }
+                }
+                useTriangles(triangles);
                 // What it is made of: the nodes that carry meshes, its bones, its animations.
                 for (const GltfNode& node : model->nodes) {
                     if (node.mesh < 0 || size_t(node.mesh) >= model->meshes.size()) continue;
@@ -381,75 +414,115 @@ private:
 
     // ---------------------------------------------------------------- models
 
+    /// The mean color of a picture, in linear light: what a part with it looks like from afar.
+    static Vec3 averageColorOf(const std::string& file) {
+        std::vector<uint8_t> pixels;
+        int width = 0, height = 0;
+        if (!Texture::readPixels(file, pixels, width, height) || pixels.empty()) return Vec3{1, 1, 1};
+        double sum[3] = {0, 0, 0};
+        int count = 0;
+        size_t step = std::max<size_t>(1, size_t(width) * size_t(height) / 4096);
+        for (size_t i = 0; i < size_t(width) * size_t(height); i += step) {
+            for (int c = 0; c < 3; c++) sum[c] += std::pow(pixels[i * 4 + size_t(c)] / 255.0, 2.2);
+            count++;
+        }
+        return count ? Vec3{float(sum[0] / count), float(sum[1] / count), float(sum[2] / count)} : Vec3{1, 1, 1};
+    }
+
+    /// The triangles of the model shown, and a thinner set of them to turn it with.
+    void useTriangles(std::shared_ptr<std::vector<SoftTriangle>> triangles) {
+        modelTriangles_ = triangles;
+        const size_t most = 40000;
+        if (triangles->size() <= most) {
+            thinTriangles_ = triangles;
+            return;
+        }
+        auto thin = std::make_shared<std::vector<SoftTriangle>>();
+        size_t step = triangles->size() / most + 1;
+        for (size_t i = 0; i < triangles->size(); i += step) thin->push_back((*triangles)[i]);
+        thinTriangles_ = thin;
+    }
+
+    struct Look {
+        float yaw = -1, pitch = 0, distance = 0;
+        int width = 0, height = 0;
+        bool isWhole = false;
+        bool operator==(const Look& other) const {
+            return yaw == other.yaw && pitch == other.pitch && distance == other.distance && width == other.width && height == other.height && isWhole == other.isWhole;
+        }
+    };
+
     void drawModel(EditorContext& editor, const AssetInfo& asset) {
         const MeshData& mesh = *mesh_;
         AABB bounds = mesh.bounds();
         Vec3 extent = bounds.halfExtents() * 2.0f;
-        ImGui::Text("%d triangles   %d vertices   %.2f x %.2f x %.2f m", int(mesh.indices.size() / 3), int(mesh.positions.size()), extent.x, extent.y, extent.z);
-        ImGui::SameLine(0, 16);
+        ImGui::TextDisabled("%d triangles, %.2f x %.2f x %.2f m", int(mesh.indices.size() / 3), extent.x, extent.y, extent.z);
+        ImGui::SameLine();
         if (ImGui::SmallButton("Add to Scene")) {
             if (!editor.scene.createFromMesh(asset.path, Vec3{0, 0, 0}).isValid()) editor.notify("Cannot load " + asset.path, ConsoleMessage::Level::Error);
         }
-        // The parts the file is made of, beside the picture.
-        const float listWidth = 190;
-        // Beside the picture where there is room, above it in a narrow panel.
-        bool isNarrow = ImGui::GetContentRegionAvail().x < 560;
-        ImGui::BeginChild("##parts", isNarrow ? ImVec2(0, std::min(26.0f + 20.0f * float(std::max<size_t>(parts_.size(), 1)), 110.0f)) : ImVec2(listWidth, 0), ImGuiChildFlags_Borders);
-        ImGui::TextDisabled("Parts");
-        for (const auto& part : parts_) {
-            ImGui::BulletText("%s", part.first.c_str());
-            ImGui::SameLine(listWidth - 62);
-            ImGui::TextDisabled("%d", part.second);
+        // What it is made of, folded away: the picture is what a small panel is for.
+        if (ImGui::TreeNodeEx("##parts", ImGuiTreeNodeFlags_SpanAvailWidth, "Parts (%d)", int(parts_.size()))) {
+            ImGui::BeginChild("##partlist", ImVec2(0, std::min(20.0f * float(parts_.size()) + 8, 140.0f)), ImGuiChildFlags_Borders);
+            for (const auto& part : parts_) {
+                ImGui::TextUnformatted(part.first.c_str());
+                ImGui::SameLine(std::max(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - 60, 120.0f));
+                ImGui::TextDisabled("%d", part.second);
+            }
+            ImGui::EndChild();
+            ImGui::TreePop();
         }
-        ImGui::EndChild();
-        if (!isNarrow) ImGui::SameLine();
         ImVec2 at = ImGui::GetCursorScreenPos(), room = ImGui::GetContentRegionAvail();
-        if (room.x < 32 || room.y < 32) return;
+        room.y = std::max(room.y, 120.0f);
+        if (room.x < 32) return;
         ImGui::InvisibleButton("##model", room);
-        if (ImGui::IsItemActive()) {
+        bool isTurning = ImGui::IsItemActive();
+        if (isTurning) {
             yaw_ += ImGui::GetIO().MouseDelta.x * 0.01f;
-            pitch_ = std::clamp(pitch_ + ImGui::GetIO().MouseDelta.y * 0.01f, -1.5f, 1.5f);
-        } else if (!ImGui::IsItemHovered()) {
-            yaw_ += ImGui::GetIO().DeltaTime * 0.25f;            // left alone, it turns
+            pitch_ = std::clamp(pitch_ + ImGui::GetIO().MouseDelta.y * 0.01f, -1.4f, 1.4f);
         }
-        if (ImGui::IsItemHovered()) distance_ = std::clamp(distance_ * std::pow(0.88f, ImGui::GetIO().MouseWheel), 1.1f, 12.0f);
+        if (ImGui::IsItemHovered() && ImGui::GetIO().MouseWheel != 0) distance_ = std::clamp(distance_ * std::pow(0.88f, ImGui::GetIO().MouseWheel), 1.1f, 12.0f);
         ImDrawList* drawList = ImGui::GetWindowDrawList();
         drawList->AddRectFilled(at, ImVec2(at.x + room.x, at.y + room.y), IM_COL32(24, 26, 31, 255), 4.0f);
-        drawList->PushClipRect(at, ImVec2(at.x + room.x, at.y + room.y), true);
 
-        Vec3 center = bounds.center();
-        float radius = std::max(simd::length(bounds.halfExtents()), 1e-4f);
-        Quat turn = simd::normalize(Quat(pitch_, Vec3{1, 0, 0}) * Quat(yaw_, Vec3{0, 1, 0}));
-        float scale = std::min(room.x, room.y) * 0.5f / radius;
-        ImVec2 middle(at.x + room.x * 0.5f, at.y + room.y * 0.5f);
-        // Every triangle, far ones first; a big model is thinned to what a panel can draw in a frame.
-        size_t count = mesh.indices.size() / 3, step = std::max<size_t>(1, count / 9000);
-        faces_.clear();
-        const Vec3 light = simd::normalize(Vec3{0.35f, 0.8f, 0.5f});
-        for (size_t triangle = 0; triangle < count; triangle += step) {
-            Vec3 points[3];
-            ImVec2 screen[3];
-            float depth = 0;
-            bool isBehind = false;
-            for (int k = 0; k < 3; k++) {
-                points[k] = rotate(turn, (mesh.positions[mesh.indices[triangle * 3 + size_t(k)]] - center) / radius);
-                float w = distance_ - points[k].z;             // the eye is on +z, looking back at the origin
-                if (w < 0.05f) isBehind = true;
-                float perspective = distance_ / std::max(w, 0.05f) * (1.0f / distance_) * 2.2f;
-                screen[k] = ImVec2(middle.x + points[k].x * perspective * radius * scale, middle.y - points[k].y * perspective * radius * scale);
-                depth += points[k].z;
-            }
-            if (isBehind) continue;
-            Vec3 normal = safeNormalize(simd::cross(points[1] - points[0], points[2] - points[0]), Vec3{0, 0, 1});
-            if (normal.z < 0) normal = -normal;                 // both sides are shown
-            float shade = 0.25f + 0.75f * std::max(simd::dot(normal, light), 0.0f);
-            int v = int(60 + 170 * shade);
-            faces_.push_back({depth, screen[0], screen[1], screen[2], IM_COL32(v, v, int(v * 1.04f > 255 ? 255 : v * 1.04f), 255)});
+        // The picture is made away from the frame, by the software renderer: the thin set of
+        // triangles while it turns, all of them once it is still.
+        float pixels = std::min(ImGui::GetIO().DisplayFramebufferScale.x, 2.0f);
+        Look wanted;
+        wanted.yaw = yaw_;
+        wanted.pitch = pitch_;
+        wanted.distance = distance_;
+        wanted.width = std::max(16, int(room.x * pixels));
+        wanted.height = std::max(16, int(room.y * pixels));
+        float scale = std::sqrt(std::min(1.0f, 700000.0f / float(wanted.width * wanted.height)));
+        wanted.width = int(float(wanted.width) * scale);
+        wanted.height = int(float(wanted.height) * scale);
+        wanted.isWhole = !isTurning;
+        if (job_.valid() && job_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+            SoftImage image = job_.get();
+            if (!image.isEmpty()) modelPicture_ = editor.engine.assets().makeTexture(image.rgba, image.width, image.height);
+            shownLook_ = jobLook_;
         }
-        std::sort(faces_.begin(), faces_.end(), [](const Face& a, const Face& b) { return a.depth < b.depth; });
-        for (const Face& face : faces_) drawList->AddTriangleFilled(face.a, face.b, face.c, face.color);
-        drawList->PopClipRect();
-        drawList->AddText(ImVec2(at.x + 8, at.y + room.y - 22), IM_COL32(150, 156, 168, 255), "Drag to turn, scroll to come closer");
+        if (!job_.valid() && !(shownLook_ == wanted) && modelTriangles_) {
+            std::shared_ptr<const std::vector<SoftTriangle>> triangles = wanted.isWhole ? modelTriangles_ : thinTriangles_;
+            Vec3 center = bounds.center();
+            float radius = std::max(simd::length(bounds.halfExtents()), 1e-4f);
+            SoftView view;
+            view.target = center;
+            view.fovY = 0.55f;
+            Vec3 direction{std::sin(yaw_) * std::cos(pitch_), std::sin(pitch_), std::cos(yaw_) * std::cos(pitch_)};
+            view.eye = center + direction * (radius / std::sin(view.fovY * 0.5f) * distance_ / 2.6f);
+            view.skyZenith = Vec3{0.12f, 0.14f, 0.18f};
+            view.skyHorizon = Vec3{0.24f, 0.26f, 0.3f};
+            view.skyGround = Vec3{0.09f, 0.1f, 0.12f};
+            view.sunIntensity = 2.8f;
+            view.sunDirection = simd::normalize(Vec3{-0.4f, -0.8f, -0.45f});
+            jobLook_ = wanted;
+            job_ = std::async(std::launch::async, [triangles, view, wanted] { return renderTriangles(*triangles, view, wanted.width, wanted.height); });
+        }
+        if (modelPicture_) drawList->AddImageRounded(ImGuiLayer::textureId(modelPicture_.get()), at, ImVec2(at.x + room.x, at.y + room.y), ImVec2(0, 0), ImVec2(1, 1), IM_COL32_WHITE, 4.0f);
+        else drawList->AddText(ImVec2(at.x + 10, at.y + 10), IM_COL32(150, 156, 168, 255), "Drawing...");
+        drawList->AddText(ImVec2(at.x + 8, at.y + room.y - 20), IM_COL32(150, 156, 168, 200), "Drag to turn, scroll to come closer");
     }
 
     // ---------------------------------------------------------------- materials
@@ -745,25 +818,11 @@ private:
         if (ImGui::Button("Edit in Visual Script")) editor.editGraph(asset.path);
         ImGui::SameLine();
         std::string name = script::typeNameFor(std::filesystem::path(asset.path).stem().string());
-        std::string file = editor.project.sourceDirectory() + "/" + name + ".cpp";
-        bool exists = std::filesystem::exists(file);
-        ImGui::BeginDisabled(exists);
         if (ImGui::Button("Convert to C++ Script")) {
-            std::optional<script::Graph> graph = script::Graph::fromText(text_);
-            std::error_code code;
-            std::filesystem::create_directories(editor.project.sourceDirectory(), code);
-            if (graph && text::writeFile(file, script::graphToCpp(*graph, name, "Assets/" + asset.path))) {
-                editor.assets.refresh();
-                editor.notify("Wrote Assets/Scripts/" + name + ".cpp: a component called " + name + ", built with the game's code");
-                platform::openWithDefaultApplication(file);
-            } else {
-                editor.notify("Cannot write " + file, ConsoleMessage::Level::Error);
-            }
+            std::string made = convertGraphToCpp(editor, asset.path);
+            if (!made.empty()) platform::openWithDefaultApplication(editor.assets.absolutePath(made));
         }
-        ImGui::EndDisabled();
-        ui::tooltip(exists ? ("Assets/Scripts/" + name + ".cpp is already there").c_str()
-                           : "Writes the same events and steps as a C++ component in Assets/Scripts, to go on from in code");
-        ImGui::TextDisabled("The other way, from C++ to boxes, cannot be done in general: code can say what boxes have no shape for.");
+        ui::tooltip("Writes the same events and steps as a C++ component in Assets/Scripts, to go on from in code. It keeps the graph, to come back");
         // The code it would become, to read.
         if (shownCodeFor_ != asset.path) {
             shownCodeFor_ = asset.path;
@@ -804,6 +863,17 @@ private:
                 ImGui::TextDisabled("A script. Declare a component in it with MOLTEN_COMPONENT(%s, ...) to add it to objects.", name.c_str());
             }
             if (ImGui::SmallButton("Edit")) platform::openWithDefaultApplication(editor.assets.absolutePath(asset.path));
+            // Made from a visual script: it can go back to one.
+            bool wasChanged = false;
+            if (script::graphKeptIn(text_, &wasChanged)) {
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Convert to Visual Script")) {
+                    std::string made = convertCppToGraph(editor, asset.path);
+                    if (!made.empty()) editor.editGraph(made);
+                }
+                ui::tooltip(wasChanged ? "It was made from a visual script, then changed: the graph it was made from comes back, without the changes"
+                                       : "It was made from a visual script: the same boxes and wires come back");
+            }
             ImGui::SameLine();
             ImGui::TextDisabled("Saved changes are built into the game by themselves.");
         }
@@ -835,6 +905,10 @@ private:
     std::vector<std::pair<std::string, int>> parts_;
     std::vector<Face> faces_;
     float yaw_ = 0.7f, pitch_ = 0.35f, distance_ = 2.6f;
+    std::shared_ptr<const std::vector<SoftTriangle>> modelTriangles_, thinTriangles_;
+    std::shared_ptr<Texture> modelPicture_;
+    std::future<SoftImage> job_;
+    Look jobLook_, shownLook_;
     // sounds
     std::unique_ptr<Scene> effectWorld_;    // an effect file runs in a world of its own
     Entity effectEntity_{};

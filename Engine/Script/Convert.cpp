@@ -1,5 +1,7 @@
 #include "Script/Convert.hpp"
 
+#include <cstring>
+
 #include "Core/World.hpp"
 #include "Scene/Components.hpp"
 
@@ -283,6 +285,57 @@ std::string graphToCpp(const Graph& graph, const std::string& name, const std::s
     function("void onTriggerEnter(World& world, Entity self, Entity other)", "script::Call call(world, self, 0, state, other);", trigger);
     out += "};\n\nMOLTEN_COMPONENT(" + name + ")\n";
     return out;
+}
+
+// ---------------------------------------------------------------- there and back
+
+namespace {
+const char* const kKeptBegin = "/* molten-graph ";
+const char* const kKeptEnd = "*/";
+
+/// A comment ends at the first "*/": a text in the graph that holds one is written apart.
+std::string escaped(const std::string& text) {
+    std::string out;
+    for (size_t i = 0; i < text.size(); i++) {
+        out += text[i];
+        if (text[i] == '*' && i + 1 < text.size() && text[i + 1] == '/') out += ' ';
+    }
+    return out;
+}
+
+std::string unescaped(const std::string& text) {
+    std::string out;
+    for (size_t i = 0; i < text.size(); i++) {
+        if (text[i] == ' ' && i > 0 && text[i - 1] == '*' && i + 1 < text.size() && text[i + 1] == '/') continue;
+        out += text[i];
+    }
+    return out;
+}
+}  // namespace
+
+std::string graphToCppKeepingGraph(const Graph& graph, const std::string& name, const std::string& source) {
+    return graphToCpp(graph, name, source) + "\n" + kKeptBegin + name + "|" + source + "\n" +
+           "The visual script this was made from, so that it can be turned back into one (Explorer: Convert to Visual Script).\n" +
+           escaped(graph.toText()) + kKeptEnd + "\n";
+}
+
+std::optional<Graph> graphKeptIn(const std::string& code, bool* wasChanged, std::string* name) {
+    size_t begin = code.rfind(kKeptBegin);
+    if (begin == std::string::npos) return std::nullopt;
+    size_t headerEnd = code.find('\n', begin);
+    size_t end = code.find(kKeptEnd, headerEnd == std::string::npos ? begin : headerEnd);
+    if (headerEnd == std::string::npos || end == std::string::npos) return std::nullopt;
+    std::string header = code.substr(begin + std::strlen(kKeptBegin), headerEnd - begin - std::strlen(kKeptBegin));
+    size_t bar = header.find('|');
+    std::string typeName = header.substr(0, bar), source = bar == std::string::npos ? std::string() : header.substr(bar + 1);
+    // The graph starts after the line that says what it is.
+    size_t graphStart = code.find("molten-graph", headerEnd);
+    if (graphStart == std::string::npos || graphStart > end) return std::nullopt;
+    std::optional<Graph> graph = Graph::fromText(unescaped(code.substr(graphStart, end - graphStart)));
+    if (!graph) return std::nullopt;
+    if (wasChanged) *wasChanged = code.substr(0, begin) != graphToCpp(*graph, typeName, source) + "\n";
+    if (name) *name = typeName;
+    return graph;
 }
 
 }  // namespace molten::script

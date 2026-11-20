@@ -364,3 +364,4 @@ TEST(debug_draw_builds_line_lists) {
     debug.clear();
     CHECK(debug.vertices().empty());
 }
+

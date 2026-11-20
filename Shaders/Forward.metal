@@ -20,8 +20,8 @@ struct MaterialSample {
     float water;            // above zero: water, and how fine its waves are
     float waveHeight;
 #if MOLTEN_EXTRAS
-    float mirror;           // how much of the sky a smooth surface may mirror: 1 unless a traced ray says it is hidden
-    float3 mirrored;        // and the light of what hides it, to mirror in its place
+    float mirror;           // the share of the mirrored light a traced ray found and brings: 0 when no ray was sent
+    float3 mirrored;        // and the light of what it found
     float3 bounced;         // light that reaches the surface from what is around it: one bounce
     float fogSun;           // how much of the fog in front of it is in sunlight
 #endif
@@ -60,7 +60,7 @@ static MaterialSample sampleMaterial(MeshVertexOut in, bool isFrontFacing,
     result.water = material.water;
     result.waveHeight = material.waveHeight;
 #if MOLTEN_EXTRAS
-    result.mirror = 1.0;
+    result.mirror = 0.0;                // no traced reflection: the sky is what is mirrored
     result.mirrored = float3(0.0);
     result.bounced = float3(0.0);
     result.fogSun = 1.0;
@@ -169,19 +169,19 @@ static float4 shadePixel(MeshVertexOut in, MaterialSample m,
         color += clamp(reflectedLight(surface, light.direction, light.radiance), 0.0, 60000.0);
     }
 #if MOLTEN_EXTRAS
-    // Where a traced ray found the mirrored sky hidden, a smooth surface gets its rough
-    // share of the sky's light only: the part that does not depend on the direction.
-    float smoothness = 1.0 - surface.roughness;
-    color += clamp(environmentLight(surface, frame, irradianceMap, prefilteredMap, brdfLUT, linearSampler, mix(1.0, m.mirror, smoothness * smoothness)), 0.0, 60000.0);
-    // What a traced ray found in the mirrored direction, as strongly as this surface mirrors at this angle.
-    float3 mirrorColor = mix(float3(0.04), m.baseColor.rgb, m.metallic);
-    float glancing = pow(1.0 - saturate(dot(m.normal, normalize(pass.cameraPosition - in.worldPosition))), 5.0);
-    color += clamp(m.mirrored * (mirrorColor + (1.0 - mirrorColor) * glancing) * (smoothness * smoothness), 0.0, 60000.0);
+    // The sky's light, matte and mirrored. Where a traced ray found something in the mirrored
+    // direction (m.mirror is that share, faded out on rougher surfaces), what it saw takes the
+    // place of the sky there, weighed exactly as the sky would have been: a rough plastic
+    // barely mirrors anything, chrome mirrors everything.
+    EnvironmentParts environment = environmentParts(surface, frame, irradianceMap, prefilteredMap, brdfLUT, linearSampler);
+    float traced = saturate(m.mirror);
+    color += clamp(environment.diffuse + environment.specular * (1.0 - traced), 0.0, 60000.0);
+    color += clamp(m.mirrored * environment.specularWeight * traced * frame.reflectionStrength, 0.0, 60000.0);
     // And the light bounced to it from its surroundings, taken up by what is not metal in it.
     color += clamp(m.bounced * m.baseColor.rgb * (1.0 - m.metallic) * m.occlusion, 0.0, 60000.0);
     return float4(applyFogAlong(color, in.worldPosition, pass.cameraPosition, m.fogSun, frame), m.baseColor.a);
 #else
-    color += clamp(environmentLight(surface, frame, irradianceMap, prefilteredMap, brdfLUT, linearSampler, 1.0), 0.0, 60000.0);
+    color += clamp(environmentLight(surface, frame, irradianceMap, prefilteredMap, brdfLUT, linearSampler), 0.0, 60000.0);
 
     return float4(applyFog(color, in.viewDepth, frame), m.baseColor.a);
 #endif
@@ -287,10 +287,12 @@ fragment float4 fragment_pbr_traced(MeshVertexOut in [[stage_in]],
     float4 around = ambientTraced(in.worldPosition, normalize(in.normal), in.viewDepth, in.position.xy, frame, tracedScene, tracedSurfaces, irradianceMap, linearSampler);
     m.occlusion *= around.a;
     m.bounced = around.rgb;
-    if (m.roughness < 0.5) {
+    if (m.roughness < frame.reflectionMaxRoughness) {
         float4 seen = reflectionTraced(in.worldPosition, m.normal, normalize(pass.cameraPosition - in.worldPosition), m.roughness, in.viewDepth, in.position.xy, frame,
                                        tracedScene, tracedSurfaces, irradianceMap, linearSampler);
-        m.mirror = 1.0 - seen.a * 0.88;
+        // How much the ray counts: all of it on a mirror, fading to nothing at the roughness where rays stop.
+        float fade = saturate(1.0 - m.roughness / frame.reflectionMaxRoughness);
+        m.mirror = seen.a * fade * fade;
         m.mirrored = seen.rgb;
     }
 #endif
@@ -331,10 +333,12 @@ fragment float4 fragment_pbr_masked_traced(MeshVertexOut in [[stage_in]],
     float4 around = ambientTraced(in.worldPosition, normalize(in.normal), in.viewDepth, in.position.xy, frame, tracedScene, tracedSurfaces, irradianceMap, linearSampler);
     m.occlusion *= around.a;
     m.bounced = around.rgb;
-    if (m.roughness < 0.5) {
+    if (m.roughness < frame.reflectionMaxRoughness) {
         float4 seen = reflectionTraced(in.worldPosition, m.normal, normalize(pass.cameraPosition - in.worldPosition), m.roughness, in.viewDepth, in.position.xy, frame,
                                        tracedScene, tracedSurfaces, irradianceMap, linearSampler);
-        m.mirror = 1.0 - seen.a * 0.88;
+        // How much the ray counts: all of it on a mirror, fading to nothing at the roughness where rays stop.
+        float fade = saturate(1.0 - m.roughness / frame.reflectionMaxRoughness);
+        m.mirror = seen.a * fade * fade;
         m.mirrored = seen.rgb;
     }
 #endif

@@ -24,12 +24,12 @@ struct Exhaust {
         const Motor* motor = world.scene.get<Motor>(car);
         float throttle = body->controls.throttle;
         float revs = motor ? saturate((motor->rpm - 800.0f) / 5500.0f) : throttle;
-        bool isElectric = motor && motor->engine == "electric";
         if (isFlame) {
-            emitter->isEmitting = !isElectric && throttle > 0.85f && revs > 0.35f;
+            // Fire from the pipe on full throttle at speed, and a pop when the valve blows.
+            emitter->isEmitting = (throttle > 0.85f && revs > 0.35f) || (motor && motor->blowsOff);
             emitter->rate = fullRate * (0.5f + 0.5f * revs);
         } else {
-            emitter->isEmitting = !isElectric;
+            emitter->isEmitting = true;
             emitter->rate = idleRate + (fullRate - idleRate) * std::max(throttle, revs * 0.4f);
             emitter->speedMin = 0.6f + 2.5f * throttle;
             emitter->speedMax = 1.2f + 4.0f * throttle;

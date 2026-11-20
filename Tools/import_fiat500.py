@@ -133,15 +133,7 @@ def main(source, target):
                           "copyright": "Based on \"Fiat 500 x Outlaw\" by Subin (https://sketchfab.com/subink), CC-BY-4.0"},
                 "scene": 0, "scenes": [{"nodes": list(range(len(nodes)))}], "nodes": nodes, "meshes": meshes,
                 "materials": [{"name": name} for name in materials], "accessors": accessors, "bufferViews": views, "buffers": [{"byteLength": len(blob)}]}
-    text = json.dumps(document, separators=(",", ":")).encode()
-    text += b" " * (-len(text) % 4)
-    while len(blob) % 4:
-        blob.append(0)
     os.makedirs(os.path.join(target, "Textures"), exist_ok=True)
-    with open(os.path.join(target, "fiat500.glb"), "wb") as out:
-        out.write(struct.pack("<4sII", b"glTF", 2, 12 + 8 + len(text) + 8 + len(blob)))
-        out.write(struct.pack("<I4s", len(text), b"JSON") + text)
-        out.write(struct.pack("<I4s", len(blob), b"BIN\0") + bytes(blob))
 
     # ---- the pictures, small enough for a phone, and what each material is made of
     look = {}
@@ -163,6 +155,33 @@ def main(source, target):
             picture.save(os.path.join(target, "Textures", name), quality=95 if key == "normalTexture" else 88)
             entry[key] = name
         look[material["name"]] = entry
+
+    # The materials in the model too, as glTF says them, pictures beside it: so that whatever
+    # opens the .glb (the editor's viewer, another program) sees the car in its colors.
+    images, gltf_materials = [], []
+    def image_of(name):
+        if name not in images: images.append(name)
+        return {"index": images.index(name)}
+    for name in materials:
+        entry = look.get(name, {})
+        pbr = {"baseColorFactor": entry.get("baseColor", [1, 1, 1, 1]), "metallicFactor": entry.get("metallic", 1.0), "roughnessFactor": entry.get("roughness", 1.0)}
+        if "baseColorTexture" in entry: pbr["baseColorTexture"] = image_of(entry["baseColorTexture"])
+        if "metallicRoughnessTexture" in entry: pbr["metallicRoughnessTexture"] = image_of(entry["metallicRoughnessTexture"])
+        out = {"name": name, "pbrMetallicRoughness": pbr}
+        if "normalTexture" in entry: out["normalTexture"] = image_of(entry["normalTexture"])
+        if entry.get("baseColor", [1, 1, 1, 1])[3] < 0.99: out["alphaMode"] = "BLEND"
+        gltf_materials.append(out)
+    document["materials"] = gltf_materials
+    document["textures"] = [{"source": k} for k in range(len(images))]
+    document["images"] = [{"uri": "Textures/" + name} for name in images]
+    text = json.dumps(document, separators=(",", ":")).encode()
+    text += b" " * (-len(text) % 4)
+    while len(blob) % 4:
+        blob.append(0)
+    with open(os.path.join(target, "fiat500.glb"), "wb") as out:
+        out.write(struct.pack("<4sII", b"glTF", 2, 12 + 8 + len(text) + 8 + len(blob)))
+        out.write(struct.pack("<I4s", len(text), b"JSON") + text)
+        out.write(struct.pack("<I4s", len(blob), b"BIN\0") + bytes(blob))
 
     def car_point(point):
         moved = (np.array(point) - middle) * SCALE

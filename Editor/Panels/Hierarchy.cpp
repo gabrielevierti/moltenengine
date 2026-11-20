@@ -556,8 +556,28 @@ void registerCreateEntries(EditorContext& editor) {
     addInterface("UI/Panel", "Panel", "UIPanel");
     addInterface("UI/Image", "Image", "UIImage");
     addInterface("UI/Bar", "Bar", "UIBar");
-    addInterface("UI/Touch Stick", "Touch Stick", "TouchStick");
-    addInterface("UI/Touch Button", "Touch Button", "TouchButton");
+    addInterface("UI/Gauge", "Gauge", "UIGauge");
+    addInterface("UI/Stick", "Stick", "TouchStick");
+    // A round button for a thumb: a Button, made round and shown only on touch screens.
+    editor.registry.addCreateEntry(nullptr, "UI/Round Button", [](EditorContext& context) {
+        Scene& scene = context.engine.scene;
+        Entity entity = scene.create("Round Button");
+        scene.add(entity, Transform{});
+        kit::UIButton button;
+        button.isRound = true;
+        button.radius = 52;
+        button.label = "A";
+        button.action = "jump";
+        button.anchor = Vec2{1, 1};
+        button.offset = Vec2{-100, -110};
+        button.color = Vec4{1, 1, 1, 0.6f};
+        button.onlyOnTouchScreens = true;
+        scene.add(entity, button);
+        context.scene.markChanged();
+        context.scene.select(entity);
+        ImGui::SetWindowFocus("Game");
+        return entity;
+    });
     add("Effects/Particle Emitter", Primitive::ParticleEmitter);
     for (int i = 0; i < int(effects::Preset::Count); i++) {
         effects::Preset preset = effects::Preset(i);

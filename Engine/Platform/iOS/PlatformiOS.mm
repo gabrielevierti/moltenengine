@@ -280,6 +280,7 @@ void Window::requestClose() {}
 
 void Window::pollEvents(Input& input) {
     Shared& state = shared();
+    input.isTouchScreen = true;                 // the screen is how a phone is played: touch controls show from the start
     // The first finger is also the mouse.
     if (state.primaryBegan) {
         input.handleMouseMove(state.primaryPosition, Vec2{0, 0});

@@ -71,14 +71,19 @@ struct Play {
 TEST(templates_are_listed_and_a_project_can_start_from_one) {
     std::string templates = std::filesystem::path(templateAssets("Driving")).parent_path().parent_path().string();
     std::vector<ProjectTemplate> found = projectTemplates(templates);
-    CHECK(found.size() == 1 && found[0].name == "Driving" && !found[0].description.empty());
+    // The example projects, by name: the driving game, and the showcase of everything.
+    const ProjectTemplate* driving = nullptr;
+    for (const ProjectTemplate& candidate : found) {
+        if (candidate.name == "Driving") driving = &candidate;
+    }
+    CHECK(found.size() == 2 && driving && !driving->description.empty());
 
     namespace fs = std::filesystem;
     fs::path scratch = fs::temp_directory_path() / "molten-template-test";
     fs::remove_all(scratch);
     fs::create_directories(scratch);
     std::string error;
-    std::optional<Project> project = Project::create(scratch.string(), "My Racer", &error, found.size() == 1 ? found[0].directory : "");
+    std::optional<Project> project = Project::create(scratch.string(), "My Racer", &error, driving ? driving->directory : "");
     CHECK(project.has_value());
     if (project) {
         CHECK(project->name == "My Racer");
@@ -477,6 +482,9 @@ TEST(template_models_are_read_as_meshes) {
 
 TEST(joystick_axes_drive_actions) {
     Input input;
+    // The standard actions are for walking and driving; flying adds its own.
+    CHECK(!input.hasAction("yaw") && !input.hasAction("flaps"));
+    input.apply(InputMap::flying());
     CHECK(!input.hasJoystick("throttleLever") && input.axis("moveX") == 0);
     JoystickState radio;
     radio.connected = true;
@@ -489,7 +497,7 @@ TEST(joystick_axes_drive_actions) {
     input.handleKey(Key::D, true);
     CHECK(input.axis("moveX") == 1);                                    // the keys still work beside it
     // An action keeps its joystick axis through the file.
-    InputMap map = InputMap::fromText(InputMap::standard().toText());
+    InputMap map = InputMap::fromText(InputMap::flying().toText());
     for (const InputAction& action : map.actions) {
         if (action.name == "throttleLever") CHECK(action.joystickAxis == 2 && !action.joystickInvert);
     }
@@ -530,7 +538,16 @@ link 6 "then" 7 "in"
     CHECK(code.find("void onTriggerEnter(World& world, Entity self, Entity other)") != std::string::npos);
     CHECK(code.find("if (call.value(\"OtherIs\", {{\"name\", script::Value::string(\"Player\")}}, \"result\").asBool()) {") != std::string::npos);
     CHECK(code.find("call(\"DestroySelf\", {});") != std::string::npos);
-    text::writeFile("/tmp/StarPickup.cpp", code);
+    // Code made from a graph keeps it, and goes back to the same graph; edited, it says so.
+    std::string kept = script::graphToCppKeepingGraph(*graph, "StarPickup", "Scripts/Star.graph");
+    bool wasChanged = true;
+    std::string keptName;
+    std::optional<script::Graph> back = script::graphKeptIn(kept, &wasChanged, &keptName);
+    CHECK(back && !wasChanged && keptName == "StarPickup" && back->toText() == graph->toText());
+    std::string edited = kept;
+    edited.replace(edited.find("struct StarPickup {"), 19, "struct StarPickup { int extra = 0;");
+    CHECK(script::graphKeptIn(edited, &wasChanged) && wasChanged);
+    CHECK(!script::graphKeptIn(code));                  // written without the graph: nothing to go back to
 
     // And a node called from code does what the box does.
     World world;
@@ -770,4 +787,237 @@ TEST(interface_buttons_are_clicked_with_the_mouse_where_the_game_is_shown) {
     CHECK(!world.hasValue("health"));
     world.setValue("health", 50);
     CHECK(world.hasValue("health"));
+}
+
+// ---------------------------------------------------------------- the showcase
+#include "Water/Liquid.hpp"
+
+TEST(the_showcase_runs_and_its_pieces_do_what_they_show) {
+    Play play("Showcase");
+    CHECK(play.isLoaded);
+    if (!play.isLoaded) return;
+    Vec3 lastDomino = play.positionOf("Domino 26");
+    Vec3 lastBall = play.positionOf("Cradle Ball 5");
+    Vec3 wreckingBall = play.positionOf("Wrecking Ball");
+    play.frames(60 * 8);
+    // The car stands where it started, on its wheels, and no station is near it.
+    const kit::VehicleBody* car = play.world.scene.get<kit::VehicleBody>(play.world.find("Car"));
+    CHECK(car && std::abs(car->speed()) < 0.3f && car->body.position.y > 0.2f && car->body.position.y < 0.6f);
+    CHECK(play.world.value("station") == 0);
+    // The dominoes have all gone down: the last one is lower than it stood.
+    CHECK(play.positionOf("Domino 26").y < lastDomino.y - 0.3f);
+    // The first ball of the cradle swung into the rest, and the last one was knocked away.
+    CHECK(simd::distance(play.positionOf("Cradle Ball 5"), lastBall) > 0.05f);
+    // The wrecking ball swings on its joint: it stays at its length from the pivot.
+    Vec3 swung = play.positionOf("Wrecking Ball");
+    CHECK(simd::distance(swung, wreckingBall) > 0.5f);
+    // Something floats in the water basin, near its surface.
+    float floating = play.positionOf("Buoy").y;
+    CHECK(floating > 0.2f && floating < 1.6f);
+    // The tanks hold their liquid.
+    const Liquid* water = play.world.scene.get<Liquid>(play.world.find("Water Liquid"));
+    CHECK(water && water->dropCount() > 300);
+    if (water) {
+        Vec3 tank = play.positionOf("Water Liquid");
+        int outside = 0;
+        for (Vec3 drop : water->positions) outside += std::abs(drop.x - tank.x) > 1.6f || std::abs(drop.z - tank.z) > 1.6f || drop.y < -0.2f;
+        CHECK(outside < int(water->dropCount() / 20));
+    }
+    // Every star is still there, turning.
+    CHECK(play.count("Star ") == 8 && play.world.value("stars") == 0);
+    // Balls come down the chute.
+    CHECK(play.count("Ball") >= 4);
+    // Nothing has flown off or become not-a-number.
+    int lost = 0;
+    play.world.scene.each<RigidBody, Transform>([&](Entity, RigidBody&, Transform& transform) {
+        Vec3 p = transform.worldPosition();
+        if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z) || p.y < -5 || p.y > 60) lost++;
+    });
+    CHECK(lost == 0);
+}
+
+TEST(the_showcase_car_drives_to_a_station_and_collects_a_star) {
+    Play play("Showcase");
+    CHECK(play.isLoaded);
+    kit::VehicleBody* car = play.world.scene.get<kit::VehicleBody>(play.world.find("Car"));
+    if (!car) return;
+    play.frames(60);
+    // Toward the star ahead and to the right (the first, at 22.5 degrees), then on to the physics station behind.
+    Vec3 star = play.positionOf("Star 1");
+    for (int i = 0; i < 60 * 12 && play.world.value("stars") < 1; i++) {
+        Vec3 at = car->body.position;
+        Vec3 nose = rotate(car->body.orientation, Vec3{0, 0, -1});
+        Vec3 to = star - at;
+        float side = nose.x * to.z - nose.z * to.x;           // which way to turn
+        kit::Controls controls;
+        controls.throttle = car->speed() < 6 ? 0.6f : 0.0f;
+        controls.steer = std::clamp(side * 0.4f, -1.0f, 1.0f);
+        car->setControls(controls);
+        play.frames(1);
+    }
+    CHECK(play.world.value("stars") == 1);
+    CHECK(play.count("Star ") == 7);
+}
+
+TEST(the_driving_car_holds_a_turn_on_the_throttle_and_can_be_drifted) {
+    // Full throttle into a long turn: stability control lets it slide a little and no more.
+    auto worstSlide = [](float stability, float handbrakeFor, FILE* note) {
+        Play play("Driving");
+        kit::VehicleBody* car = play.world.scene.get<kit::VehicleBody>(play.world.find("Car"));
+        if (!car) return -1.0f;
+        car->stability = stability;
+        // Out on the grass, far from the walls, facing the open.
+        if (Transform* place = play.world.scene.get<Transform>(play.world.find("Car"))) place->position = Vec3{0, place->position.y, 260};
+        play.frames(30);
+        float worst = 0;
+        for (int i = 0; i < 60 * 6; i++) {
+            kit::Controls controls;
+            controls.throttle = 1;
+            controls.steer = i > 60 * 2 ? 0.4f : 0.0f;
+            controls.handbrake = i > 60 * 2 && i < 60 * 2 + int(handbrakeFor * 60) ? 1.0f : 0.0f;
+            car->setControls(controls);
+            play.frames(1);
+            float along = simd::dot(car->body.velocity, car->body.forward()), across = simd::dot(car->body.velocity, car->body.right());
+            if (along > 3 && i > 60 * 2) worst = std::max(worst, std::abs(std::atan2(across, along)) * 57.3f);
+            if (note && i % 20 == 0) std::fprintf(note, "%.0f %d speed %.1f slide %.1f\n", double(stability), i, double(along * 3.6f), double(std::atan2(across, along) * 57.3f));
+        }
+        return worst;
+    };
+    FILE* note = nullptr;
+    float held = worstSlide(0.85f, 0, note);
+    float loose = worstSlide(0.0f, 0, note);
+    float drifted = worstSlide(0.85f, 0.5f, note);
+    if (note) {
+        std::fprintf(note, "held %.1f loose %.1f drifted %.1f\n", double(held), double(loose), double(drifted));
+        std::fclose(note);
+    }
+    CHECK(held >= 0 && held < 30);                  // it may slide, but it does not spin
+    CHECK(drifted > 8 && drifted < 70);             // the handbrake starts a drift, and it is caught
+}
+
+// ---------------------------------------------------------------- lighting quality, interface scale
+#include "Rendering/Renderer.hpp"
+
+TEST(lighting_quality_levels_are_recognized_and_kept) {
+    RenderSettings settings;
+    CHECK(lightingQualityOf(settings) == LightingQuality::Low);
+    for (LightingQuality level : {LightingQuality::Medium, LightingQuality::High, LightingQuality::Ultra, LightingQuality::Low}) {
+        applyLightingQuality(settings, level);
+        CHECK(lightingQualityOf(settings) == level);
+    }
+    applyLightingQuality(settings, LightingQuality::High);
+    settings.occlusionRayCount = 7;
+    CHECK(lightingQualityOf(settings) == LightingQuality::Custom);
+    // The reflections' limit goes through a scene file.
+    settings.reflectionMaxRoughness = 0.42f;
+    settings.reflectionStrength = 0.7f;
+    Scene empty, read;
+    std::vector<NamedMaterial> none;
+    RenderSettings back;
+    CHECK(readScene(writeScene(empty, none, settings), read, none, back, SceneAssets{}));
+    CHECK_NEAR(back.reflectionMaxRoughness, 0.42, 1e-5);
+    CHECK_NEAR(back.reflectionStrength, 0.7, 1e-5);
+}
+
+TEST(the_interface_scales_with_the_screen_it_is_shown_on) {
+    CHECK_NEAR(World::interfaceScaleFor(Vec2{1280, 720}, Vec2{1280, 720}, 0.5f), 1.0, 1e-5);
+    CHECK_NEAR(World::interfaceScaleFor(Vec2{640, 360}, Vec2{1280, 720}, 0.5f), 0.5, 1e-5);
+    CHECK_NEAR(World::interfaceScaleFor(Vec2{2560, 720}, Vec2{1280, 720}, 0.0f), 2.0, 1e-5);       // by width
+    CHECK_NEAR(World::interfaceScaleFor(Vec2{2560, 720}, Vec2{1280, 720}, 1.0f), 1.0, 1e-5);       // by height
+    // Drawn into a scaled area, a shape lands where the scale says.
+    Canvas canvas;
+    canvas.begin(Vec2{640, 360});
+    canvas.beginArea(Vec2{0, 0}, Vec2{640, 360}, 0.5f);
+    CHECK_NEAR(canvas.size().x, 1280, 1e-3);
+    canvas.rect(Vec2{1000, 600}, Vec2{100, 100}, Vec4{1, 1, 1, 1});
+    canvas.endArea();
+    float largestX = 0;
+    for (const auto& vertex : canvas.vertices()) largestX = std::max(largestX, vertex.position.x);
+    CHECK_NEAR(largestX, 550, 1.0);
+}
+
+TEST(the_driving_car_is_driven_by_touch_on_a_phone) {
+    // A phone held sideways, in points: the stick and the pedals are where they are drawn.
+    Play play("Driving");
+    CHECK(play.isLoaded);
+    kit::VehicleBody* car = play.world.scene.get<kit::VehicleBody>(play.world.find("Car"));
+    CHECK(car != nullptr);
+    if (!car) return;
+    Vec2 screen{852, 393};
+    auto drawn = [&]() {
+        Canvas canvas;
+        canvas.begin(screen);
+        play.world.drawComponents(canvas);
+    };
+    play.frames(20);
+    drawn();
+    // Where GAS is on the screen: its place in the interface, times the interface's scale.
+    const kit::UIButton* gas = play.world.scene.get<kit::UIButton>(play.world.find("Gas"));
+    CHECK(gas != nullptr);
+    if (!gas) return;
+    float scale = play.world.interfaceScale;
+    Vec2 logical = screen / scale;
+    Vec2 middle = Vec2{gas->anchor.x * logical.x, gas->anchor.y * logical.y} + gas->offset;
+    Input::Touch finger;
+    finger.id = 7;
+    finger.position = middle * scale;
+    finger.hasBegun = true;
+    for (int i = 0; i < 120; i++) {
+        play.world.input.handleTouches({finger});
+        finger.hasBegun = false;
+        play.frames(1);
+        drawn();
+    }
+    std::fprintf(stderr, "touch gas: scale %.3f at (%.0f %.0f) held %d isDown %d speed %.1f km/h throttle %.2f\n", double(scale),
+                 double(finger.position.x), double(finger.position.y), int(gas->isHeld), int(play.world.input.isDown("gas")),
+                 double(car->speed() * 3.6f), double(car->controls.throttle));
+    CHECK(gas->isHeld && play.world.input.isDown("gas"));
+    CHECK(car->speed() * 3.6f > 10);
+    // A second finger on the left arrow steers left, the first still on the gas.
+    const kit::UIButton* left = play.world.scene.get<kit::UIButton>(play.world.find("Steer Left"));
+    CHECK(left != nullptr);
+    if (!left) return;
+    Input::Touch thumb;
+    thumb.id = 8;
+    thumb.position = (Vec2{left->anchor.x * logical.x, left->anchor.y * logical.y} + left->offset) * scale;
+    thumb.hasBegun = true;
+    for (int i = 0; i < 30; i++) {
+        play.world.input.handleTouches({finger, thumb});
+        thumb.hasBegun = false;
+        play.frames(1);
+        drawn();
+    }
+    CHECK(play.world.input.isDown("steerLeft") && !play.world.input.isDown("steerRight"));
+    CHECK(car->controls.steer < -0.8f);
+    // A phone shows its touch controls from the start: no touch needed first.
+    Input fresh;
+    CHECK(!fresh.hasTouched());
+    fresh.isTouchScreen = true;
+    CHECK(fresh.hasTouched());
+}
+
+TEST(a_games_own_component_wins_in_either_order_it_is_declared) {
+    // In the editor the game's code is loaded after the engine's; in the iPhone player it is
+    // linked in, and may be declared first. Either way the game's is the one used.
+    ComponentRegistry& registry = ComponentRegistry::instance();
+    for (bool gameFirst : {true, false}) {
+        std::string name = gameFirst ? "OrderTestA" : "OrderTestB";
+        ComponentType game, engine;
+        game.name = engine.name = name;
+        game.module = &ComponentRegistry::linkedGameModule;
+        engine.category = "Vehicles";
+        if (gameFirst) {
+            registry.add(game);
+            registry.add(engine);
+        } else {
+            registry.add(engine);
+            registry.add(game);
+        }
+        const ComponentType* used = registry.find(name);
+        CHECK(used && used->module == &ComponentRegistry::linkedGameModule && used->category == "Vehicles");
+        int waiting = 0;
+        for (const ComponentType& type : registry.replaced) waiting += type.name == name && type.module == nullptr;
+        CHECK(waiting == 1);
+        registry.remove(name);
+    }
 }

@@ -72,6 +72,15 @@ public:
         float treeWidth = std::min(220.0f, ImGui::GetContentRegionAvail().x * 0.3f);
         ImGui::BeginChild("##folders", ImVec2(treeWidth, 0), ImGuiChildFlags_ResizeX);
         drawFolderNode(editor, "");
+        // Below the tree too: a right click makes something in the folder that is shown.
+        if (ImGui::BeginPopupContextWindow("##tree-menu", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
+            if (ImGui::BeginMenu("New")) {
+                drawNewItems(editor);
+                ImGui::EndMenu();
+            }
+            if (ImGui::MenuItem("Import...")) importFiles(editor);
+            ImGui::EndPopup();
+        }
         ImGui::EndChild();
         ImGui::SameLine();
         ImGui::BeginChild("##contents", ImVec2(0, 0));
@@ -153,44 +162,54 @@ private:
         ImGui::EndDragDropTarget();
     }
 
-    /// What can be made in the folder that is shown: the same list under + New and under a right click.
-    void drawNewItems(EditorContext& editor) {
-        if (ImGui::MenuItem("Folder")) createFolder(editor);
+    /// What can be made: the same list under + New and under a right click anywhere, made in
+    /// `folder` (the one shown, or the one that was right-clicked), which is then shown.
+    void drawNewItems(EditorContext& editor) { drawNewItems(editor, editor.currentFolder); }
+    void drawNewItems(EditorContext& editor, const std::string& folder) {
+        if (ImGui::MenuItem("Folder")) {
+            editor.currentFolder = folder;
+            createFolder(editor);
+        }
         if (ImGui::MenuItem("Material")) {
-            if (std::shared_ptr<Material> material = createMaterialAsset(editor, editor.currentFolder, "New Material", nullptr)) {
+            if (std::shared_ptr<Material> material = createMaterialAsset(editor, folder, "New Material", nullptr)) {
                 editor.selectedAsset = material->assetName;
+                editor.currentFolder = folder;
                 startRenaming(editor, material->assetName);
             }
         }
         if (ImGui::MenuItem("Script")) editor.wantsNewScript = true;        // C++: asks for its name, makes it in Scripts and opens it
         if (ImGui::MenuItem("Visual Script")) {
-            std::string path = editor.assets.uniquePath(editor.currentFolder, "New Script", ".graph");
+            std::string path = editor.assets.uniquePath(folder, "New Script", ".graph");
             if (text::writeFile(editor.assets.absolutePath(path), script::Graph::starter().toText())) {
                 editor.assets.refresh();
+                editor.currentFolder = folder;
                 startRenaming(editor, path);
             }
         }
         if (ImGui::MenuItem("Shader")) {
             // A surface shader to write by hand: it starts as one that works, to change.
-            std::string path = editor.assets.uniquePath(editor.currentFolder, "New Shader", ".shader");
+            std::string path = editor.assets.uniquePath(folder, "New Shader", ".shader");
             if (text::writeFile(editor.assets.absolutePath(path), newSurfaceShaderText())) {
                 editor.assets.refresh();
+                editor.currentFolder = folder;
                 startRenaming(editor, path);
             }
         }
         if (ImGui::MenuItem("Effect")) {
             // A particle effect to shape in the Viewer: it starts as a fire.
-            std::string path = editor.assets.uniquePath(editor.currentFolder, "New Effect", ".effect");
+            std::string path = editor.assets.uniquePath(folder, "New Effect", ".effect");
             if (text::writeFile(editor.assets.absolutePath(path), writeEffect(effectPreset("Fire")))) {
                 editor.assets.refresh();
+                editor.currentFolder = folder;
                 startRenaming(editor, path);
             }
         }
         if (ImGui::MenuItem("Scene")) {
             // A new file with what every new scene starts with. The scene that is open is left alone.
-            std::string path = editor.assets.uniquePath(editor.currentFolder, "New Scene", ".scene");
+            std::string path = editor.assets.uniquePath(folder, "New Scene", ".scene");
             if (text::writeFile(editor.assets.absolutePath(path), editor.scene.defaultSceneText())) {
                 editor.assets.refresh();
+                editor.currentFolder = folder;
                 startRenaming(editor, path);
             }
         }
@@ -231,7 +250,7 @@ private:
         ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), right - searchWidth - sizeWidth - ImGui::GetStyle().ItemSpacing.x));
         ImGui::SetNextItemWidth(sizeWidth);
         ImGui::SliderFloat("##size", &tileSize_, 48.0f, 160.0f, "", ImGuiSliderFlags_AlwaysClamp);
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Size of the pictures");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Size of the pictures: all the way down, a list");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(searchWidth);
         ImGui::InputTextWithHint("##search", "Search all assets", &filter_);
@@ -251,6 +270,19 @@ private:
         bool isOpen = ImGui::TreeNodeEx("##folder", flags, "%s", name.c_str());
         if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) editor.currentFolder = folder;
         acceptMove(editor, folder);
+        if (ImGui::BeginPopupContextItem("##folder-menu")) {
+            if (ImGui::BeginMenu("New")) {
+                drawNewItems(editor, folder);
+                ImGui::EndMenu();
+            }
+            if (ImGui::MenuItem("Import...")) {
+                editor.currentFolder = folder;
+                importFiles(editor);
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Reveal in Finder")) platform::revealInFinder(editor.assets.absolutePath(folder));
+            ImGui::EndPopup();
+        }
         if (isOpen) {
             // Copies of the paths: moving something into a folder rescans, and the pointers go stale.
             std::vector<std::string> paths;
@@ -274,8 +306,9 @@ private:
         }
 
         float spacing = ImGui::GetStyle().ItemSpacing.x;
-        float tileWidth = tileSize_ + 16;
-        int columns = std::max(1, int((ImGui::GetContentRegionAvail().x + spacing) / (tileWidth + spacing)));
+        float tileWidth = isList() ? ImGui::GetContentRegionAvail().x : tileSize_ + 16;
+        int columns = isList() ? 1 : std::max(1, int((ImGui::GetContentRegionAvail().x + spacing) / (tileWidth + spacing)));
+        if (isList()) ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(spacing, 0));
         int column = 0;
         for (const std::string& path : paths) {
             const AssetInfo* asset = assets.find(path);
@@ -284,13 +317,14 @@ private:
             drawTile(editor, *asset, tileWidth);
             column = (column + 1) % columns;
         }
+        if (isList()) ImGui::PopStyleVar();
         if (paths.empty()) ImGui::TextDisabled(filter_.empty() ? "This folder is empty. Use Import, or drop files into it in the Finder." : "Nothing matches.");
 
         // The space that is left: a click deselects, a right click offers what can be made here.
         ImVec2 rest = ImGui::GetContentRegionAvail();
         ImGui::InvisibleButton("##rest", ImVec2(std::max(rest.x, 1.0f), std::max(rest.y, 30.0f)));
         if (ImGui::IsItemClicked()) editor.selectedAsset.clear();
-        if (ImGui::BeginPopupContextItem("##rest-menu")) {
+        if (ImGui::BeginPopupContextWindow("##rest-menu", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
             if (ImGui::BeginMenu("New")) {
                 drawNewItems(editor);
                 ImGui::EndMenu();
@@ -311,9 +345,12 @@ private:
 
         ImGui::PushID(path.c_str());
         ImGui::BeginGroup();
-        float textHeight = ImGui::GetTextLineHeight() * 2 + 4;
+        // At the smallest size, as in Unity, a list: a small picture and the name on one row.
+        const bool asList = isList();
+        const float t = asList ? 18.0f : tileSize_;
+        float textHeight = asList ? ImGui::GetTextLineHeight() : ImGui::GetTextLineHeight() * 2 + 4;
         ImVec2 origin = ImGui::GetCursorScreenPos();
-        ImVec2 size(tileWidth, tileSize_ + textHeight + 12);
+        ImVec2 size = asList ? ImVec2(tileWidth, 24) : ImVec2(tileWidth, tileSize_ + textHeight + 12);
         bool isSelected = editor.selectedAsset == path;
         if (ImGui::Selectable("##tile", isSelected, ImGuiSelectableFlags_AllowDoubleClick, size)) {
             editor.selectedAsset = path;
@@ -342,13 +379,18 @@ private:
 
         if (ImGui::BeginPopupContextItem("##menu")) {
             editor.selectedAsset = path;
-            if (ImGui::BeginMenu("New")) {
-                drawNewItems(editor);
+            if (ImGui::BeginMenu(isFolder ? "New Inside" : "New")) {
+                drawNewItems(editor, isFolder ? path : editor.currentFolder);
                 ImGui::EndMenu();
             }
             ImGui::Separator();
             if (type == AssetType::Scene && ImGui::MenuItem("Open Scene")) editor.requestOpenScene(editor.assets.absolutePath(path));
             if (type == AssetType::Graph && ImGui::MenuItem("Edit Script")) editor.editGraph(path);
+            if (type == AssetType::Graph && ImGui::MenuItem("Convert to C++ Script")) convertGraphToCpp(editor, path);
+            if (type == AssetType::Script && std::filesystem::path(path).extension() == ".cpp" && ImGui::MenuItem("Convert to Visual Script")) {
+                std::string made = convertCppToGraph(editor, path);
+                if (!made.empty()) editor.editGraph(made);
+            }
             if (ImGui::MenuItem("Rename")) startRenaming(editor, path);
             if (ImGui::MenuItem("Reveal in Finder")) platform::revealInFinder(editor.assets.absolutePath(path));
             if (!isFolder && ImGui::MenuItem("Open with Default Application")) platform::openWithDefaultApplication(editor.assets.absolutePath(path));
@@ -359,20 +401,20 @@ private:
 
         // The picture: the texture itself, or a tile in the color of the asset's kind.
         ImDrawList* drawList = ImGui::GetWindowDrawList();
-        ImVec2 pictureMin(origin.x + 8, origin.y + 6), pictureMax(pictureMin.x + tileSize_, pictureMin.y + tileSize_);
+        ImVec2 pictureMin = asList ? ImVec2(origin.x + 6, origin.y + 3) : ImVec2(origin.x + 8, origin.y + 6);
+        ImVec2 pictureMax(pictureMin.x + t, pictureMin.y + t);
         std::shared_ptr<Texture> texture;
         if (type == AssetType::Texture && isLoadableImage(path)) texture = editor.engine.assets().texture(path);
         TileLook look = lookOf(type);
         if (texture) {
             drawList->AddImageRounded(ImGuiLayer::textureId(texture.get()), pictureMin, pictureMax, ImVec2(0, 0), ImVec2(1, 1), IM_COL32_WHITE, 4.0f);
         } else if (type == AssetType::Material && editor.engine.assets().material(path)) {
-            drawMaterialPreview(drawList, ImVec2((pictureMin.x + pictureMax.x) * 0.5f, (pictureMin.y + pictureMax.y) * 0.5f), tileSize_ * 0.42f,
+            drawMaterialPreview(drawList, ImVec2((pictureMin.x + pictureMax.x) * 0.5f, (pictureMin.y + pictureMax.y) * 0.5f), t * 0.42f,
                                 *editor.engine.assets().material(path));
         } else if (!isFolder && drawAssetPreview(editor, drawList, pictureMin, pictureMax, path, type, assetSize, look.color)) {
             // drawn
         } else if (isFolder) {
             // Everything a share of the tile's size, so that it is the same folder at any size.
-            float t = tileSize_;
             float left = pictureMin.x + t * 0.08f, right = pictureMax.x - t * 0.08f;
             float top = pictureMin.y + t * 0.26f, bottom = pictureMax.y - t * 0.14f;
             float round = t * 0.06f;
@@ -381,18 +423,18 @@ private:
             drawList->AddRectFilled(ImVec2(left, top), ImVec2(right, bottom), back, round);
             drawList->AddRectFilled(ImVec2(left, top + t * 0.07f), ImVec2(right, bottom), look.color, round);                                           // the front
         } else {
-            ImVec2 min(pictureMin.x + tileSize_ * 0.14f, pictureMin.y + 2), max(pictureMax.x - tileSize_ * 0.14f, pictureMax.y - 2);
+            ImVec2 min(pictureMin.x + t * 0.14f, pictureMin.y + (asList ? 0 : 2)), max(pictureMax.x - t * 0.14f, pictureMax.y - (asList ? 0 : 2));
             drawList->AddRectFilled(min, max, IM_COL32(40, 44, 51, 255), 5.0f);
             drawList->AddRectFilled(min, ImVec2(max.x, min.y + 5), look.color, 5.0f, ImDrawFlags_RoundCornersTop);
             ImVec2 letters = ImGui::CalcTextSize(look.letters);
-            drawList->AddText(ImVec2((min.x + max.x - letters.x) * 0.5f, (min.y + max.y - letters.y) * 0.5f), look.color, look.letters);
+            if (!asList) drawList->AddText(ImVec2((min.x + max.x - letters.x) * 0.5f, (min.y + max.y - letters.y) * 0.5f), look.color, look.letters);
         }
 
         // The name: an input while renaming, otherwise up to two lines, cut with "...".
-        ImVec2 textMin(origin.x + 4, pictureMax.y + 6);
+        ImVec2 textMin = asList ? ImVec2(pictureMax.x + 10, origin.y + (size.y - textHeight) * 0.5f) : ImVec2(origin.x + 4, pictureMax.y + 6);
         if (renaming_ == path) {
             ImGui::SetCursorScreenPos(textMin);
-            ImGui::SetNextItemWidth(tileWidth - 8);
+            ImGui::SetNextItemWidth(asList ? std::min(tileWidth - 40, 320.0f) : tileWidth - 8);
             if (renameNeedsFocus_) {
                 ImGui::SetKeyboardFocusHere();
                 renameNeedsFocus_ = false;
@@ -407,7 +449,13 @@ private:
         } else {
             ImVec4 clip(textMin.x, textMin.y, origin.x + tileWidth - 4, textMin.y + textHeight);
             drawList->AddText(ImGui::GetFont(), ImGui::GetFontSize(), textMin, ImGui::GetColorU32(ImGuiCol_Text), name.c_str(), nullptr,
-                              tileWidth - 8, &clip);
+                              asList ? 0.0f : tileWidth - 8, &clip);
+            if (asList && !isFolder) {
+                // What it is, in the column after the names.
+                const char* kind = AssetDatabase::typeName(type);
+                float x = std::max(textMin.x + ImGui::CalcTextSize(name.c_str()).x + 24, origin.x + 300);
+                if (x + 80 < origin.x + tileWidth) drawList->AddText(ImVec2(x, textMin.y), ImGui::GetColorU32(ImGuiCol_TextDisabled), kind);
+            }
             if (isHovered) ImGui::SetItemTooltip("%s", name.c_str());
         }
         ImGui::EndGroup();
@@ -441,7 +489,8 @@ private:
     }
 
     std::string filter_;
-    float tileSize_ = 84.0f;
+    float tileSize_ = 48.0f;                // the smallest: a list, the most to see at once
+    bool isList() const { return tileSize_ <= 50.0f; }
     std::string renaming_, renameText_;
     bool renameNeedsFocus_ = false;
     std::string pendingDelete_;

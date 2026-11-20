@@ -5,13 +5,13 @@
 //
 //   W S       accelerate and brake; S at a standstill is reverse
 //   A D       steer
-//   Space     handbrake
-//   1 to 7    another engine: four, five, six, V8, V12, diesel, electric
+//   Space     handbrake: the rear wheels lock, for the hairpin or to start a drift
 //   B         anti-lock brakes on and off, to feel what they do
 //   T         the touch controls on the screen, on and off (they show by themselves on a phone)
 //
-// On a phone there are no keys: the stick on the left steers and the buttons on the right
-// hold the actions "gas", "brake" and "jump" (the handbrake), which are read here too.
+// On a phone there are no keys: the two buttons on the left hold "steerLeft" and
+// "steerRight", those on the right "gas", "brake" and "jump" (the handbrake), which are read
+// here too. (A Stick pushing moveX steers as well.)
 #include "MoltenMetal.hpp"
 #include "Motor.hpp"
 
@@ -21,7 +21,6 @@
 using namespace molten;
 
 struct DriveControls {
-    bool switchesEngines = true;        // keys 1 to 7
     bool antiLockBrakes = true;         // ABS: B turns it on and off
     bool showsTouchControls = false;    // the stick and the pedals on the screen: T, or a touch
     std::string skidSound = "Audio/skid.wav";
@@ -65,6 +64,8 @@ struct DriveControls {
         controls.throttle = toward(controls.throttle, wantThrottle, dt * 6);
         controls.brake = toward(controls.brake, wantBrake, dt * 8);
         float wheel = input.axis("moveX");
+        // The buttons on the screen: full lock while held, eased in as the keys are.
+        if (input.isDown("steerLeft") != input.isDown("steerRight")) wheel = input.isDown("steerLeft") ? -1.0f : 1.0f;
         controls.steer = toward(controls.steer, wheel, dt * (std::abs(wheel) > 0.01f ? 3.2f : 5.0f));
         controls.handbrake = input.isDown("jump") ? 1.0f : 0.0f;
 
@@ -77,26 +78,13 @@ struct DriveControls {
         world.setValue("speed", std::round(std::abs(along) * 3.6f));
         if (!motor) return;
         motor->gear = gear;
-        if (switchesEngines) {
-            const char* const engines[] = {"i4", "i5", "i6", "v8", "v12", "diesel", "electric"};
-            for (int i = 0; i < 7; i++) {
-                if (input.wasPressed(Key(int(Key::Num1) + i))) {
-                    motor->engine = engines[i];
-                    if (motor->gear > 1) motor->gear = 1;   // the new gearbox starts from the bottom
-                }
-            }
-        }
         world.setValue("rpm", std::round(motor->rpm / 10.0f) * 10.0f);
         world.setValue("gear", float(motor->gear));
-        // For the read-outs: the gear as a place in "R|1|2|3...", the engine as a place in its
-        // list, and how far up its revs it is, from 0 to 1.
+        // For the read-outs: the gear as a place in "R|1|2|3...", and how far up its revs it is, from 0 to 1.
         world.setValue("gearIndex", motor->gear < 0 ? 0.0f : float(motor->gear));
-        const EngineKind& kind = engineKind(motor->engine);
-        world.setValue("revs", saturate((motor->rpm - kind.idle * 0.6f) / std::max(kind.redline - kind.idle * 0.6f, 1.0f)));
-        const char* const names[] = {"i4", "i5", "i6", "v8", "v12", "diesel", "electric"};
-        for (int i = 0; i < 7; i++) {
-            if (motor->engine == names[i]) world.setValue("engine", float(i));
-        }
+        const EngineKind& kind = engineKind();
+        world.setValue("revs", saturate(motor->rpm / kind.redline));
+        world.setValue("redline", kind.redline);
     }
 
     void update(World& world, Entity self, float) {
@@ -108,9 +96,12 @@ struct DriveControls {
         bool onScreen = showsTouchControls || world.input.hasTouched();
         world.scene.each<kit::TouchStick, Transform>([&](Entity, kit::TouchStick& stick, Transform&) { stick.onlyOnTouchScreens = !onScreen; });
         world.scene.each<kit::TouchButton, Transform>([&](Entity, kit::TouchButton& button, Transform&) { button.onlyOnTouchScreens = !onScreen; });
+        world.scene.each<kit::UIButton, Transform>([&](Entity, kit::UIButton& button, Transform&) {
+            if (button.isRound) button.onlyOnTouchScreens = !onScreen;
+        });
         // And what the keys do is of no use to someone holding a phone.
         // On a touch screen the keys' help and the engine's name go: the thumbs need the room.
-        for (const char* name : {"Help", "Help 2", "Engine"}) {
+        for (const char* name : {"Help", "Help 2"}) {
             if (kit::HudText* help = world.scene.get<kit::HudText>(world.find(name))) help->color.w = world.input.hasTouched() ? 0.0f : 0.55f;
         }
         if (!hasSounds) {
@@ -134,5 +125,5 @@ struct DriveControls {
     }
 };
 
-MOLTEN_COMPONENT(DriveControls, MOLTEN_FIELD(switchesEngines).help("Keys 1 to 7"), MOLTEN_FIELD(antiLockBrakes).help("ABS: eases the brakes when a wheel locks. B turns it on and off."),
+MOLTEN_COMPONENT(DriveControls, MOLTEN_FIELD(antiLockBrakes).help("ABS: eases the brakes when a wheel locks. B turns it on and off."),
                  MOLTEN_FIELD(showsTouchControls).help("The stick and the pedals on the screen. T turns them on and off; a touch shows them."), MOLTEN_FIELD(skidSound), MOLTEN_FIELD(windSound))

@@ -125,23 +125,41 @@ if(MOLTEN_IOS)
         list(APPEND MOLTEN_IOS_RESOURCES ${MOLTEN_IOS_STAGING})
     endif()
 
-    # The icon, in the sizes a phone and a tablet ask for, made from one picture when CMake runs.
+    # The icon: an asset catalog with one picture of 1024 points, which Xcode turns into every
+    # size the home screen, Settings and Spotlight ask for. (Loose pictures named in Info.plist
+    # are not shown by today's iOS.) Made when CMake runs; without alpha, as Apple asks.
     set(MOLTEN_IOS_ICONS "")
     if(EXISTS "${MOLTEN_IOS_ICON}")
-        set(MOLTEN_IOS_ICON_FOLDER ${CMAKE_BINARY_DIR}/icons)
-        file(MAKE_DIRECTORY ${MOLTEN_IOS_ICON_FOLDER})
-        foreach(ICON "AppIcon60x60@2x.png;120" "AppIcon60x60@3x.png;180" "AppIcon76x76@2x~ipad.png;152" "AppIcon83.5x83.5@2x~ipad.png;167")
-            list(GET ICON 0 ICON_NAME)
-            list(GET ICON 1 ICON_SIZE)
-            execute_process(COMMAND sips -z ${ICON_SIZE} ${ICON_SIZE} "${MOLTEN_IOS_ICON}" --out "${MOLTEN_IOS_ICON_FOLDER}/${ICON_NAME}" OUTPUT_QUIET ERROR_QUIET)
-            if(EXISTS "${MOLTEN_IOS_ICON_FOLDER}/${ICON_NAME}")
-                list(APPEND MOLTEN_IOS_ICONS "${MOLTEN_IOS_ICON_FOLDER}/${ICON_NAME}")
-            endif()
-        endforeach()
+        set(MOLTEN_IOS_CATALOG ${CMAKE_BINARY_DIR}/Icon.xcassets)
+        set(MOLTEN_IOS_ICON_SET ${MOLTEN_IOS_CATALOG}/AppIcon.appiconset)
+        file(REMOVE_RECURSE ${MOLTEN_IOS_CATALOG})
+        file(MAKE_DIRECTORY ${MOLTEN_IOS_ICON_SET})
+        file(WRITE ${MOLTEN_IOS_CATALOG}/Contents.json "{ \"info\" : { \"author\" : \"xcode\", \"version\" : 1 } }\n")
+        file(WRITE ${MOLTEN_IOS_ICON_SET}/Contents.json
+             "{ \"images\" : [ { \"filename\" : \"icon-1024.png\", \"idiom\" : \"universal\", \"platform\" : \"ios\", \"size\" : \"1024x1024\" } ],\n  \"info\" : { \"author\" : \"xcode\", \"version\" : 1 } }\n")
+        # Through JPEG and back: the simplest way sips has to take the alpha away.
+        execute_process(COMMAND sips -s format jpeg -z 1024 1024 "${MOLTEN_IOS_ICON}" --out "${CMAKE_BINARY_DIR}/icon-1024.jpg" OUTPUT_QUIET ERROR_QUIET)
+        execute_process(COMMAND sips -s format png "${CMAKE_BINARY_DIR}/icon-1024.jpg" --out "${MOLTEN_IOS_ICON_SET}/icon-1024.png" OUTPUT_QUIET ERROR_QUIET)
+        if(EXISTS "${MOLTEN_IOS_ICON_SET}/icon-1024.png")
+            set(MOLTEN_IOS_ICONS ${MOLTEN_IOS_CATALOG})
+        else()
+            message(WARNING "The icon ${MOLTEN_IOS_ICON} could not be read: the application will have none")
+        endif()
+    else()
+        message(WARNING "No icon at ${MOLTEN_IOS_ICON}: the application will have none")
     endif()
 
     add_executable(MoltenPlayer MACOSX_BUNDLE Player/Main.cpp ${MOLTEN_IOS_GAME_SOURCES} ${MOLTEN_IOS_RESOURCES} ${MOLTEN_IOS_ICONS})
-    set_source_files_properties(${MOLTEN_IOS_ICONS} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    # The game's own components take the place of the engine's of the same name, as they do in
+    # the editor: they are marked as the game's, since here they are declared before the engine's.
+    if(MOLTEN_IOS_GAME_SOURCES)
+        set_source_files_properties(${MOLTEN_IOS_GAME_SOURCES} PROPERTIES COMPILE_DEFINITIONS MOLTEN_GAME_CODE=1)
+    endif()
+    # The asset catalog goes to Copy Bundle Resources, where Xcode compiles it (Assets.car): a
+    # source with no place in the bundle would only sit in the project.
+    if(MOLTEN_IOS_ICONS)
+        set_source_files_properties(${MOLTEN_IOS_ICONS} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    endif()
     target_link_libraries(MoltenPlayer PRIVATE moltenengine)
     if(MOLTEN_IOS_PROJECT)
         target_include_directories(MoltenPlayer PRIVATE ${MOLTEN_IOS_PROJECT}/Source)
@@ -158,7 +176,8 @@ if(MOLTEN_IOS)
         XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${MOLTEN_IOS_BUNDLE_ID}"
         XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${MOLTEN_IOS_TEAM}"
         XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
-        XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2")
+        XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
+        XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon")
     return()
 endif()
 

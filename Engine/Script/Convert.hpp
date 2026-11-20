@@ -8,8 +8,9 @@
 //                                                     call("Rotate", {{"degrees", script::Value::number(180)}});
 //                                                 }
 //
-// The other way, from C++ to a graph, cannot be done in general: code can say things boxes
-// and wires have no shape for.
+// The other way, from any C++ to a graph, cannot be done: code can say things boxes and
+// wires have no shape for. Code that was made from a graph keeps the graph in a comment at
+// its end, so that it can go back: the graph it was made from.
 #pragma once
 
 #include "Script/Runtime.hpp"
@@ -42,6 +43,14 @@ struct Call {
 /// The C++ of a graph, as a component called `name`. `source` is where the graph came
 /// from, for the comment at the top.
 std::string graphToCpp(const Graph& graph, const std::string& name, const std::string& source);
+
+/// The same, with the graph kept in a comment at the end of the file: what can go back to boxes.
+std::string graphToCppKeepingGraph(const Graph& graph, const std::string& name, const std::string& source);
+
+/// The graph kept in C++ made from one, if there is one. `wasChanged` is set to true if the
+/// code was edited after it was made: the graph is then the one it was made from, not what
+/// the code does now.
+std::optional<Graph> graphKeptIn(const std::string& code, bool* wasChanged = nullptr, std::string* name = nullptr);
 
 /// A name that can be a C++ type: letters and digits, starting with a capital letter.
 std::string typeNameFor(const std::string& fileStem);

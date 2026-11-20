@@ -135,6 +135,8 @@ typedef struct {
     float bounceIntensity;           // above zero: the rays for ambient light also bring back the light of what they hit
     uint32_t fogShaftSteps;          // above zero: the fog is walked through in this many steps, lit where the sun reaches it
     uint32_t volumetricClouds;       // 1: clouds have depth, and are walked through too
+    float reflectionMaxRoughness;    // rougher surfaces send no reflection ray: the sky's blurred light is enough for them
+    float reflectionStrength;        // how much of what a ray sees is mirrored: 1 as physics says
 } FrameUniforms;
 
 // What a ray sees of the thing it hits: its color and its glow. One for each instance of

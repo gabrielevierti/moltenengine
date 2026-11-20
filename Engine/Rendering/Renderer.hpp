@@ -76,6 +76,8 @@ struct RenderSettings {
     bool rayTracedReflections = false;
     /// Global illumination, one bounce: the rays of the ambient light also bring back the
     /// light of what they hit, so that a red wall in the sun tints the floor beside it.
+    float reflectionMaxRoughness = 0.3f;        // traced reflections only on surfaces smoother than this, fading out toward it
+    float reflectionStrength = 1.0f;            // 1 as the surface's own Fresnel says; less to tone them down
     bool rayTracedBounce = false;
     float bounceIntensity = 1.0f;
 
@@ -111,6 +113,36 @@ struct RenderSettings {
     float filmGrain = 0.0f;                     // fine noise; 0.03 is visible
     float interference = 0.0f;                  // 0 clean, 1 an analog video link about to drop
 };
+
+/// Levels of lighting quality, from cheapest to dearest: what ray tracing does, and how many
+/// rays it sends. Low uses shadow maps only; Medium traces the sun's shadows; High adds ambient
+/// light and reflections of smooth things; Ultra more rays, rougher reflections, bounced light.
+enum class LightingQuality { Low, Medium, High, Ultra, Custom };
+
+inline void applyLightingQuality(RenderSettings& settings, LightingQuality quality) {
+    settings.rayTracedShadows = quality != LightingQuality::Low;
+    settings.shadowRayCount = quality == LightingQuality::Ultra ? 4 : quality == LightingQuality::High ? 2 : 1;
+    settings.rayTracedOcclusion = quality == LightingQuality::High || quality == LightingQuality::Ultra;
+    settings.occlusionRayCount = quality == LightingQuality::Ultra ? 4 : 2;
+    settings.rayTracedReflections = settings.rayTracedOcclusion;
+    settings.reflectionMaxRoughness = quality == LightingQuality::Ultra ? 0.5f : 0.25f;
+    settings.rayTracedBounce = quality == LightingQuality::Ultra;
+}
+
+/// The level the settings are at, or Custom if they were set one by one.
+inline LightingQuality lightingQualityOf(const RenderSettings& settings) {
+    for (LightingQuality quality : {LightingQuality::Low, LightingQuality::Medium, LightingQuality::High, LightingQuality::Ultra}) {
+        RenderSettings level = settings;
+        applyLightingQuality(level, quality);
+        bool same = level.rayTracedShadows == settings.rayTracedShadows && level.rayTracedOcclusion == settings.rayTracedOcclusion &&
+                    level.rayTracedReflections == settings.rayTracedReflections && level.rayTracedBounce == settings.rayTracedBounce &&
+                    (!settings.rayTracedShadows || level.shadowRayCount == settings.shadowRayCount) &&
+                    (!settings.rayTracedOcclusion || level.occlusionRayCount == settings.occlusionRayCount) &&
+                    (!settings.rayTracedReflections || level.reflectionMaxRoughness == settings.reflectionMaxRoughness);
+        if (same) return quality;
+    }
+    return LightingQuality::Custom;
+}
 
 struct RenderStats {
     int drawCalls = 0;

@@ -53,6 +53,21 @@ std::vector<std::string> chooseFiles(const std::string& title, const std::vector
     }
 }
 
+std::string chooseSaveFile(const std::string& title, const std::string& suggestedName, const std::string& extension) {
+    @autoreleasepool {
+        NSSavePanel* panel = [NSSavePanel savePanel];
+        panel.message = toNSString(title);
+        panel.nameFieldStringValue = toNSString(suggestedName);
+        panel.canCreateDirectories = YES;
+        if (!extension.empty()) {
+            UTType* type = [UTType typeWithFilenameExtension:toNSString(extension)];
+            if (type) panel.allowedContentTypes = @[type];
+        }
+        if ([panel runModal] != NSModalResponseOK) return {};
+        return toString(panel.URL.path);
+    }
+}
+
 bool moveToTrash(const std::string& path) {
     @autoreleasepool {
         NSError* error = nil;

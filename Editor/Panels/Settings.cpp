@@ -23,11 +23,11 @@ public:
         editor.engine.scene.each<Light>([&](Entity entity, Light& light) {
             if (!sun.isValid() && light.type == LightType::Directional) sun = entity;
         });
-        // Three pages, as lighting windows have: what the scene is lit by, the lights in it, and how shadows are made.
+        // Three pages: what the scene is lit by, the lights in it, and how well (and at what cost) it is lit.
         if (ImGui::BeginTabBar("##pages")) {
             if (ImGui::BeginTabItem("Environment")) { page_ = 0; ImGui::EndTabItem(); }
             if (ImGui::BeginTabItem("Lights")) { page_ = 1; ImGui::EndTabItem(); }
-            if (ImGui::BeginTabItem("Shadows")) { page_ = 2; ImGui::EndTabItem(); }
+            if (ImGui::BeginTabItem("Quality")) { page_ = 2; ImGui::EndTabItem(); }
             ImGui::EndTabBar();
         }
         if (page_ == 1) {
@@ -35,12 +35,23 @@ public:
             if (changed) editor.scene.markChanged();
             return;
         }
-        if (page_ == 0 && ui::section("Sun")) {
+        if (page_ == 0) drawEnvironment(editor, settings, sun, changed);
+        if (page_ == 2) drawQuality(editor, settings, changed);
+        // These settings are saved with the scene, so changing them is an edit like any other.
+        if (changed) editor.scene.markChanged();
+    }
+
+private:
+    void drawEnvironment(EditorContext& editor, RenderSettings& settings, Entity sun, bool& changed) {
+        if (ui::section("Sun")) {
             if (sun.isValid()) {
                 Light* light = editor.engine.scene.get<Light>(sun);
                 changed |= ui::color("Color", light->color, false);
                 changed |= ui::dragFloat("Intensity", light->intensity, 0.02f, 0.0f, 100.0f);
                 changed |= ui::checkbox("Casts Shadows", light->castsShadows);
+                changed |= ui::dragDegrees("Size in the Sky", settings.sky.sunAngularRadius, 0.1f, 20.0f);
+                ui::tooltip("A larger sun gives softer ray traced shadows, and a larger disk in the sky");
+                changed |= ui::dragFloat("Disk Brightness", settings.sky.sunDiskIntensity, 0.1f, 0.0f, 1000.0f);
                 if (ImGui::Button("Select the Sun")) {
                     editor.scene.select(sun);
                     editor.selectedAsset.clear();
@@ -51,81 +62,124 @@ public:
                 ImGui::TextDisabled("Create > Light > Directional Light makes one.");
             }
         }
-        if (page_ == 0 && ui::section("Sky")) {
+        if (ui::section("Sky")) {
             changed |= ui::color("Zenith", settings.sky.zenithColor, true);
             changed |= ui::color("Horizon", settings.sky.horizonColor, true);
             changed |= ui::color("Ground", settings.sky.groundColor, true);
             changed |= ui::dragFloat("Brightness", settings.sky.intensity, 0.01f, 0.0f, 100.0f);
-            changed |= ui::dragFloat("Sun Disk", settings.sky.sunDiskIntensity, 0.1f, 0.0f, 1000.0f);
-            changed |= ui::dragDegrees("Sun Size", settings.sky.sunAngularRadius, 0.1f, 20.0f);
-            changed |= ui::sliderFloat("Clouds", settings.sky.cloudCoverage, 0.0f, 1.0f);
-            changed |= ui::checkbox("Clouds Have Depth", settings.sky.cloudsHaveDepth);
+            changed |= ui::dragFloat("Light from the Sky", settings.environmentIntensity, 0.01f, 0.0f, 10.0f);
+            ui::tooltip("How much the sky lights the scene: the soft light in the shade, and what shiny things mirror");
+        }
+        if (ui::section("Clouds")) {
+            changed |= ui::sliderFloat("Coverage", settings.sky.cloudCoverage, 0.0f, 1.0f);
+            changed |= ui::dragFloat("Scale", settings.sky.cloudScale, 0.01f, 0.05f, 20.0f);
+            changed |= ui::dragVec2("Drift", settings.sky.cloudSpeed, 0.001f);
+            changed |= ui::checkbox("With Depth", settings.sky.cloudsHaveDepth);
             ui::tooltip("Clouds as volumes one looks through, thick and thin, lit from the sun's side. Costs more than the flat layer");
-            changed |= ui::dragFloat("Cloud Scale", settings.sky.cloudScale, 0.01f, 0.05f, 20.0f);
-            changed |= ui::dragVec2("Cloud Wind", settings.sky.cloudSpeed, 0.001f);
-            changed |= ui::dragFloat("Sky Lighting", settings.environmentIntensity, 0.01f, 0.0f, 10.0f);
         }
-        if (page_ == 0 && ui::section("Wind")) {
-            changed |= ui::dragVec3("Velocity", settings.wind, 0.05f, "%.2f m/s");
-            changed |= ui::sliderFloat("Gusts", settings.windGustiness, 0.0f, 1.0f);
-            ImGui::TextDisabled("Carries particles with Wind Influence above zero.");
-        }
-        if (page_ == 0 && ui::section("Fog")) {
-            changed |= ui::color("Color", settings.fogColor, true);
+        if (ui::section("Fog")) {
+            changed |= ui::color("Color##fog", settings.fogColor, true);
             changed |= ui::dragFloat("Density", settings.fogDensity, 0.0005f, 0.0f, 1.0f, "%.4f");
             changed |= ui::dragFloat("Thins With Height", settings.fogHeightFalloff, 0.001f, 0.0f, 2.0f, "%.3f");
             ui::tooltip("Above zero the fog lies low, as mist in a valley, and thins at this rate per meter of height");
             changed |= ui::dragFloat("Glow Toward Sun", settings.fogSunScatter, 0.02f, 0.0f, 20.0f);
             changed |= ui::dragInt("Light Shafts", settings.fogShaftSteps, 0.2f, 0, 48);
-            ui::tooltip("Above zero the fog glows only where the sun reaches it: what stands in the sun's way casts beams of shadow through the mist. The number is how finely the fog is walked through; 12 to 24 is usual. Needs Glow Toward Sun above zero");
+            ui::tooltip("Above zero the fog glows only where the sun reaches it: what stands in the sun's way casts beams of shadow through the mist. The number is how finely the fog is walked through; 12 to 24 is usual, and each step costs. Needs Glow Toward Sun above zero");
         }
-        if (page_ == 2 && ui::section("Shadows")) {
+        if (ui::section("Wind")) {
+            changed |= ui::dragVec3("Velocity", settings.wind, 0.05f, "%.2f m/s");
+            changed |= ui::sliderFloat("Gusts", settings.windGustiness, 0.0f, 1.0f);
+            ImGui::TextDisabled("Carries particles with Wind Influence above zero.");
+        }
+    }
+
+    void drawQuality(EditorContext& editor, RenderSettings& settings, bool& changed) {
+        bool canTrace = editor.engine.renderer().canTraceRays();
+        bool hasExtras = editor.engine.renderer().hasExtras();
+        // One choice for the whole: four levels, from what any Mac runs at full speed to the best there is.
+        if (ui::section("Lighting Quality")) {
+            static const char* names[] = {"Low", "Medium", "High", "Ultra"};
+            static const char* what[] = {"Shadow maps only. Fast on every Mac, iPhone and iPad.",
+                                         "The sun's shadows ray traced, one ray a pixel: exact at any distance.",
+                                         "And the sky's light hidden where it really is, and reflections on smooth things.",
+                                         "More rays, reflections on rougher things, and light bounced off what is lit. The most costly."};
+            LightingQuality current = lightingQualityOf(settings);
+            float width = (ImGui::GetContentRegionAvail().x - 3 * 4) / 4;
+            for (int level = 0; level < 4; level++) {
+                if (level > 0) ImGui::SameLine(0, 4);
+                bool isOn = int(current) == level;
+                ImGui::BeginDisabled(level > 0 && !canTrace);
+                ImGui::PushStyleColor(ImGuiCol_Button, isOn ? ImVec4(0.95f, 0.47f, 0.18f, 1) : ImGui::GetStyleColorVec4(ImGuiCol_Button));
+                if (ImGui::Button(names[level], ImVec2(width, 0))) {
+                    applyLightingQuality(settings, LightingQuality(level));
+                    if (level > 1 && !hasExtras) settings.rayTracedOcclusion = settings.rayTracedReflections = settings.rayTracedBounce = false;
+                    changed = true;
+                }
+                ImGui::PopStyleColor();
+                ImGui::EndDisabled();
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", what[level]);
+            }
+            ImGui::TextWrapped("%s", current == LightingQuality::Custom ? "Custom: set one by one below." : what[int(current)]);
+            if (!canTrace) {
+                ImGui::TextDisabled("%s", editor.engine.renderer().device().supportsRayTracing()
+                                                ? "The ray tracing shaders did not compile here (see the console): Low only."
+                                                : "This GPU cannot trace rays: Low only.");
+            }
+        }
+        if (ui::section("Shadow Maps")) {
             changed |= ui::checkbox("Enabled", settings.shadowsEnabled);
             changed |= ui::dragFloat("Distance", settings.cascades.shadowDistance, 0.5f, 1.0f, 5000.0f);
+            ui::tooltip("How far from the camera things cast shadows. Shorter is sharper");
             changed |= ui::dragFloat("Bias", settings.shadowBias, 0.00001f, 0.0f, 0.01f, "%.5f");
             changed |= ui::dragFloat("Normal Offset", settings.shadowNormalOffset, 0.05f, 0.0f, 10.0f);
+            if (settings.rayTracedShadows && canTrace) ImGui::TextDisabled("Ray traced shadows are on: the maps are not used.");
         }
-        if (page_ == 2 && ui::section("Ray Tracing")) {
-            bool canTrace = editor.engine.renderer().canTraceRays();
+        if (ui::section("Ray Traced Shadows")) {
             ImGui::BeginDisabled(!canTrace);
-            changed |= ui::checkbox("Sun Shadows", settings.rayTracedShadows);
-            if (settings.rayTracedShadows) {
-                changed |= ui::dragInt("Rays per Pixel", settings.shadowRayCount, 0.1f, 1, 16);
-                ImGui::TextDisabled("Softness follows Sky > Sun Size.");
-                // What else the same rays can answer, once the scene is there to be asked.
-                bool hasExtras = editor.engine.renderer().hasExtras();
-                ImGui::BeginDisabled(!hasExtras);
-                changed |= ui::checkbox("Ambient Light", settings.rayTracedOcclusion);
-                ui::tooltip("The sky's light is hidden by what is really in the way: under a car, in a corner");
-                if (settings.rayTracedOcclusion) changed |= ui::dragInt("Ambient Rays", settings.occlusionRayCount, 0.1f, 1, 16);
-                if (settings.rayTracedOcclusion) {
-                    changed |= ui::checkbox("Bounced Light", settings.rayTracedBounce);
-                    ui::tooltip("Global illumination, one bounce: the same rays bring back the light of what they hit, so a red wall in the sun tints the floor beside it");
-                    if (settings.rayTracedBounce) changed |= ui::dragFloat("Bounce Strength", settings.bounceIntensity, 0.02f, 0.0f, 8.0f);
-                }
-                changed |= ui::checkbox("Reflections", settings.rayTracedReflections);
-                ui::tooltip("Smooth surfaces mirror what is around them: each sends a ray and shows what it hits, in its color and light");
-                ImGui::EndDisabled();
-                if (!hasExtras) ImGui::TextDisabled("Not available: the extra shaders did not compile (see the console).");
-            }
+            changed |= ui::checkbox("Enabled##rt", settings.rayTracedShadows);
+            ImGui::BeginDisabled(!settings.rayTracedShadows);
+            changed |= ui::dragInt("Rays a Pixel", settings.shadowRayCount, 0.1f, 1, 16);
+            ui::tooltip("More is smoother at the soft edges, and slower. 1 or 2 is usually enough");
             ImGui::EndDisabled();
-            if (!canTrace) {
-                ImGui::TextWrapped(editor.engine.renderer().device().supportsRayTracing()
-                                       ? "The ray tracing shaders did not compile on this system (see the console). Shadow maps are used."
-                                       : "This GPU cannot trace rays. Shadow maps are used.");
-            }
+            ImGui::EndDisabled();
         }
-        if (page_ == 2 && ui::section("Ambient Occlusion")) {
+        // The rest uses the rays the shadows already send for: off with them.
+        bool canRest = canTrace && hasExtras && settings.rayTracedShadows;
+        if (ui::section("Ray Traced Ambient Light")) {
+            ImGui::BeginDisabled(!canRest);
+            changed |= ui::checkbox("Enabled##ao-rt", settings.rayTracedOcclusion);
+            ui::tooltip("The sky's light is hidden by what is really in the way: under a car, in a corner");
+            ImGui::BeginDisabled(!settings.rayTracedOcclusion);
+            changed |= ui::dragInt("Rays a Pixel##ao", settings.occlusionRayCount, 0.1f, 1, 16);
+            changed |= ui::checkbox("Bounced Light", settings.rayTracedBounce);
+            ui::tooltip("Global illumination, one bounce: a red wall in the sun tints the floor beside it");
+            ImGui::BeginDisabled(!settings.rayTracedBounce);
+            changed |= ui::dragFloat("Bounce Strength", settings.bounceIntensity, 0.02f, 0.0f, 8.0f);
+            ImGui::EndDisabled();
+            ImGui::EndDisabled();
+            ImGui::EndDisabled();
+        }
+        if (ui::section("Ray Traced Reflections")) {
+            ImGui::BeginDisabled(!canRest);
+            changed |= ui::checkbox("Enabled##refl", settings.rayTracedReflections);
+            ui::tooltip("Smooth surfaces show what is around them. Each is weighed by the surface's own shine: rough things barely reflect");
+            ImGui::BeginDisabled(!settings.rayTracedReflections);
+            changed |= ui::sliderFloat("Up to Roughness", settings.reflectionMaxRoughness, 0.05f, 1.0f);
+            ui::tooltip("Only surfaces smoother than this send a reflection ray, fading out toward it; rougher ones mirror the sky. Lower is faster");
+            changed |= ui::sliderFloat("Strength", settings.reflectionStrength, 0.0f, 1.5f);
+            ImGui::EndDisabled();
+            ImGui::EndDisabled();
+        }
+        if (!canRest && canTrace) ImGui::TextDisabled(hasExtras ? "Ambient light and reflections need Ray Traced Shadows on." : "The extra shaders did not compile (see the console).");
+        if (ui::section("Screen Ambient Occlusion")) {
             changed |= ui::checkbox("Enabled##ao", settings.ambientOcclusionEnabled);
+            ui::tooltip("A cheap darkening of creases from the picture itself. Ray traced ambient light does it better where it is on");
             changed |= ui::dragFloat("Radius", settings.ambientOcclusionRadius, 0.01f, 0.01f, 10.0f);
             changed |= ui::dragFloat("Strength", settings.ambientOcclusionIntensity, 0.01f, 0.0f, 4.0f);
             changed |= ui::dragFloat("Contrast", settings.ambientOcclusionPower, 0.01f, 0.1f, 8.0f);
         }
-        // These settings are saved with the scene, so changing them is an edit like any other.
-        if (changed) editor.scene.markChanged();
     }
 
-private:
     /// Every light of the scene in one table: turn each on and off, set it, go to it.
     void drawLights(EditorContext& editor, bool& changed) {
         Scene& scene = editor.engine.scene;
@@ -329,6 +383,23 @@ public:
         if (ImGui::Button("Back to the Standard Ones")) {
             map_ = InputMap::standard();
             changed = true;
+        }
+        ImGui::SameLine();
+        // Only what a game needs is in the list: the actions of things that fly come on asking.
+        bool hasFlying = false;
+        for (const InputAction& action : map_.actions) hasFlying = hasFlying || action.name == "flaps";
+        ImGui::BeginDisabled(hasFlying);
+        if (ImGui::Button("+ Flying Actions")) {
+            for (const InputAction& action : InputMap::flying().actions) {
+                bool has = false;
+                for (const InputAction& mine : map_.actions) has = has || mine.name == action.name;
+                if (!has) map_.actions.push_back(action);
+            }
+            changed = true;
+        }
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort | ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("Adds yaw, throttle, throttleLever, flaps and brake: what Flight Controls reads");
         }
         if (changed) {
             editor.engine.input.apply(map_);

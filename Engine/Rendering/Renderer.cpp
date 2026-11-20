@@ -545,6 +545,8 @@ void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const
     frame.shadowRayCount = tracesRaysThisFrame_ ? uint32_t(std::clamp(settings.shadowRayCount, 1, 16)) : 0u;
     frame.occlusionRayCount = tracesRaysThisFrame_ && settings.rayTracedOcclusion ? uint32_t(std::clamp(settings.occlusionRayCount, 1, 16)) : 0u;
     frame.tracesReflections = tracesRaysThisFrame_ && settings.rayTracedReflections ? 1u : 0u;
+    frame.reflectionMaxRoughness = std::clamp(settings.reflectionMaxRoughness, 0.01f, 1.0f);
+    frame.reflectionStrength = std::max(settings.reflectionStrength, 0.0f);
     frame.bounceIntensity = tracesRaysThisFrame_ && settings.rayTracedOcclusion && settings.rayTracedBounce ? std::max(settings.bounceIntensity, 0.0f) : 0.0f;
 
     FrameAllocator::Allocation passUniforms = allocator().copy(

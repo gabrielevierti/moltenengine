@@ -2,6 +2,8 @@
 // What is drawn is saved as soon as the hand is off, and a game that is playing picks
 // the change up at once: scripts can be rewired while they run.
 #include "Editor.hpp"
+#include "Platform.hpp"
+#include "Script/Convert.hpp"
 #include "GraphEditor.hpp"
 #include "Panels/Widgets.hpp"
 
@@ -125,9 +127,25 @@ private:
         }
 
         ImGui::SameLine();
+        if (ImGui::Button("To C++")) {
+            if (isUnsaved_) save(editor);
+            std::string made = convertGraphToCpp(editor, path_);
+            if (!made.empty()) platform::openWithDefaultApplication(editor.assets.absolutePath(made));
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("Writes the same behavior as a C++ component in Assets/Scripts, to go on from in code");
+        // The view of the board.
+        ImGui::SameLine(0, 16);
+        if (ImGui::SmallButton("-")) board_.zoomBy(1 / 1.25f);
+        ImGui::SameLine(0, 2);
+        ImGui::TextDisabled("%3d%%", int(board_.zoom() * 100 + 0.5f));
+        ImGui::SameLine(0, 2);
+        if (ImGui::SmallButton("+")) board_.zoomBy(1.25f);
+        ImGui::SameLine(0, 4);
+        if (ImGui::SmallButton("Fit")) board_.fitView();
+        ImGui::SameLine();
         int users = 0;
         editor.engine.scene.each<VisualScript>([&](Entity, VisualScript& component) { users += component.graph == path_ ? 1 : 0; });
-        ImGui::TextDisabled("%zu nodes   used by %d %s   right-click the board to add a node", graph_.nodes.size(), users, users == 1 ? "entity" : "entities");
+        ImGui::TextDisabled("%zu nodes, used by %d %s.  Space: add a node   drag: select   Cmd+scroll: zoom", graph_.nodes.size(), users, users == 1 ? "entity" : "entities");
     }
 
     std::string path_;                  // relative to Assets; empty for none
@@ -137,6 +155,55 @@ private:
 };
 
 }  // namespace
+
+std::string convertGraphToCpp(EditorContext& editor, const std::string& graphPath) {
+    std::optional<std::string> text = text::readFile(editor.assets.absolutePath(graphPath));
+    std::optional<script::Graph> graph = text ? script::Graph::fromText(*text) : std::nullopt;
+    if (!graph) {
+        editor.notify("Assets/" + graphPath + " could not be read as a visual script", ConsoleMessage::Level::Error);
+        return {};
+    }
+    std::string name = script::typeNameFor(std::filesystem::path(graphPath).stem().string());
+    std::string relative = editor.assets.uniquePath("Scripts", name, ".cpp");
+    std::string file = editor.assets.absolutePath(relative);
+    // The component is called after the file: a second copy gets a name of its own too.
+    name = std::filesystem::path(relative).stem().string();
+    std::error_code code;
+    std::filesystem::create_directories(std::filesystem::path(file).parent_path(), code);
+    if (!text::writeFile(file, script::graphToCppKeepingGraph(*graph, name, "Assets/" + graphPath))) {
+        editor.notify("Cannot write Assets/" + relative, ConsoleMessage::Level::Error);
+        return {};
+    }
+    editor.assets.refresh();
+    editor.notify("Wrote Assets/" + relative + ": a component called " + name + ", built with the game's code. It keeps the graph, to go back");
+    return relative;
+}
+
+std::string convertCppToGraph(EditorContext& editor, const std::string& cppPath) {
+    std::optional<std::string> code = text::readFile(editor.assets.absolutePath(cppPath));
+    bool wasChanged = false;
+    std::string name;
+    std::optional<script::Graph> graph = code ? script::graphKeptIn(*code, &wasChanged, &name) : std::nullopt;
+    if (!graph) {
+        editor.notify("Assets/" + cppPath + " was not made from a visual script: code written by hand has no boxes to go back to",
+                      ConsoleMessage::Level::Warning);
+        return {};
+    }
+    std::string folder = std::filesystem::path(cppPath).parent_path().string();
+    std::string relative = editor.assets.uniquePath(folder, std::filesystem::path(cppPath).stem().string(), ".graph");
+    if (!text::writeFile(editor.assets.absolutePath(relative), graph->toText())) {
+        editor.notify("Cannot write Assets/" + relative, ConsoleMessage::Level::Error);
+        return {};
+    }
+    editor.assets.refresh();
+    if (wasChanged) {
+        editor.notify("Wrote Assets/" + relative + " from the graph Assets/" + cppPath + " was made from. The code was changed since: those changes are not in it",
+                      ConsoleMessage::Level::Warning);
+    } else {
+        editor.notify("Wrote Assets/" + relative + ": the same behavior as boxes and wires");
+    }
+    return relative;
+}
 
 void registerVisualScriptPanel(EditorContext& editor) {
     editor.registry.addPanel(nullptr, std::make_unique<VisualScriptPanel>());

@@ -327,12 +327,19 @@ static float4 reflectionTraced(float3 worldPosition, float3 normal, float3 view,
 
 // Light from the whole environment: the irradiance map for the diffuse part, the
 // prefiltered map and the BRDF lookup table (the "split sum") for the specular part.
-// `mirrorShare` is how much of the mirrored part is kept (1: all of it). Where a traced ray
-// found the mirrored direction hidden, that part is replaced by what the ray saw; the matte
-// part, which comes from every direction, is never taken away with it.
-static float3 environmentLight(Surface surface, constant FrameUniforms &frame,
-                               texturecube<float> irradianceMap, texturecube<float> prefilteredMap,
-                               texture2d<float> brdfLUT, sampler linearSampler, float mirrorShare) {
+// In two parts: the matte light, which comes from every direction, and the mirrored light,
+// which comes from one. `specularWeight` is how much of whatever lies in the mirrored
+// direction the surface sends to the eye (Fresnel and roughness, as the split sum has it):
+// a traced reflection is weighed by it, so that only what is really shiny looks like a mirror.
+struct EnvironmentParts {
+    float3 diffuse;
+    float3 specular;
+    float3 specularWeight;
+};
+
+static EnvironmentParts environmentParts(Surface surface, constant FrameUniforms &frame,
+                                         texturecube<float> irradianceMap, texturecube<float> prefilteredMap,
+                                         texture2d<float> brdfLUT, sampler linearSampler) {
     float3 F = fresnelSchlickRoughness(surface.NdotV, surface.F0, surface.roughness);
     float3 diffuse = (1.0 - F) * (1.0 - surface.metallic) * surface.albedo
                    * irradianceMap.sample(linearSampler, surface.normal).rgb;
@@ -341,9 +348,21 @@ static float3 environmentLight(Surface surface, constant FrameUniforms &frame,
     float mip = surface.roughness * (frame.prefilteredMipCount - 1.0);
     float3 prefiltered = prefilteredMap.sample(linearSampler, R, level(mip)).rgb;
     float2 brdf = brdfLUT.sample(linearSampler, float2(surface.NdotV, surface.roughness)).rg;
-    float3 specular = prefiltered * (F * brdf.x + brdf.y);
+    float3 weight = F * brdf.x + brdf.y;
 
-    return (diffuse + specular * mirrorShare) * surface.occlusion * frame.environmentIntensity;
+    EnvironmentParts parts;
+    float scale = surface.occlusion * frame.environmentIntensity;
+    parts.diffuse = diffuse * scale;
+    parts.specular = prefiltered * weight * scale;
+    parts.specularWeight = weight * surface.occlusion;
+    return parts;
+}
+
+static float3 environmentLight(Surface surface, constant FrameUniforms &frame,
+                               texturecube<float> irradianceMap, texturecube<float> prefilteredMap,
+                               texture2d<float> brdfLUT, sampler linearSampler) {
+    EnvironmentParts parts = environmentParts(surface, frame, irradianceMap, prefilteredMap, brdfLUT, linearSampler);
+    return parts.diffuse + parts.specular;
 }
 
 // ---------------------------------------------------------------- fog

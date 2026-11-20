@@ -69,6 +69,14 @@ struct VehicleBody {
     float dragArea = 0.68f;             // drag coefficient times frontal area, square meters
     bool hitsWithItsBox = true;         // the corners of a box of its size stop at walls and the ground. Off: only its Bumpers do
     Vec3 startVelocity{0, 0, 0};        // in its own axes: -z is forward. For starting on the move
+    /// Stability control, 0 (off) to 1: once the car slides further than `driftAngle` off where
+    /// it is going, the engine is eased and the spin is caught. Up to that angle it lets you
+    /// drift; with the handbrake held it lets you drift further.
+    float stability = 0.0f;
+    float driftAngle = 15.0f;           // degrees
+    /// What a tire keeps of its grip once it slides, as a share of its best: low is ice, high
+    /// is a car that slides and can be held there. 0 leaves the tire's own curve.
+    float slideGrip = 0.0f;
 
     void start(World& world, Entity self);
     void fixedUpdate(World& world, Entity self, float dt);

@@ -49,6 +49,7 @@ struct GizmoSettings {
     GizmoOperation operation = GizmoOperation::Move;
     GizmoSpace space = GizmoSpace::World;
     bool snapEnabled = false;           // holding Cmd while dragging inverts it
+    bool aroundCenter = true;           // several selected: the handles at their middle (Center) or on the last chosen (Pivot)
     float moveSnap = 0.5f;              // world units
     float rotateSnap = 15.0f;           // degrees
     float scaleSnap = 0.1f;
@@ -149,7 +150,7 @@ public:
 // ---------------------------------------------------------------- the editor's state
 
 struct ConsoleMessage {
-    enum class Level { Info, Warning, Error };
+    enum class Level { Info, Warning, Error, Debug };
     Level level = Level::Info;
     std::string text;
     double time = 0;                    // seconds since the editor started

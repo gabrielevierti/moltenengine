@@ -1,5 +1,7 @@
 #include "Game/Component.hpp"
 
+#include <map>
+
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -126,10 +128,20 @@ ComponentRegistry& ComponentRegistry::instance() {
 void ComponentRegistry::add(ComponentType type) {
     for (ComponentType& existing : types_) {
         if (existing.name == type.name) {
+            // The engine's own, declared after the game's (in a program the game's code is
+            // linked into): the game's stays, and the engine's waits behind it.
+            if (existing.module != nullptr && type.module == nullptr) {
+                // Filed where the engine files its own, unless the game's says otherwise.
+                if (existing.category.empty() || existing.category == "Scripts") existing.category = type.category;
+                auto waiting = std::find_if(replaced.begin(), replaced.end(), [&](const ComponentType& r) { return r.name == type.name; });
+                if (waiting != replaced.end()) *waiting = std::move(type);
+                else replaced.push_back(std::move(type));
+                return;
+            }
             // A game's own Follow takes the place of the one that comes with the engine,
             // which is kept for when the game's code is not there.
             if (existing.module == nullptr && type.module != nullptr) {
-                type.category = type.category.empty() ? existing.category : type.category;
+                if (type.category.empty() || type.category == "Scripts") type.category = existing.category;
                 replaced.push_back(existing);
             }
             existing = std::move(type);
@@ -158,7 +170,18 @@ void ComponentRegistry::setCategory(const std::string& name, const std::string& 
     }
 }
 
+namespace {
+std::map<std::string, std::string>& displayNames() {
+    static std::map<std::string, std::string> names;
+    return names;
+}
+}  // namespace
+
+void ComponentRegistry::setDisplayName(const std::string& typeName, const std::string& shown) { displayNames()[typeName] = shown; }
+
 std::string ComponentRegistry::displayName(const std::string& typeName) {
+    auto named = displayNames().find(typeName);
+    if (named != displayNames().end()) return named->second;
     std::string out;
     for (size_t i = 0; i < typeName.size(); i++) {
         char c = typeName[i];

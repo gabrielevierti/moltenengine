@@ -204,6 +204,9 @@ struct UIButton {
     Vec4 color{0.95f, 0.47f, 0.18f, 1};
     Vec4 textColor{1, 1, 1, 1};
     std::string action;                 // a button action it holds while pressed: "jump"; empty for none
+    bool isRound = false;               // a circle of `radius` instead of a box of `size`: a thumb's button
+    float radius = 50.0f;
+    bool onlyOnTouchScreens = false;    // hidden until the screen is touched: for a game that also has keys
     std::string scene;                  // a scene it loads when clicked: "Scenes/Level1.scene"; empty for none
     std::string value;                  // a shared value it adds `amount` to when clicked; empty for none
     float amount = 1.0f;
@@ -213,6 +216,28 @@ struct UIButton {
     bool wasClicked = false;            // true for the frame it was clicked in: for scripts that ask
 
     void update(World& world, Entity self, float dt);
+    void draw(World& world, Entity self, Canvas& canvas);
+};
+
+/// A dial that shows a shared value: a speedometer, a rev counter, a boost gauge. An arc
+/// that fills, marks with numbers along it, a needle, and the value in the middle.
+struct UIGauge {
+    std::string value = "speed";
+    float most = 200.0f;                // the value at the end of the arc
+    float numbersEvery = 20.0f;         // a numbered mark at each multiple of this (0: none)
+    float numbersScale = 1.0f;          // the numbers as written: 0.001 writes rpm in thousands
+    float redFrom = 0.0f;               // where the red part of the arc starts, as a share (0: none)
+    std::string label = "km/h";
+    bool showsValue = true;             // the value itself, large, in the middle
+    Vec2 anchor{0.5f, 1.0f};
+    Vec2 offset{0, -90};
+    float radius = 70.0f;
+    float thickness = 7.0f;
+    Vec4 color{1.0f, 0.5f, 0.18f, 1};
+    Vec4 backColor{0.04f, 0.045f, 0.055f, 0.7f};
+
+    float shown = 0;                    // eased toward the value: a needle has weight
+
     void draw(World& world, Entity self, Canvas& canvas);
 };
 

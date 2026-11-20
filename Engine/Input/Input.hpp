@@ -80,6 +80,10 @@ struct InputMap {
     static InputMap fromText(const std::string& text);
     /// What every game starts with: moveX, moveZ, jump, fire, pause.
     static InputMap standard();
+    /// The standard actions and those FlightControls reads: "yaw" (Q E), "throttle" (Shift
+    /// and Ctrl, or Z X), "throttleLever" (a radio's or flight stick's lever), "flaps" (F) and
+    /// "brake" (B). For a game that flies: the Input window adds them with one button.
+    static InputMap flying();
 };
 
 /// One snapshot of a controller, as the platform layer reads it each frame.
@@ -112,7 +116,10 @@ public:
     /// Holds or lets go of a button action from code.
     void setVirtualButton(const std::string& action, bool down);
     /// True once a finger has touched the screen: this is a device to show touch controls on.
-    bool hasTouched() const { return hasTouched_; }
+    /// True once the screen has been touched, or from the start on a device whose screen is
+    /// how it is used (a phone, a tablet): touch controls hidden "until a touch" show at once there.
+    bool hasTouched() const { return hasTouched_ || isTouchScreen; }
+    bool isTouchScreen = false;
 
     /// Off, the game hears nothing: no key is down, no button, no stick is moved, nothing is
     /// typed. An editor turns it off while the game runs but its window is not the one

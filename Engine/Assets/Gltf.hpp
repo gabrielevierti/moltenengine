@@ -58,6 +58,9 @@ struct GltfMaterial {
     Vec4 baseColor{1, 1, 1, 1};
     float metallic = 1, roughness = 1;
     Vec3 emissive{0, 0, 0};
+    /// The picture of its color, where the file names one beside it ("Textures/paint.jpg",
+    /// relative to the model's file); empty when there is none, or it is inside the file.
+    std::string baseColorTexture;
 };
 
 /// Where every node is: what an animation changes.

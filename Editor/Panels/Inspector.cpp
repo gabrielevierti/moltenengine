@@ -306,7 +306,7 @@ private:
             }
             for (size_t i = 0; i < ComponentRegistry::instance().types().size(); i++) {
                 const ComponentType& type = ComponentRegistry::instance().types()[i];
-                if (type.has(scene, entity)) continue;
+                if (type.has(scene, entity) || type.category == "Hidden") continue;
                 auto add = type.add;
                 choices.push_back({type.category, ComponentRegistry::displayName(type.name), [add, &scene, entity] { add(scene, entity); }});
             }
@@ -725,12 +725,26 @@ void registerBuiltinComponents(EditorContext& editor) {
     auto drawCollider = [](EditorContext& context, Entity entity, Collider& collider) {
         bool changed = false;
         if (collider.shape == ColliderShape::Mesh) {
-            if (ui::text("Model", collider.meshName)) {
+            // Chosen from the models there are (or dropped from the Explorer), never typed.
+            std::vector<std::string> models = meshChoices(context);
+            const MeshRenderer* shown = context.engine.scene.get<MeshRenderer>(entity);
+            std::vector<std::string> labels = {"Its Mesh Renderer's model"};
+            for (const std::string& model : models) labels.push_back(model);
+            int index = collider.meshName.empty() ? 0 : indexOfName(models, collider.meshName) + 1;
+            if (index == 0 && !collider.meshName.empty()) {
+                labels.push_back(collider.meshName);                    // a part of a model, or a file that is gone: shown as it is
+                index = int(labels.size()) - 1;
+            }
+            auto use = [&](const std::string& name) {
+                collider.meshName = name;
                 collider.mesh = nullptr;
                 collider.meshScale = Vec3{0, 0, 0};
                 changed = true;
-            }
-            ui::tooltip("The model whose triangles it is: a file among the assets, or cube, plane, sphere. The object's scale is its size");
+            };
+            if (ui::combo("Model", index, labels)) use(index == 0 ? (shown && shown->mesh ? shown->mesh->name : std::string()) : labels[size_t(index)]);
+            ui::tooltip("The model whose triangles it is. The object's scale is its size");
+            std::string dropped;
+            if (ui::acceptAsset(context.assets, {AssetType::Mesh}, dropped)) use(dropped);
             ImGui::TextDisabled(collider.mesh ? "%d triangles. For things that stand still: other shapes collide with it." : "Read when the game runs.",
                                 collider.mesh ? int(collider.mesh->triangleCount()) : 0);
             changed |= ui::checkbox("Trigger", collider.isTrigger);
