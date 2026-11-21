@@ -79,6 +79,8 @@ public:
     int end();
     void quit() { isRunning_ = false; }
     const EngineConfig& config() const { return config_; }
+    /// F1 statistics and the profiler, F2 colliders, F3 full screen, F4 a screenshot: on in a development build.
+    void setDeveloperKeys(bool on) { config_.developerKeys = on; }
 
     // ---- the parts. A game uses them directly.
 
@@ -104,6 +106,8 @@ public:
     void adjustSound(uint32_t sound, float volume, float pitch) override;
     void panSound(uint32_t sound, float pan) override;
     bool listener(Mat4& world) override;
+    int deviceHeat() const override;
+    bool isSavingBattery() const override;
     void endSound(uint32_t sound) override;
     std::shared_ptr<Texture> loadTexture(const std::string& name, TextureFormat format) override;
     Engine* asEngine() override { return this; }
@@ -154,6 +158,7 @@ private:
     std::vector<Entity> behaviorEntities_;
     Game* game_ = nullptr;              // between begin() and end()
     double previousTime_ = 0;
+    uint64_t frameCount_ = 0;
     int capturedFrames_ = 0;
     bool captureSaved_ = false;
     bool isRunning_ = true;

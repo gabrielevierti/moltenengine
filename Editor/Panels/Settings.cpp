@@ -258,6 +258,16 @@ public:
                 changed = true;
             }
             changed |= ui::sliderFloat("Render Scale", settings.renderScale, 0.25f, 2.0f);
+            ui::tooltip("Below 1 the scene is drawn smaller and made the screen's size: faster, a little softer");
+            changed |= ui::checkbox("MetalFX Upscaling", settings.metalFXUpscaling);
+            ui::tooltip("A smaller picture is made larger by MetalFX, which keeps edges sharp, instead of being stretched");
+            changed |= ui::checkbox("Dynamic Resolution", settings.dynamicResolution);
+            ui::tooltip("While the GPU cannot keep up with the frame rate below, the scene is drawn smaller, and larger again when it can");
+            if (settings.dynamicResolution) {
+                changed |= ui::dragFloat("Target Frame Rate", settings.targetFrameRate, 1.0f, 20.0f, 240.0f, "%.0f fps");
+                changed |= ui::sliderFloat("Smallest Scale", settings.lowestDynamicScale, 0.25f, 1.0f);
+                ui::info("Scale Now", std::to_string(int(editor.engine.renderer().dynamicScale() * settings.renderScale * 100 + 0.5f)) + "%");
+            }
         }
         if (ui::section("Statistics")) {
             const auto& stats = editor.engine.renderer().stats;

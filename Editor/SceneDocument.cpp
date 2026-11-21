@@ -384,8 +384,11 @@ bool SceneDocument::savePrefab(Entity root, const std::string& absolutePath) {
 }
 
 Entity SceneDocument::instantiatePrefab(const std::string& assetName, Vec3 position) {
-    std::optional<std::string> contents = text::readFile(engine_.assets().path(assetName));
-    if (!contents) return Entity{};
+    if (!text::readFile(engine_.assets().path(assetName))) return Entity{};
+    // A copy that follows the prefab: an entity of its own (named after it, where it is put)
+    // that the scene keeps, with the prefab's contents put under it each time the scene is read.
+    std::string name = std::filesystem::path(assetName).stem().string();
+    std::optional<std::string> contents = "molten-scene 1\nentity \"" + name + "\"\n  transform 0 0 0 0 0 0 1 1 1 1\n  prefab \"" + assetName + "\"\n";
     std::vector<NamedMaterial> prefabMaterials;
     RenderSettings ignored;
     std::vector<Entity> created;

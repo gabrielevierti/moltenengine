@@ -16,6 +16,8 @@
 // view, sorts, and groups objects that share a mesh and a material into instanced draws.
 #pragma once
 
+#include "Core/Profiler.hpp"
+#include <MetalFX/MetalFX.hpp>
 #include "Rendering/Canvas.hpp"
 #include "Rendering/Cascades.hpp"
 #include "Rendering/DebugDraw.hpp"
@@ -26,6 +28,8 @@
 #include "Scene/Scene.hpp"
 
 #include <dispatch/dispatch.h>
+
+#include <atomic>
 
 #include <functional>
 #include <memory>
@@ -51,6 +55,13 @@ struct SkySettings {
 struct RenderSettings {
     int sampleCount = 4;                        // multisampling: 1 (off), 2 or 4
     float renderScale = 1.0f;                   // below 1 renders the scene smaller and stretches it
+    bool metalFXUpscaling = true;               // with renderScale below 1: stretched by MetalFX, sharp, where the GPU has it
+    // Dynamic resolution: the scene drawn smaller while the GPU cannot keep up with `targetFrameRate`,
+    // down to `lowestDynamicScale` of renderScale, and back up when it can.
+    bool dynamicResolution = false;
+    float targetFrameRate = 60.0f;
+    float lowestDynamicScale = 0.6f;
+    bool followsDeviceHeat = true;              // hot (thermal state serious or critical): the scene drawn smaller, until it cools
 
     bool shadowsEnabled = true;
     CascadeSettings cascades;
@@ -166,6 +177,18 @@ public:
 
     RenderSettings settings;
     RenderStats stats;                          // of the last frame
+    Profiler* profiler = nullptr;               // sections of the frame on the CPU, if someone keeps them
+    /// What the GPU took for the last frame it finished (a frame or two behind the CPU), in milliseconds.
+    float lastGpuMilliseconds() const { return lastGpuMilliseconds_.load(std::memory_order_relaxed); }
+    /// What dynamic resolution has made of renderScale now: 1 when it is off or the GPU keeps up.
+    float dynamicScale() const { return dynamicScale_; }
+    /// How much smaller the device's heat asks for (1 when it is cool); the engine sets it.
+    float heatScale = 1.0f;
+    /// The profiler, or one that keeps nothing.
+    Profiler& profilerOrIdle() {
+        static Profiler idle;
+        return profiler ? *profiler : idle;
+    }
     DebugDraw debug;                            // lines to draw with the next frame
 
     /// If this entity has a Camera, the renderer looks through it whatever the scene's own
@@ -310,6 +333,10 @@ private:
     uint64_t frameNumber_ = 0;
     double time_ = 0;                               // of the frame being drawn
     dispatch_semaphore_t frameSemaphore_;
+    std::atomic<float> lastGpuMilliseconds_{0};
+    float dynamicScale_ = 1.0f;
+    int framesSinceScaleChange_ = 0;
+    void adjustDynamicScale();
 
     std::shared_ptr<Texture> white_, flatNormal_;
     Material defaultMaterial_;
@@ -323,11 +350,22 @@ private:
     int shadowMapSize_ = 0, shadowMapSlices_ = 0;
     NS::SharedPtr<MTL::Texture> imageTarget_;       // for renderToImage
 
+    /// MetalFX's spatial upscaler, and the two pictures it reads and writes: one per view.
+    struct Upscaler {
+        NS::SharedPtr<MTLFX::SpatialScaler> scaler;
+        NS::SharedPtr<MTL::Texture> input, output;
+        int inputWidth = 0, inputHeight = 0, outputWidth = 0, outputHeight = 0;
+    };
+    Upscaler upscaler_;
+    /// The scene's picture tone mapped and upscaled to `width` x `height` by MetalFX; nullptr
+    /// where it cannot be (no MetalFX on this GPU, or nothing to upscale).
+    MTL::Texture* upscaleWithMetalFX(MTL::CommandBuffer* commandBuffer, const void* postUniforms, size_t uniformsSize, bool hasBloom, int width, int height);
     struct TargetSet {
         int width = 0, height = 0, samples = 0;
         bool hasOcclusion = false;
         NS::SharedPtr<MTL::Texture> colorMultisample, depth, color, prepassDepth, prepassNormal, occlusionRaw, occlusion;
         std::vector<NS::SharedPtr<MTL::Texture>> bloom;
+        Upscaler upscaler;
     };
     std::vector<TargetSet> targetSets_;                             // one per picture drawn in a frame
     std::vector<NS::SharedPtr<MTL::Texture>> viewColors_;           // the finished pictures of `views`

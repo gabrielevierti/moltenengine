@@ -2,6 +2,7 @@
 // The editor as the engine sees it: a Game whose "gameplay" is editing the scene it shows.
 #pragma once
 
+#include "CommandPalette.hpp"
 #include "DeviceExport.hpp"
 #include "ProjectWindow.hpp"
 
@@ -55,6 +56,8 @@ private:
     void chooseAndOpenScene();
     void drawUnsavedChangesDialog();
     void drawAboutDialog();
+    void drawCommandPalette();
+    std::vector<PaletteCommand> paletteCommands();
     void drawBuildWindow();
     void updateTitle();
 
@@ -77,12 +80,15 @@ private:
     std::shared_ptr<Texture> emptyScenePicture_;        // what an empty project starts with, for the project window
     bool needsDefaultLayout_ = false;
     bool showsAbout_ = false;
+    CommandPalette palette_;            // Cmd+K
     bool showsBuild_ = false;           // the Build and Export window
     int buildPlatform_ = 0;             // 0 Mac, 1 iPhone and iPad
     bool lastBuildFailed_ = false;
     DeviceExport deviceExport_;         // the work of putting the game on an iPhone or an iPad
     std::string appleTeam_;             // the developer team that signs it: the user's, kept with the editor's own settings
     std::vector<std::string> deviceLines_;      // the last things that work said
+    bool exportsForOtherMacs_ = false;  // Developer ID and notarization after a Mac export
+    bool exportsDevelopment_ = false;   // a development build: the developer keys on in the exported game
     double nextAssetScan_ = 0;
     std::string shownTitle_;
 

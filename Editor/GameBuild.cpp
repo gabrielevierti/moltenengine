@@ -191,7 +191,7 @@ BuildResult buildGameCode(const Project& project, const std::string& hostExecuta
 }
 
 std::string exportMacApplication(const Project& project, const std::string& destination, const std::string& playerExecutable,
-                                 const std::string& engineRoot, std::string* applicationPath) {
+                                 const std::string& engineRoot, std::string* applicationPath, bool isDevelopment) {
     std::error_code code;
     if (!fs::exists(playerExecutable, code)) return "The player was not found at " + playerExecutable + ". Build the target molten-player.";
     std::string name = Project::fileNameFor(project.name);
@@ -215,6 +215,8 @@ std::string exportMacApplication(const Project& project, const std::string& dest
     copyTree(fs::path(engineRoot) / "Assets", resources / "Assets");
     copyTree(project.assetsDirectory(), resources / "Project" / "Assets");
     fs::copy_file(project.filePath(), resources / "Project" / fs::path(project.filePath()).filename(), fs::copy_options::overwrite_existing, code);
+    // A development build: the player sees this mark and turns on the developer keys (F1: statistics and profiler).
+    if (isDevelopment) text::writeFile((resources / "Project" / "Development").string(), "F1 statistics and profiler, F2 colliders, F3 full screen, F4 screenshot\n");
     fs::path gameLibrary = fs::path(project.libraryDirectory()) / "Game" / "Game.dylib";
     if (fs::exists(gameLibrary, code)) fs::copy_file(gameLibrary, resources / "Game.dylib", fs::copy_options::overwrite_existing, code);
 

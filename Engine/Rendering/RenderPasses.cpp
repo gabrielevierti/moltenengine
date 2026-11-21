@@ -389,10 +389,17 @@ void Renderer::renderFinal(MTL::CommandBuffer* commandBuffer, const Canvas& canv
     uniforms.interference = settings.interference;
     uniforms.time = float(time_);
 
+    // Drawn smaller (renderScale): tone mapped at that size, then made the target's size by
+    // MetalFX, which keeps edges and detail sharp where plain stretching blurs them.
+    Rect area = sceneRect(target.texture);
+    MTL::Texture* upscaled = nullptr;
+    if (settings.metalFXUpscaling && sceneColor_ && int(sceneColor_->width()) < area.width) {
+        upscaled = upscaleWithMetalFX(commandBuffer, &uniforms, sizeof(uniforms), hasBloom, area.width, area.height);
+    }
+
     auto pass = NS::TransferPtr(MTL::RenderPassDescriptor::alloc()->init());
     MTL::RenderPassColorAttachmentDescriptor* color = pass->colorAttachments()->object(0);
     color->setTexture(target.texture);
-    Rect area = sceneRect(target.texture);
     bool coversTarget = area.width == int(target.texture->width()) && area.height == int(target.texture->height());
     // When the scene covers the target the first draw writes every pixel; otherwise what
     // is around it must be cleared.
@@ -413,12 +420,12 @@ void Renderer::renderFinal(MTL::CommandBuffer* commandBuffer, const Canvas& canv
     // than the target (renderScale); the sampler stretches it.
     PipelineDescription description;
     description.vertexFunction = "vertex_fullscreen";
-    description.fragmentFunction = "fragment_tonemap";
+    description.fragmentFunction = upscaled ? "fragment_copy" : "fragment_tonemap";
     description.colorFormat = target.texture->pixelFormat();
     if (MTL::RenderPipelineState* pipeline = shaders_.pipeline(description)) {
         encoder->setRenderPipelineState(pipeline);
         encoder->setFragmentBytes(&uniforms, sizeof(uniforms), gpu::MMBufferPass);
-        encoder->setFragmentTexture(sceneColor_.get(), 0);
+        encoder->setFragmentTexture(upscaled ? upscaled : sceneColor_.get(), 0);
         encoder->setFragmentTexture(hasBloom ? bloom_[0].get() : white_->handle(), 1);
         encoder->setFragmentSamplerState(device_.linearClampSampler(), gpu::MMSamplerLinearClamp);
         encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0), NS::UInteger(3));
@@ -434,6 +441,75 @@ void Renderer::renderFinal(MTL::CommandBuffer* commandBuffer, const Canvas& canv
     drawCanvas(encoder, canvas, target.texture);
     if (overlay && withOverlay) overlay(commandBuffer, encoder);
     encoder->endEncoding();
+}
+
+MTL::Texture* Renderer::upscaleWithMetalFX(MTL::CommandBuffer* commandBuffer, const void* postUniforms, size_t uniformsSize, bool hasBloom,
+                                           int width, int height) {
+    static const bool isSupported = MTLFX::SpatialScalerDescriptor::supportsDevice(device_.device());
+    if (!isSupported || width < 1 || height < 1) return nullptr;
+    Upscaler& up = upscaler_;
+    int inputWidth = int(sceneColor_->width()), inputHeight = int(sceneColor_->height());
+    // Linear colors in half floats, read and written by MetalFX; the target's sRGB format adds the gamma after.
+    const MTL::PixelFormat format = MTL::PixelFormatRGBA16Float;
+    if (!up.scaler || up.inputWidth != inputWidth || up.inputHeight != inputHeight || up.outputWidth != width || up.outputHeight != height) {
+        auto descriptor = NS::TransferPtr(MTLFX::SpatialScalerDescriptor::alloc()->init());
+        descriptor->setInputWidth(NS::UInteger(inputWidth));
+        descriptor->setInputHeight(NS::UInteger(inputHeight));
+        descriptor->setOutputWidth(NS::UInteger(width));
+        descriptor->setOutputHeight(NS::UInteger(height));
+        descriptor->setColorTextureFormat(format);
+        descriptor->setOutputTextureFormat(format);
+        descriptor->setColorProcessingMode(MTLFX::SpatialScalerColorProcessingModeLinear);
+        up = Upscaler{};
+        up.scaler = NS::TransferPtr(descriptor->newSpatialScaler(device_.device()));
+        if (!up.scaler) return nullptr;
+        auto makeTexture = [&](int w, int h, MTL::TextureUsage usage) {
+            auto texture = NS::TransferPtr(MTL::TextureDescriptor::alloc()->init());
+            texture->setTextureType(MTL::TextureType2D);
+            texture->setPixelFormat(format);
+            texture->setWidth(NS::UInteger(w));
+            texture->setHeight(NS::UInteger(h));
+            texture->setUsage(usage | MTL::TextureUsageShaderRead | MTL::TextureUsageRenderTarget);
+            texture->setStorageMode(MTL::StorageModePrivate);
+            return NS::TransferPtr(device_.device()->newTexture(texture.get()));
+        };
+        up.input = makeTexture(inputWidth, inputHeight, up.scaler->colorTextureUsage());
+        up.output = makeTexture(width, height, up.scaler->outputTextureUsage());
+        up.inputWidth = inputWidth, up.inputHeight = inputHeight, up.outputWidth = width, up.outputHeight = height;
+        if (!up.input || !up.output) {
+            up = Upscaler{};
+            return nullptr;
+        }
+    }
+    // Tone mapped at the size it was drawn.
+    auto pass = NS::TransferPtr(MTL::RenderPassDescriptor::alloc()->init());
+    MTL::RenderPassColorAttachmentDescriptor* color = pass->colorAttachments()->object(0);
+    color->setTexture(up.input.get());
+    color->setLoadAction(MTL::LoadActionDontCare);
+    color->setStoreAction(MTL::StoreActionStore);
+    PipelineDescription description;
+    description.vertexFunction = "vertex_fullscreen";
+    description.fragmentFunction = "fragment_tonemap";
+    description.colorFormat = format;
+    MTL::RenderPipelineState* pipeline = shaders_.pipeline(description);
+    if (!pipeline) return nullptr;
+    MTL::RenderCommandEncoder* encoder = commandBuffer->renderCommandEncoder(pass.get());
+    encoder->setLabel(label("Tone mapping, before MetalFX"));
+    encoder->setRenderPipelineState(pipeline);
+    encoder->setFragmentBytes(postUniforms, uniformsSize, gpu::MMBufferPass);
+    encoder->setFragmentTexture(sceneColor_.get(), 0);
+    encoder->setFragmentTexture(hasBloom ? bloom_[0].get() : white_->handle(), 1);
+    encoder->setFragmentSamplerState(device_.linearClampSampler(), gpu::MMSamplerLinearClamp);
+    encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0), NS::UInteger(3));
+    encoder->endEncoding();
+    stats.drawCalls++;
+    // Then made the target's size.
+    up.scaler->setColorTexture(up.input.get());
+    up.scaler->setOutputTexture(up.output.get());
+    up.scaler->setInputContentWidth(NS::UInteger(inputWidth));
+    up.scaler->setInputContentHeight(NS::UInteger(inputHeight));
+    up.scaler->encodeToCommandBuffer(commandBuffer);
+    return up.output.get();
 }
 
 void Renderer::renderInterface(MTL::CommandBuffer* commandBuffer, const Canvas& canvas, const RenderTarget& target) {

@@ -385,6 +385,24 @@ private:
             }
             ImGui::Separator();
             if (type == AssetType::Scene && ImGui::MenuItem("Open Scene")) editor.requestOpenScene(editor.assets.absolutePath(path));
+            // A variant: the prefab with some values changed, written as the changes (see SceneFile.hpp).
+            if (type == AssetType::Prefab && ImGui::MenuItem("Create Variant")) {
+                std::filesystem::path original(path);
+                std::string stem = original.stem().string();
+                std::string made = (original.parent_path() / (stem + " Variant.prefab")).string();
+                for (int number = 2; std::filesystem::exists(editor.assets.absolutePath(made)); number++) {
+                    made = (original.parent_path() / (stem + " Variant " + std::to_string(number) + ".prefab")).string();
+                }
+                std::string variant = "molten-variant 1\nbase \"" + path + "\"\nname \"" + stem + " Variant\"\n"
+                                      "# What it changes, one per line (the entity by its path of names below the root, \"\" for the root):\n"
+                                      "# set \"\" NavAgent speed \"6\"\n# set \"Body\" MeshRenderer material \"Materials/Red.material\"\n"
+                                      "# set \"Body\" Transform scale \"1.2 1.2 1.2\"\n";
+                if (text::writeFile(editor.assets.absolutePath(made), variant)) {
+                    editor.assets.refresh();
+                    editor.selectedAsset = made;
+                    editor.notify("Made " + made + ": its changes are lines in the file (Open with Default Application)");
+                }
+            }
             if (type == AssetType::Graph && ImGui::MenuItem("Edit Script")) editor.editGraph(path);
             if (type == AssetType::Graph && ImGui::MenuItem("Convert to C++ Script")) convertGraphToCpp(editor, path);
             if (type == AssetType::Script && std::filesystem::path(path).extension() == ".cpp" && ImGui::MenuItem("Convert to Visual Script")) {

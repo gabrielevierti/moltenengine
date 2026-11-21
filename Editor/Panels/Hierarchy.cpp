@@ -2,6 +2,7 @@
 // Click to select (Cmd adds), drag one onto another to parent it, F2 to rename.
 #include "Editor.hpp"
 #include "Kit/Effects.hpp"
+#include "Kit/Spline.hpp"
 #include "Panels/Widgets.hpp"
 
 #include <algorithm>
@@ -377,6 +378,18 @@ private:
             if (ImGui::MenuItem("Frame in View", "F")) editor.frameSelectionRequested = true;
             if (ImGui::MenuItem("Align with View", "Shift+Cmd+F")) editor.alignWithViewRequested = true;
             if (ImGui::MenuItem("Save as Prefab")) savePrefab(editor, entity);
+            // A copy of a prefab follows the prefab; unpacked, it is the scene's own, to change freely.
+            if (world.has<PrefabInstance>(entity) && ImGui::MenuItem("Unpack Prefab")) {
+                world.remove<PrefabInstance>(entity);
+                std::vector<Entity> under{entity};
+                for (size_t i = 0; i < under.size(); i++) {
+                    for (Entity child : scene.children(under[i])) {
+                        world.remove<FromPrefab>(child);
+                        if (!world.has<PrefabInstance>(child)) under.push_back(child);       // a prefab inside stays a copy
+                    }
+                }
+                scene.markChanged();
+            }
             ImGui::Separator();
             if (ImGui::MenuItem("Delete", "Del")) scene.deleteSelection();
             ImGui::EndPopup();
@@ -444,8 +457,10 @@ private:
             ImGui::Dummy(ImVec2(0, 0));
         } else {
             drawList->PushClipRect(ImVec2(textX, min.y), ImVec2(right, max.y), true);
-            drawList->AddText(ImVec2(textX, middle - ImGui::GetFontSize() * 0.5f), isHidden ? IM_COL32(120, 128, 142, 255) : IM_COL32(223, 227, 234, 255),
-                              name.empty() ? "(no name)" : name.c_str());
+            // A prefab's copy in blue, as Unity has it; what it holds (from the prefab, not saved here) greyer.
+            const bool isCopy = world.has<PrefabInstance>(entity), isFromPrefab = world.has<FromPrefab>(entity);
+            ImU32 ink = isHidden ? IM_COL32(120, 128, 142, 255) : isCopy ? IM_COL32(120, 175, 255, 255) : isFromPrefab ? IM_COL32(150, 175, 215, 255) : IM_COL32(223, 227, 234, 255);
+            drawList->AddText(ImVec2(textX, middle - ImGui::GetFontSize() * 0.5f), ink, name.empty() ? "(no name)" : name.c_str());
             drawList->PopClipRect();
         }
 
@@ -486,6 +501,21 @@ void registerHierarchyPanel(EditorContext& editor) {
     editor.registry.addPanel(nullptr, std::make_unique<HierarchyPanel>());
 }
 
+Entity createFromEntry(EditorContext& editor, const CreateEntry& entry, Entity parent) {
+    Entity created = entry.create(editor);
+    if (!editor.engine.scene.isAlive(created)) return created;
+    if (editor.engine.scene.isAlive(parent)) {
+        editor.engine.scene.updateTransforms();
+        editor.scene.reparent(created, parent);
+        // Under a parent, a new entity starts where the parent is.
+        if (Transform* transform = editor.engine.scene.get<Transform>(created)) transform->position = Vec3{0, 0, 0};
+    }
+    editor.scene.select(created);
+    editor.selectedAsset.clear();
+    editor.scene.markChanged();
+    return created;
+}
+
 void drawCreateMenu(EditorContext& editor, Entity parent) {
     // "Light/Point Light" becomes the item "Point Light" in the submenu "Light". Entries
     // are grouped in the order their groups first appear.
@@ -503,26 +533,61 @@ void drawCreateMenu(EditorContext& editor, Entity parent) {
             std::string itemGroup = slash == std::string::npos ? std::string() : item.value.path.substr(0, slash);
             if (itemGroup != group) continue;
             std::string label = slash == std::string::npos ? item.value.path : item.value.path.substr(slash + 1);
-            if (ImGui::MenuItem(label.c_str())) {
-                Entity created = item.value.create(editor);
-                if (editor.engine.scene.isAlive(created)) {
-                    if (editor.engine.scene.isAlive(parent)) {
-                        editor.engine.scene.updateTransforms();
-                        editor.scene.reparent(created, parent);
-                        // Under a parent, a new entity starts where the parent is.
-                        if (Transform* transform = editor.engine.scene.get<Transform>(created)) transform->position = Vec3{0, 0, 0};
-                    }
-                    editor.scene.select(created);
-                    editor.selectedAsset.clear();
-                    editor.scene.markChanged();
-                }
-            }
+            if (ImGui::MenuItem(label.c_str())) createFromEntry(editor, item.value, parent);
         }
         if (!group.empty()) ImGui::EndMenu();
     }
 }
 
+/// A point more on the Spline that is chosen (after its last point), or after the point that is
+/// chosen, halfway to the next. Its points are numbered again, in order.
+void addSplinePoint(EditorContext& editor) {
+    Scene& scene = editor.engine.scene;
+    if (editor.scene.selection().empty()) return;
+    Entity chosen = editor.scene.selection().front(), line = chosen, after{};
+    if (!scene.has<kit::Spline>(chosen)) {
+        const Transform* transform = scene.get<Transform>(chosen);
+        line = transform ? transform->parent : Entity{};
+        after = chosen;
+    }
+    kit::Spline* spline = scene.get<kit::Spline>(line);
+    if (!spline) {
+        editor.notify("Choose a Spline, or one of its points, to add a point to it", ConsoleMessage::Level::Warning);
+        return;
+    }
+    std::vector<Entity> points = kit::Spline::pointsOf(editor.engine, line);
+    size_t place = points.size();                       // where the new one goes
+    for (size_t i = 0; i < points.size(); i++) {
+        if (points[i] == after) place = i + 1;
+    }
+    auto where = [&](size_t i) { return scene.get<Transform>(points[i])->position; };
+    Vec3 position{0, 0, 0};
+    if (points.empty()) {
+        position = Vec3{0, 0, 0};
+    } else if (place < points.size()) {
+        position = (where(place - 1) + where(place)) * 0.5f;
+    } else if (points.size() == 1) {
+        position = where(0) + Vec3{4, 0, 0};
+    } else {
+        position = where(points.size() - 1) * 2.0f - where(points.size() - 2);     // on, the way it was going
+    }
+    Entity added = scene.create("Point");
+    Transform transform;
+    transform.position = position;
+    transform.parent = line;
+    scene.add(added, transform);
+    points.insert(points.begin() + long(place), added);
+    for (size_t i = 0; i < points.size(); i++) {
+        if (Name* name = scene.get<Name>(points[i])) name->value = "Point " + std::to_string(i + 1);
+    }
+    scene.updateTransforms();
+    editor.scene.select(added);
+    editor.scene.markChanged();
+}
+
 void registerCreateEntries(EditorContext& editor) {
+    editor.registry.addMenuItem(nullptr, "Edit/Add Spline Point", [](EditorContext& context) { addSplinePoint(context); }, "",
+                                [](EditorContext& context) { return !context.scene.selection().empty() && !context.scene.isPlaying(); });
     auto add = [&editor](const char* path, Primitive kind) {
         editor.registry.addCreateEntry(nullptr, path, [kind](EditorContext& context) { return context.scene.create(kind); });
     };
@@ -578,6 +643,36 @@ void registerCreateEntries(EditorContext& editor) {
         ImGui::SetWindowFocus("Game");
         return entity;
     });
+    // Curves: an entity with a Spline and its points as children, "Point 1" to "Point 4".
+    auto addPath = [&editor](const char* path, const char* name, bool isRoad) {
+        editor.registry.addCreateEntry(nullptr, path, [name, isRoad](EditorContext& context) {
+            Entity line = context.scene.create(Primitive::Empty);
+            Scene& scene = context.engine.scene;
+            if (!scene.isAlive(line)) return line;
+            if (Name* named = scene.get<Name>(line)) named->value = name;
+            kit::Spline spline;
+            spline.closed = isRoad;
+            scene.add(line, spline);
+            const Vec3 corners[4] = {{-6, 0, -6}, {6, 0, -6}, {6, 0, 6}, {-6, 0, 6}};
+            for (int k = 0; k < 4; k++) {
+                Entity point = scene.create("Point " + std::to_string(k + 1));
+                Transform transform;
+                transform.position = isRoad ? corners[k] * 2.5f : Vec3{float(k) * 4 - 6, 0, k % 2 == 0 ? 0.0f : -3.0f};
+                transform.parent = line;
+                scene.add(point, transform);
+            }
+            if (isRoad) {
+                scene.add(line, kit::SplineRoad{});
+                scene.add(line, MeshRenderer{});
+            }
+            scene.updateTransforms();
+            context.scene.select(line);
+            context.scene.markChanged();
+            return line;
+        });
+    };
+    addPath("Paths/Spline", "Spline", false);
+    addPath("Paths/Road", "Road", true);
     add("Effects/Particle Emitter", Primitive::ParticleEmitter);
     for (int i = 0; i < int(effects::Preset::Count); i++) {
         effects::Preset preset = effects::Preset(i);

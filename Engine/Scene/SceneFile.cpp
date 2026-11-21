@@ -243,6 +243,8 @@ std::string writeScene(Scene& scene, const std::vector<NamedMaterial>& materials
             .number(settings.ambientOcclusionIntensity).to(out);
         Line("bloom").flag(settings.bloomEnabled).number(settings.bloomIntensity).number(settings.bloomThreshold).to(out);
         Line("exposure").number(settings.exposure).to(out);
+        Line("resolution").number(settings.renderScale).flag(settings.metalFXUpscaling).flag(settings.dynamicResolution)
+            .number(settings.targetFrameRate).number(settings.lowestDynamicScale).to(out);
         Line("toneMapper").integer(settings.toneMapper).to(out);
         Line("vignette").number(settings.vignette).to(out);
         Line("clouds").number(settings.sky.cloudCoverage).number(settings.sky.cloudScale).to(out);
@@ -252,7 +254,7 @@ std::string writeScene(Scene& scene, const std::vector<NamedMaterial>& materials
 
     // ---- materials: the named ones, then any other that an entity uses
     auto isWritten = [&](Entity entity) {
-        if (scene.has<EditorOnly>(entity)) return false;
+        if (scene.has<EditorOnly>(entity) || scene.has<FromPrefab>(entity)) return false;
         return !only || std::find(only->begin(), only->end(), entity) != only->end();
     };
     std::vector<NamedMaterial> all;
@@ -301,6 +303,7 @@ std::string writeScene(Scene& scene, const std::vector<NamedMaterial>& materials
         Line("transform").vec(t.position).vec(t.rotation.vector).vec(t.scale).to(out);
         if (scene.isAlive(t.parent) && fileIndex.count(t.parent.index)) Line("parent").integer(fileIndex[t.parent.index]).to(out);
         if (!t.isActive) Line("inactive").to(out);
+        if (const PrefabInstance* instance = scene.get<PrefabInstance>(entity)) Line("prefab").string(instance->prefab).to(out);
         if (const Tag* tag = scene.get<Tag>(entity); tag && (tag->value != "Untagged" || tag->layer != 0)) {
             Line("tag").string(tag->value).integer(tag->layer).to(out);
         }
@@ -366,8 +369,45 @@ std::string writeScene(Scene& scene, const std::vector<NamedMaterial>& materials
     return out;
 }
 
+namespace {
+
+/// How deep prefabs inside prefabs (and variants of variants) go: a prefab that holds itself stops here.
+thread_local int gPrefabDepth = 0;
+
+/// An entity under `root` by the path of names below it ("Body/Hat"); "" is the root itself.
+Entity entityAtPath(Scene& scene, Entity root, const std::string& path) {
+    Entity at = root;
+    size_t start = 0;
+    while (start < path.size() && at.isValid()) {
+        size_t slash = path.find('/', start);
+        std::string part = path.substr(start, slash == std::string::npos ? std::string::npos : slash - start);
+        Entity found;
+        scene.each<Transform>([&](Entity child, Transform& place) {
+            if (!found.isValid() && place.parent == at) {
+                const Name* name = scene.get<Name>(child);
+                if (name && name->value == part) found = child;
+            }
+        });
+        at = found;
+        start = slash == std::string::npos ? path.size() : slash + 1;
+    }
+    return at;
+}
+
+bool readVariant(const std::string& text, Scene& scene, std::vector<NamedMaterial>& materials, RenderSettings& settings, const SceneAssets& assets,
+                 std::vector<Entity>* created);
+
+}  // namespace
+
+bool isPrefabVariant(const std::string& text) {
+    std::istringstream stream(text);
+    std::string line;
+    return std::getline(stream, line) && Words(line).keyword() == "molten-variant";
+}
+
 bool readScene(const std::string& text, Scene& scene, std::vector<NamedMaterial>& materials, RenderSettings& settings,
                const SceneAssets& assets, std::vector<Entity>* created) {
+    if (isPrefabVariant(text)) return readVariant(text, scene, materials, settings, assets, created);
     std::istringstream stream(text);
     std::string line;
     // "learnmetal-scene" is what the engine wrote before it had this name: still read.
@@ -449,6 +489,13 @@ bool readScene(const std::string& text, Scene& scene, std::vector<NamedMaterial>
                 settings.bloomIntensity = words.number(0.06f);
                 settings.bloomThreshold = words.number(1);
             } else if (key == "exposure") settings.exposure = words.number(1);
+            else if (key == "resolution") {
+                settings.renderScale = words.number(1);
+                settings.metalFXUpscaling = words.flag(true);
+                settings.dynamicResolution = words.flag(false);
+                settings.targetFrameRate = words.number(60);
+                settings.lowestDynamicScale = words.number(0.6f);
+            }
             else if (key == "toneMapper") settings.toneMapper = int(words.integer());
             else if (key == "vignette") settings.vignette = words.number();
             else if (key == "volumetrics") {
@@ -509,6 +556,8 @@ bool readScene(const std::string& text, Scene& scene, std::vector<NamedMaterial>
                 scene.add(entity, disabled);
             } else if (key == "parent") {
                 parents.push_back({entity, words.integer(-1)});
+            } else if (key == "prefab") {
+                scene.add(entity, PrefabInstance{words.string()});
             } else if (key == "camera") {
                 Camera c;
                 c.fovY = words.number(c.fovY);
@@ -619,9 +668,125 @@ bool readScene(const std::string& text, Scene& scene, std::vector<NamedMaterial>
             scene.get<Transform>(child)->parent = entities[size_t(index)];
         }
     }
-    if (created) *created = entities;
+    // Copies of prefabs: what each prefab holds, put under its entity, marked as the prefab's.
+    std::vector<Entity> nested;
+    for (Entity instance : entities) {
+        const PrefabInstance* reference = scene.get<PrefabInstance>(instance);
+        if (!reference) continue;
+        std::string path = reference->prefab;
+        std::optional<std::string> prefab = assets.prefabText ? assets.prefabText(path) : std::nullopt;
+        if (!prefab) {
+            logError("the prefab %s is not there: its copy is left empty", path.c_str());
+            continue;
+        }
+        if (gPrefabDepth >= 8) {
+            logError("prefabs inside prefabs too deep (does %s hold itself?)", path.c_str());
+            continue;
+        }
+        gPrefabDepth++;
+        std::vector<NamedMaterial> itsMaterials;            // kept alive by the meshes that use them
+        RenderSettings ignored;
+        std::vector<Entity> inside;
+        bool read = readScene(*prefab, scene, itsMaterials, ignored, assets, &inside);
+        gPrefabDepth--;
+        if (!read) continue;
+        for (Entity part : inside) {
+            scene.add(part, FromPrefab{});
+            Transform* place = scene.get<Transform>(part);
+            // Its root (or roots) under the copy, where the copy is.
+            if (place && !scene.isAlive(place->parent)) {
+                place->parent = instance;
+                place->position = Vec3{0, 0, 0};
+            }
+            nested.push_back(part);
+        }
+    }
+    if (created) {
+        *created = entities;
+        created->insert(created->end(), nested.begin(), nested.end());
+    }
     return true;
 }
+
+namespace {
+
+bool readVariant(const std::string& text, Scene& scene, std::vector<NamedMaterial>& materials, RenderSettings& settings, const SceneAssets& assets,
+                 std::vector<Entity>* created) {
+    std::istringstream stream(text);
+    std::string line;
+    std::getline(stream, line);
+    std::string base, name;
+    std::vector<std::vector<std::string>> sets;
+    while (std::getline(stream, line)) {
+        Words words(line);
+        const std::string& key = words.keyword();
+        if (key == "base") base = words.string();
+        else if (key == "name") name = words.string();
+        else if (key == "set") {
+            std::vector<std::string> parts;
+            for (int i = 0; i < 4; i++) parts.push_back(words.string());
+            sets.push_back(parts);
+        }
+    }
+    std::optional<std::string> baseText = assets.prefabText && !base.empty() ? assets.prefabText(base) : std::nullopt;
+    if (!baseText) {
+        logError("a prefab variant's base %s is not there", base.c_str());
+        return false;
+    }
+    if (gPrefabDepth >= 8) {
+        logError("prefab variants too deep (is %s its own base?)", base.c_str());
+        return false;
+    }
+    gPrefabDepth++;
+    std::vector<Entity> made;
+    bool read = readScene(*baseText, scene, materials, settings, assets, &made);
+    gPrefabDepth--;
+    if (!read || made.empty()) return false;
+    Entity root = made.front();
+    for (Entity entity : made) {
+        const Transform* place = scene.get<Transform>(entity);
+        if (place && !scene.isAlive(place->parent)) {
+            root = entity;
+            break;
+        }
+    }
+    if (!name.empty()) {
+        if (Name* named = scene.get<Name>(root)) named->value = name;
+    }
+    for (const std::vector<std::string>& set : sets) {
+        const std::string &path = set[0], &component = set[1], &field = set[2], &value = set[3];
+        Entity target = entityAtPath(scene, root, path);
+        if (!target.isValid()) {
+            logError("prefab variant: the base has no \"%s\"", path.c_str());
+            continue;
+        }
+        if (component == "Transform") {
+            Transform* place = scene.get<Transform>(target);
+            Words numbers("value " + value);         // the first word of a line is its key
+            if (!place) continue;
+            if (field == "position") place->position = numbers.vec3(place->position);
+            else if (field == "scale") place->scale = numbers.vec3(place->scale);
+            else if (field == "rotation") {
+                Vec3 degrees = numbers.vec3();
+                place->rotation = simd::normalize(axisAngle(Vec3{0, 1, 0}, radians(degrees.y)) * axisAngle(Vec3{1, 0, 0}, radians(degrees.x)) *
+                                                  axisAngle(Vec3{0, 0, 1}, radians(degrees.z)));
+            }
+        } else if (component == "MeshRenderer" && field == "material") {
+            if (MeshRenderer* renderer = scene.get<MeshRenderer>(target); renderer && assets.material) {
+                if (std::shared_ptr<Material> material = assets.material(value)) renderer->material = material;
+            }
+        } else if (const ComponentType* type = ComponentRegistry::instance().find(component)) {
+            const Field* declared = type->findField(field);
+            void* instance = type->get ? type->get(scene, target) : nullptr;
+            if (declared && instance) declared->setValueText(instance, value);
+            else logError("prefab variant: \"%s\" has no %s with a field %s", path.c_str(), component.c_str(), field.c_str());
+        }
+    }
+    if (created) *created = made;
+    return true;
+}
+
+}  // namespace
 
 bool saveSceneFile(const std::string& path, Scene& scene, const std::vector<NamedMaterial>& materials, const RenderSettings& settings) {
     std::ofstream file(path, std::ios::binary);

@@ -59,6 +59,7 @@ struct GizmoSettings {
     bool showCameras = true;            // their icon, and what they see
     bool showEffects = true;            // particle emitters' icon
     bool showSounds = true;             // Audio Sources' icon
+    bool showSplines = true;            // the line of each Spline, and its points
     bool showSelection = true;          // the box around what is selected, and its colliders
     bool showPluginOverlays = true;     // what plugins draw in the view
     float flySpeed = 6.0f;              // of the camera, world units per second

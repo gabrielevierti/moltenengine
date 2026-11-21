@@ -16,13 +16,15 @@
 // The preferences it applies itself: "quality" (0 low, 1 medium, 2 high: the lighting, the
 // shadows and how sharp the picture is), "volume" (0 off, 1 half, 2 full), "controls"
 // (the size of the touch buttons: 0 small, 1 medium, 2 large). The others ("weather",
-// "abs", "startCompound", "mode", "laps") are read by the scripts they belong to.
+// "abs", "startCompound", "mode", "laps") are read by the scripts they belong to. "language" is
+// 0 for the texts as written and then the game's tables (Localization/it.txt...) in order.
 #include "MoltenMetal.hpp"
 
 #include <algorithm>
 #include <cstdlib>
 #include <map>
 #include <string>
+#include <vector>
 
 using namespace molten;
 
@@ -34,6 +36,7 @@ struct GameMenu {
     Screen settingsFrom = Screen::Title;
     std::map<std::string, float> touchRadius;   // each touch button as it was made
     int appliedQuality = -1;
+    float languageNow = 0;              // the language shown, as the setting numbers it
     float appliedControls = -1;
     // Starting over from the pause skips the title: the scene comes back without it.
     static inline bool skipsTitleOnce = false;
@@ -65,6 +68,9 @@ struct GameMenu {
         // Low: shadow maps alone, a softer picture; Medium: traced sun shadows; High: traced light.
         applyLightingQuality(settings, quality <= 0 ? LightingQuality::Low : quality == 1 ? LightingQuality::Medium : LightingQuality::High);
         settings.renderScale = quality <= 0 ? 0.7f : quality == 1 ? 0.85f : 1.0f;
+        // And smaller still, for a moment, when the GPU falls behind 60 frames a second (a phone, a hot one).
+        settings.dynamicResolution = true;
+        settings.targetFrameRate = 60.0f;
         settings.ambientOcclusionEnabled = quality >= 1;
         settings.bloomEnabled = quality >= 1;
         appliedQuality = quality;
@@ -90,6 +96,16 @@ struct GameMenu {
                 if (auto made = touchRadius.find(name.value); made != touchRadius.end()) button.radius = made->second * scale;
             });
             appliedControls = controls;
+        }
+        // The language: 0 the texts as written, then each table the game has (Localization/), in order.
+        std::vector<std::string> spoken = world.languages();
+        if (world.hasPreference("language")) {
+            int chosen = int(world.preference("language"));
+            world.language = chosen <= 0 || size_t(chosen) > spoken.size() ? std::string() : spoken[size_t(chosen - 1)];
+        }
+        languageNow = 0;
+        for (size_t k = 0; k < spoken.size(); k++) {
+            if (spoken[k] == world.language) languageNow = float(k + 1);
         }
         float volume = std::clamp(world.preference("volume", 2), 0.0f, 2.0f) * 0.5f;
         world.soundVolume = screen == Screen::Race ? volume : volume * 0.25f;
@@ -138,7 +154,7 @@ struct GameMenu {
             std::string key = name.value.substr(7, space - 7);
             float value = std::strtof(name.value.c_str() + space + 1, nullptr);
             if (button.wasClicked) world.setPreference(key, value);
-            bool chosen = std::abs(world.preference(key, defaultOf(key)) - value) < 0.01f;
+            bool chosen = std::abs(world.preference(key, key == "language" ? languageNow : defaultOf(key)) - value) < 0.01f;
             button.color.w = chosen ? 0.95f : 0.3f;
             button.textColor.w = chosen ? 1.0f : 0.75f;
         });

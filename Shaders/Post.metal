@@ -156,6 +156,13 @@ static float interleavedGradientNoise(float2 pixel) {
 
 // For every pixel, test a handful of points in the hemisphere above the surface and
 // count how many are behind what the depth buffer shows. Works in view space.
+// A picture already tone mapped (and made larger by MetalFX), put on the screen as it is.
+fragment float4 fragment_copy(FullscreenOut in [[stage_in]],
+                              texture2d<float> picture [[texture(0)]],
+                              sampler linearSampler [[sampler(MMSamplerLinearClamp)]]) {
+    return float4(picture.sample(linearSampler, in.uv).rgb, 1.0);
+}
+
 fragment float4 fragment_ssao(FullscreenOut in [[stage_in]],
                               constant AmbientOcclusionUniforms &ao [[buffer(MMBufferPass)]],
                               depth2d<float> depthTexture [[texture(0)]],

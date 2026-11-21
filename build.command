@@ -18,7 +18,7 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
     cmake -B build -DCMAKE_BUILD_TYPE=Release || { echo "!! configure failed"; exit 1; }
 
     # One target at a time, engine first: when something fails, the log says which part.
-    for target in moltenengine moltenimgui molten-player molten SceneTools; do
+    for target in molten-shaders moltenengine moltenimgui molten-player molten SceneTools; do
         echo "== build $target"
         if cmake --build build -j --target $target; then
             echo "== ok $target"

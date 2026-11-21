@@ -1,4 +1,7 @@
 #include "Kit/Kit.hpp"
+#include "Kit/Character.hpp"
+#include "Kit/Navigation.hpp"
+#include "Kit/Spline.hpp"
 
 #include "Kit/Vehicles.hpp"
 #include "Animation/Animator.hpp"
@@ -264,7 +267,9 @@ void Spawner::update(World& world, Entity self, float dt) {
 
 // ---------------------------------------------------------------- HudText, Goal, RestartWhenBelow
 
-std::string HudText::filled(const World& world, const std::string& text) {
+std::string HudText::filled(const World& world, const std::string& written) {
+    // In the game's language first, as a whole: "BEST LAP   {bestLap:time}" is one line of a table.
+    const std::string text = world.translate(written);
     std::string out;
     size_t i = 0;
     while (i < text.size()) {
@@ -297,7 +302,7 @@ std::string HudText::filled(const World& world, const std::string& text) {
                 if (k == which || bar == std::string::npos) break;
                 from = bar + 1;
             }
-            out += word;
+            out += world.translate(word);            // "{weather:SUN|RAIN}": each word in the game's language
             i = close + 1;
             continue;
         }
@@ -461,6 +466,9 @@ void AudioSource::update(World& world, Entity, float) {
 
 void registerKit() {
     (void)engineTorque("i4", 1000);
+    linkCharacters();
+    linkNavigation();
+    linkSplines();
     (void)script::typeNameFor("kit");
     (void)&sharedGltfModel;                 // and the Animator       // and what scripts made from visual scripts are written with         // names something in Vehicles.cpp, so that a program that links the kit gets the vehicles too
     // Where each is found under Add Component.
@@ -470,8 +478,20 @@ void registerKit() {
         registry.setCategory(name, "Gameplay");
     }
     registry.setCategory("Buoyancy", "Physics");
+    for (const char* name : {"CharacterController", "CharacterMover", "OrbitCamera"}) registry.setCategory(name, "Characters");
+    ComponentRegistry::setDisplayName("CharacterController", "Character Controller");
+    ComponentRegistry::setDisplayName("CharacterMover", "Character Mover");
+    ComponentRegistry::setDisplayName("OrbitCamera", "Orbit Camera");
+    for (const char* name : {"NavigationArea", "NavAgent", "Guard"}) registry.setCategory(name, "Navigation");
+    ComponentRegistry::setDisplayName("NavigationArea", "Navigation Area");
+    ComponentRegistry::setDisplayName("NavAgent", "Nav Agent");
+    for (const char* name : {"Spline", "SplineFollower", "SplineRoad"}) registry.setCategory(name, "Paths");
+    ComponentRegistry::setDisplayName("SplineFollower", "Spline Follower");
+    ComponentRegistry::setDisplayName("SplineRoad", "Spline Road");
     registry.setCategory("Joint", "Physics");
     registry.setCategory("Animator", "Animation");
+    registry.setCategory("TwoBoneIK", "Animation");
+    ComponentRegistry::setDisplayName("TwoBoneIK", "Two Bone IK");
     registry.setCategory("Water", "Environment");
     registry.setCategory("Liquid", "Effects");
     (void)sizeof(Liquid);
@@ -679,8 +699,9 @@ void UIButton::draw(World& world, Entity, Canvas& canvas) {
         canvas.circle(middle, radius, color * Vec4{1, 1, 1, isHeld ? 0.9f : 0.3f});
         canvas.ring(middle, radius, 2.0f, color);
         if (!label.empty()) {
-            float height = radius * 0.7f * std::min(1.0f, 3.2f / float(std::max<size_t>(label.size(), 1)));
-            canvas.text(label, Vec2{middle.x, middle.y - height * 0.6f}, height, Vec4{color.x, color.y, color.z, 0.95f}, TextAlign::Center);
+            std::string shown = world.translate(label);
+            float height = radius * 0.7f * std::min(1.0f, 3.2f / float(std::max<size_t>(shown.size(), 1)));
+            canvas.text(shown, Vec2{middle.x, middle.y - height * 0.6f}, height, Vec4{color.x, color.y, color.z, 0.95f}, TextAlign::Center);
         }
         return;
     }
@@ -689,7 +710,7 @@ void UIButton::draw(World& world, Entity, Canvas& canvas) {
     canvas.rect(corner, size, color * shade);
     if (!label.empty()) {
         float height = std::min(size.y * 0.5f, 28.0f);
-        canvas.text(label, Vec2{corner.x + size.x * 0.5f, corner.y + (size.y - height * 1.2f) * 0.5f}, height, textColor, TextAlign::Center);
+        canvas.text(world.translate(label), Vec2{corner.x + size.x * 0.5f, corner.y + (size.y - height * 1.2f) * 0.5f}, height, textColor, TextAlign::Center);
     }
 }
 

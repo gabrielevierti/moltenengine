@@ -64,11 +64,44 @@ std::string DeviceExport::script(const Project& project, const std::string& engi
     s += "if ! command -v cmake >/dev/null; then echo 'error: CMake was not found. Install it (brew install cmake) and try again.'; exit 1; fi\n";
     s += "if ! xcode-select -p >/dev/null 2>&1 || ! command -v xcodebuild >/dev/null; then echo 'error: Xcode was not found. Install it from the App Store and open it once.'; exit 1; fi\n";
     s += "echo '== Making the Xcode project'\n";
+    // The build's number grows by itself (the date and time): App Store Connect takes each number once.
+    s += "BUILD_NUMBER=$(date +%Y%m%d%H%M)\n";
     s += "cmake -S " + shellQuoted(engineRoot) + " -B \"$BUILD\" -G Xcode -DCMAKE_SYSTEM_NAME=iOS -DMOLTEN_IOS_PROJECT=" + shellQuoted(project.directory) +
-         " -DMOLTEN_IOS_BUNDLE_ID=" + shellQuoted(identifier) + " -DMOLTEN_IOS_NAME=" + shellQuoted(name) + " -DMOLTEN_IOS_TEAM=" + shellQuoted(team) + " -DMOLTEN_IOS_ICON=" + shellQuoted(phoneIconFor(project.iconFile(engineRoot), build)) + " || exit 1\n";
+         " -DMOLTEN_IOS_BUNDLE_ID=" + shellQuoted(identifier) + " -DMOLTEN_IOS_NAME=" + shellQuoted(name) + " -DMOLTEN_IOS_TEAM=" + shellQuoted(team) +
+         " -DMOLTEN_IOS_VERSION=" + shellQuoted(project.version.empty() ? std::string("1.0") : project.version) + " -DMOLTEN_IOS_BUILD_NUMBER=\"$BUILD_NUMBER\"" +
+         " -DMOLTEN_IOS_ICON=" + shellQuoted(phoneIconFor(project.iconFile(engineRoot), build)) + " || exit 1\n";
     if (goal == Goal::OpenInXcode) {
         s += "echo '== Opening it in Xcode: choose the MoltenPlayer scheme and your device, and press Run'\n";
         s += "open \"$BUILD/MoltenMetalEngine.xcodeproj\" || exit 1\n";
+        return s;
+    }
+    if (goal == Goal::AppStore) {
+        // An archive made for release, then exported for App Store Connect and sent there with
+        // the Apple account Xcode is signed in to. The app must exist in App Store Connect first,
+        // with this bundle identifier.
+        s += "echo '== Archiving the application for release (the first time takes a few minutes)'\n";
+        s += "xcodebuild -project \"$BUILD/MoltenMetalEngine.xcodeproj\" -scheme MoltenPlayer -configuration Release -destination 'generic/platform=iOS' "
+             "-archivePath \"$BUILD/Release.xcarchive\" -allowProvisioningUpdates archive 2>&1 | grep -E --line-buffered 'error|warning: |ARCHIVE|Signing|Provisioning' ; "
+             "ARCHIVED=${pipestatus[1]:-${PIPESTATUS[0]}}\n";
+        s += "if [ \"$ARCHIVED\" != 0 ]; then echo 'error: Xcode could not archive the application. Open in Xcode shows why.'; exit 1; fi\n";
+        s += "cat > \"$BUILD/ExportOptions.plist\" <<'PLIST'\n"
+             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+             "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+             "<plist version=\"1.0\"><dict>\n"
+             "  <key>method</key><string>app-store-connect</string>\n"
+             "  <key>destination</key><string>upload</string>\n"
+             "  <key>signingStyle</key><string>automatic</string>\n"
+             "  <key>teamID</key><string>" + team + "</string>\n"
+             "  <key>uploadSymbols</key><true/>\n"
+             "</dict></plist>\n"
+             "PLIST\n";
+        s += "echo '== Sending it to App Store Connect (version " + project.version + ", build '\"$BUILD_NUMBER\"')'\n";
+        s += "xcodebuild -exportArchive -archivePath \"$BUILD/Release.xcarchive\" -exportPath \"$BUILD/AppStore\" -exportOptionsPlist \"$BUILD/ExportOptions.plist\" "
+             "-allowProvisioningUpdates 2>&1 | grep -E --line-buffered 'error|warning: |EXPORT|Upload|upload' ; SENT=${pipestatus[1]:-${PIPESTATUS[0]}}\n";
+        s += "if [ \"$SENT\" != 0 ]; then echo 'error: it was not sent. The app must exist in App Store Connect with the identifier " + identifier +
+             ", and Xcode must be signed in to your account (Xcode > Settings > Accounts).'; exit 1; fi\n";
+        s += "echo '== Sent: in a few minutes it is in App Store Connect, under TestFlight'\n";
+        s += "echo '== Done'\n";
         return s;
     }
     s += "echo '== Building the application (the first time takes a few minutes)'\n";
@@ -105,9 +138,36 @@ DeviceExport::~DeviceExport() {
 }
 
 bool DeviceExport::start(const Project& project, const std::string& engineRoot, const std::string& team, Goal goal) {
+    return startScript(script(project, engineRoot, team, goal));
+}
+
+std::string DeviceExport::notarizeScript(const std::string& application, const std::string& profile) {
+    std::string s;
+    s += "APP=" + shellQuoted(application) + "\n";
+    s += "IDENTITY=$(security find-identity -v -p codesigning | grep 'Developer ID Application' | head -1 | sed -E 's/.*\"(.*)\".*/\\1/')\n";
+    s += "if [ -z \"$IDENTITY\" ]; then echo 'error: there is no Developer ID Application certificate on this Mac. "
+         "Make one in Xcode > Settings > Accounts > Manage Certificates (a paid developer account is needed).'; exit 1; fi\n";
+    s += "echo \"== Signing with $IDENTITY\"\n";
+    // The game's code first: the player loads it, and with the hardened runtime it must carry the same team's signature.
+    s += "if [ -f \"$APP/Contents/Resources/Game.dylib\" ]; then codesign --force --options runtime --timestamp --sign \"$IDENTITY\" \"$APP/Contents/Resources/Game.dylib\" || exit 1; fi\n";
+    s += "codesign --force --options runtime --timestamp --sign \"$IDENTITY\" \"$APP\" || exit 1\n";
+    s += "ZIP=\"${APP%.app}.zip\"\n";
+    s += "ditto -c -k --keepParent \"$APP\" \"$ZIP\" || exit 1\n";
+    s += "echo '== Sending it to Apple to be notarized (usually a few minutes)'\n";
+    s += "OUT=$(xcrun notarytool submit \"$ZIP\" --keychain-profile " + shellQuoted(profile) + " --wait 2>&1); echo \"$OUT\"\n";
+    s += "rm -f \"$ZIP\"\n";
+    s += "if ! echo \"$OUT\" | grep -q 'status: Accepted'; then echo 'error: it was not notarized. The first time, keep your credentials once in Terminal: "
+         "xcrun notarytool store-credentials " + profile + " --apple-id <your Apple ID> --team-id <your team> (with an app-specific password from account.apple.com). "
+         "If it was sent and refused, xcrun notarytool log <the id above> --keychain-profile " + profile + " says why.'; exit 1; fi\n";
+    s += "echo '== Stapling the ticket to it, so it opens without asking Apple'\n";
+    s += "xcrun stapler staple \"$APP\" || exit 1\n";
+    s += "echo '== Done: it opens on any Mac'\n";
+    return s;
+}
+
+bool DeviceExport::startScript(const std::string& text) {
     if (isRunning_) return false;
     if (worker_.joinable()) worker_.join();
-    std::string text = script(project, engineRoot, team, goal);
     isRunning_ = true;
     hasEnded_ = false;
     succeeded_ = false;

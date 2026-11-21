@@ -4,6 +4,7 @@
 #include "Rendering/Particles.hpp"
 #include "Kit/Kit.hpp"
 #include "Kit/Vehicles.hpp"
+#include "Kit/Spline.hpp"
 #include "Audio/Audio.hpp"
 #include "Panels/Widgets.hpp"
 
@@ -304,6 +305,31 @@ void drawShapes(EditorContext& editor) {
         }
         emitter.isSimulated = isShown;
     });
+    // Curves: the line they make, a dot at each of their points; the road along one, made
+    // again as soon as a point is moved, so that it is seen while it is laid out.
+    scene.each<kit::Spline, Transform>([&](Entity entity, kit::Spline& spline, Transform&) {
+        spline.refresh(editor.engine, entity);
+        if (kit::SplineRoad* road = scene.get<kit::SplineRoad>(entity); road && !isPlaying && road->builtFrom != spline.signature) {
+            road->rebuild(editor.engine, entity);
+        }
+        if (!editor.gizmo.showSplines) return;
+        bool isChosen = editor.scene.isSelected(entity);
+        for (Entity point : kit::Spline::pointsOf(editor.engine, entity)) isChosen = isChosen || editor.scene.isSelected(point);
+        Vec4 color = isChosen ? Vec4{1.0f, 0.48f, 0.18f, 1} : Vec4{0.45f, 0.85f, 1.0f, 0.75f};
+        const std::vector<Vec3>& points = spline.path.points;
+        for (size_t i = 1; i < points.size(); i++) lines.line(points[i - 1], points[i], color);
+        for (Entity point : kit::Spline::pointsOf(editor.engine, entity)) {
+            if (const Transform* at = scene.get<Transform>(point)) lines.sphere(at->worldPosition(), isChosen ? 0.25f : 0.15f, color, 12);
+        }
+        // Which way it goes: an arrow a little way from the start.
+        if (spline.path.length() > 1) {
+            float along = std::min(2.0f, spline.path.length() * 0.25f);
+            Vec3 tip = spline.path.pointAt(along), forward = spline.path.directionAt(along);
+            Vec3 side = simd::normalize(simd::cross(forward, Vec3{0, 1, 0}) + Vec3{1e-6f, 0, 0}) * 0.4f;
+            lines.line(tip, tip - forward * 0.7f + side, color);
+            lines.line(tip, tip - forward * 0.7f - side, color);
+        }
+    });
     for (Entity entity : editor.scene.entities()) {
         const Transform* transform = scene.get<Transform>(entity);
         if (!transform) continue;
@@ -432,13 +458,14 @@ void drawToolbar(EditorContext& editor) {
         ImGui::Checkbox("Cameras", &gizmo.showCameras);
         ImGui::Checkbox("Particle effects", &gizmo.showEffects);
         ImGui::Checkbox("Sounds", &gizmo.showSounds);
+        ImGui::Checkbox("Splines", &gizmo.showSplines);
         if (!editor.registry.viewportOverlays.empty()) ImGui::Checkbox("From plugins", &gizmo.showPluginOverlays);
         if (ImGui::SmallButton("All")) {
-            gizmo.showGrid = gizmo.showSelection = gizmo.showLights = gizmo.showCameras = gizmo.showEffects = gizmo.showSounds = gizmo.showPluginOverlays = true;
+            gizmo.showGrid = gizmo.showSelection = gizmo.showLights = gizmo.showCameras = gizmo.showEffects = gizmo.showSounds = gizmo.showSplines = gizmo.showPluginOverlays = true;
         }
         ImGui::SameLine();
         if (ImGui::SmallButton("None")) {
-            gizmo.showGrid = gizmo.showSelection = gizmo.showLights = gizmo.showCameras = gizmo.showEffects = gizmo.showSounds = gizmo.showPluginOverlays = false;
+            gizmo.showGrid = gizmo.showSelection = gizmo.showLights = gizmo.showCameras = gizmo.showEffects = gizmo.showSounds = gizmo.showSplines = gizmo.showPluginOverlays = false;
             gShowsAllColliders = false;
         }
         ImGui::Separator();

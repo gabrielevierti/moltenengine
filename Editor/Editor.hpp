@@ -29,12 +29,15 @@ void registerAssetBrowserPanel(EditorContext& editor);
 void registerAssetViewerPanel(EditorContext& editor);
 void registerRenderingPanel(EditorContext& editor);
 void registerConsolePanel(EditorContext& editor);
+void registerProfilerPanel(EditorContext& editor);
 void registerProjectPanel(EditorContext& editor);
 void registerVisualScriptPanel(EditorContext& editor);
 void registerCreateEntries(EditorContext& editor);
 
 /// The entries of the Create menu as menu items. New entities become children of `parent`.
 void drawCreateMenu(EditorContext& editor, Entity parent);
+/// Makes an entity as one entry of the Create menu does, under `parent` if it is one, and chooses it.
+Entity createFromEntry(EditorContext& editor, const CreateEntry& entry, Entity parent);
 
 /// A visual script (a .graph among the assets) as a C++ script in Assets/Scripts, which keeps
 /// the graph so that it can go back; and back again, from C++ made that way. Each returns the

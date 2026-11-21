@@ -9,6 +9,8 @@
 
 #include <optional>
 #include "Assets/MeshData.hpp"
+#include "Core/Profiler.hpp"
+#include "Core/SaveGame.hpp"
 #include "Core/Time.hpp"
 #include "Input/Input.hpp"
 #include "Physics/Physics.hpp"
@@ -41,6 +43,7 @@ public:
     Physics physics;
     Input input;
     Time time;
+    Profiler profiler;                  // where each frame's time went: see Profiler.hpp
 
     /// While true, physics stands still. The editor sets it while a scene is edited.
     bool isSimulationPaused = false;
@@ -69,6 +72,24 @@ public:
     bool hasPreference(const std::string& name) const;
     void setPreference(const std::string& name, float value);
     std::string preferencesFile;
+
+    // ---- languages: the texts of the interface (HudText, button labels, the words of
+    // "{value:a|b}") in another language, from Assets/Localization/<language>.txt, a line per
+    // text as it is written in the game:   "RACE" = "GARA"
+    // A text with no line, or with no language chosen, is shown as it is written.
+    std::string language;               // "it", "fr"...; empty: as written
+    std::string translate(const std::string& text) const;
+    /// The languages the game has files for, by name ("it", "fr"), sorted.
+    std::vector<std::string> languages() const;
+
+    // ---- saved games (see SaveGame.hpp): each slot a file in a "Saves" folder beside the
+    // preferences; with no preferences file, kept for this run.
+    bool saveGame(const SaveGame& save, const std::string& slot = "Save");
+    std::optional<SaveGame> loadGame(const std::string& slot = "Save") const;
+    bool hasSavedGame(const std::string& slot = "Save") const;
+    bool deleteSavedGame(const std::string& slot = "Save");
+    /// The slots saved, by name.
+    std::vector<std::string> savedGames() const;
     void clearValues() { values_.clear(); }
 
     // ---- entities
@@ -120,6 +141,13 @@ public:
 
     // ---- what only a full engine can do. Here they do nothing, so that gameplay code
     // need not ask whether there is a screen or a loudspeaker.
+
+    /// How hot the device is: 0 cool, 1 warm, 2 hot (the system is about to slow down), 3 very hot.
+    /// The renderer already draws smaller when it is hot (RenderSettings::followsDeviceHeat);
+    /// a game can do more: fewer effects, no traced light.
+    virtual int deviceHeat() const { return 0; }
+    /// Low Power Mode is on: a game may lower its frame rate or its quality.
+    virtual bool isSavingBattery() const { return false; }
 
     /// Plays a sound file from Assets ("Audio/coin.wav").
     virtual void playSound(const std::string& name, float volume = 1.0f) {}
@@ -210,6 +238,10 @@ protected:
     bool pendingClearsValues_ = false;
     std::vector<Entity> scratchEntities_;
     mutable std::unordered_map<std::string, float> preferences_;
+    std::unordered_map<std::string, std::string> savesInMemory_;       // with no preferences file
+    mutable std::unordered_map<std::string, std::string> translations_;
+    mutable std::string translationsFor_ = "\n";                      // the language `translations_` holds
+    std::string saveFileOf(const std::string& slot) const;
     mutable std::string preferencesReadFrom_;           // which file `preferences_` holds, once read
     void readPreferences() const;
 

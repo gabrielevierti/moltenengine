@@ -1,5 +1,6 @@
 #include "Assets/ImportSettings.hpp"
 #include "Assets/Assets.hpp"
+#include "Core/TextFile.hpp"
 
 #include "Assets/Gltf.hpp"
 
@@ -214,6 +215,7 @@ SceneAssets sceneAssets(Assets& assets) {
     result.mesh = [&assets](const std::string& name) { return assets.mesh(name); };
     result.texture = [&assets](const std::string& name, TextureFormat format) { return assets.texture(name, format); };
     result.material = [&assets](const std::string& name) { return assets.material(name); };
+    result.prefabText = [&assets](const std::string& name) { return text::readFile(assets.path(name)); };
     return result;
 }
 

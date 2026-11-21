@@ -78,9 +78,9 @@ file(GLOB_RECURSE MOLTEN_ENGINE_SOURCES CONFIGURE_DEPENDS Engine/*.cpp Engine/*.
 if(MOLTEN_IOS)
     # The window and the start of the program are UIKit's business there.
     list(FILTER MOLTEN_ENGINE_SOURCES EXCLUDE REGEX "Engine/Platform/(Window|Application)\\.cpp$")
-    set(MOLTEN_PLATFORM_SOURCES Engine/Platform/iOS/PlatformiOS.mm)
+    set(MOLTEN_PLATFORM_SOURCES Engine/Platform/iOS/PlatformiOS.mm Engine/Platform/DeviceState.mm)
 else()
-    set(MOLTEN_PLATFORM_SOURCES Engine/Platform/MetalLayerBridge.mm)
+    set(MOLTEN_PLATFORM_SOURCES Engine/Platform/MetalLayerBridge.mm Engine/Platform/DeviceState.mm)
 endif()
 add_library(moltenengine STATIC ${MOLTEN_ENGINE_SOURCES} ${MOLTEN_PLATFORM_SOURCES} Shaders/Shared/ShaderTypes.h)
 target_include_directories(moltenengine PUBLIC Engine Shaders/Shared)
@@ -93,11 +93,12 @@ if(MOLTEN_IOS)
     # miniaudio talks to the audio session in Objective-C on iOS.
     set_source_files_properties(Engine/Platform/ThirdParty.cpp PROPERTIES LANGUAGE OBJCXX)
     target_link_libraries(moltenengine PUBLIC
-        "-framework Metal" "-framework Foundation" "-framework QuartzCore" "-framework UIKit" "-framework CoreGraphics"
+        "-framework Metal" "-framework MetalFX" "-framework Foundation" "-framework QuartzCore" "-framework UIKit" "-framework CoreGraphics"
+        "-framework GameController"
         "-framework AVFoundation" "-framework AudioToolbox" "-framework CoreFoundation")
 else()
     target_link_libraries(moltenengine PUBLIC glfw
-        "-framework Metal" "-framework Foundation" "-framework QuartzCore" "-framework Cocoa"
+        "-framework Metal" "-framework MetalFX" "-framework Foundation" "-framework QuartzCore" "-framework Cocoa"
         "-framework CoreAudio" "-framework AudioToolbox" "-framework AudioUnit" "-framework CoreFoundation")
 endif()
 
@@ -109,6 +110,8 @@ if(MOLTEN_IOS)
     set(MOLTEN_IOS_BUNDLE_ID "com.example.moltenplayer" CACHE STRING "The application's bundle identifier")
     set(MOLTEN_IOS_TEAM "" CACHE STRING "Your Apple developer team identifier, for signing")
     set(MOLTEN_IOS_NAME "Molten" CACHE STRING "The name under the application's icon")
+    set(MOLTEN_IOS_VERSION "${PROJECT_VERSION}" CACHE STRING "The game's version, as players see it: 1.2.0")
+    set(MOLTEN_IOS_BUILD_NUMBER "1" CACHE STRING "The build's number: higher for each one sent to the App Store")
     set(MOLTEN_IOS_ICON "${CMAKE_SOURCE_DIR}/Assets/Branding/icon.png" CACHE FILEPATH "A square picture for the application's icon")
 
     set(MOLTEN_IOS_GAME_SOURCES "")
@@ -171,8 +174,8 @@ if(MOLTEN_IOS)
         MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/Engine/Platform/iOS/Info.plist.in
         MACOSX_BUNDLE_GUI_IDENTIFIER "${MOLTEN_IOS_BUNDLE_ID}"
         MACOSX_BUNDLE_BUNDLE_NAME "${MOLTEN_IOS_NAME}"
-        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
-        MACOSX_BUNDLE_BUNDLE_VERSION "1"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${MOLTEN_IOS_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${MOLTEN_IOS_BUILD_NUMBER}"
         XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${MOLTEN_IOS_BUNDLE_ID}"
         XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${MOLTEN_IOS_TEAM}"
         XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
@@ -227,6 +230,17 @@ set_target_properties(molten-player PROPERTIES ENABLE_EXPORTS ON)
 # The editor exports the player it finds beside itself.
 add_dependencies(molten molten-player)
 
+# The shaders compiled ahead of time (Shaders/Compiled), when the Metal compiler is installed:
+# the engine starts without compiling them, and a mistake in them stops here, in the build.
+# Without them, or with sources newer than them, the engine compiles the sources as it starts.
+add_executable(molten-shader-join Tools/ShaderJoin.cpp Engine/Rendering/ShaderSource.cpp)
+target_include_directories(molten-shader-join PRIVATE Engine)
+add_custom_target(molten-shaders
+    COMMAND sh ${CMAKE_SOURCE_DIR}/Tools/compile_shaders.sh $<TARGET_FILE:molten-shader-join> ${CMAKE_SOURCE_DIR}/Shaders ${CMAKE_BINARY_DIR}/shaders
+    DEPENDS molten-shader-join
+    COMMENT "Compiling the shaders ahead of time"
+    VERBATIM)
+
 # What an editor plugin compiles against: the editor's headers, the engine's, ImGui's.
 add_library(molten_editor_api INTERFACE)
 target_include_directories(molten_editor_api INTERFACE Editor Engine Shaders/Shared)
@@ -254,7 +268,7 @@ endif()
 if(MOLTEN_BUILD_TESTS)
     enable_testing()
     file(GLOB MOLTEN_TEST_SOURCES CONFIGURE_DEPENDS Tests/*.cpp Tests/*.hpp)
-    add_executable(moltentests ${MOLTEN_TEST_SOURCES})
+    add_executable(moltentests ${MOLTEN_TEST_SOURCES} Editor/PaletteSearch.cpp)     # the palette's search, without the editor
     target_link_libraries(moltentests PRIVATE moltenengine)
     add_test(NAME unit COMMAND moltentests)
     set_tests_properties(unit PROPERTIES LABELS unit)

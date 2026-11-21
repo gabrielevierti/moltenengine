@@ -1,4 +1,5 @@
 #include "Core/Engine.hpp"
+#include "Platform/DeviceState.hpp"
 
 #include "Core/Log.hpp"
 #include "Core/Paths.hpp"
@@ -133,6 +134,8 @@ bool Engine::frame() {
     if (!window_) {
         // No window: a fixed number of frames at a fixed step, so the picture is the same every time.
         if (capturedFrames_ >= config_.captureFrames) return false;
+        profiler.beginFrame();
+        renderer_->profiler = &profiler;
         int pixelWidth = config_.width * config_.captureScale, pixelHeight = config_.height * config_.captureScale;
         simulate(game, 1.0 / 60.0);
         if (capturedFrames_ == config_.captureFrames - 1) {
@@ -142,24 +145,45 @@ bool Engine::frame() {
         }
         input.endFrame();
         applyPendingScene();
+        profiler.setDrawStatistics(renderer_->stats.drawCalls, renderer_->stats.triangles, renderer_->stats.visibleObjects);
+        profiler.endFrame();
         capturedFrames_++;
         return capturedFrames_ < config_.captureFrames;
     }
 
     if (window_->shouldClose()) return false;
-    window_->pollEvents(input);
+    profiler.beginFrame();
+    renderer_->profiler = &profiler;
+    {
+        Profiler::Scope timed(profiler, "Events");
+        window_->pollEvents(input);
+    }
     if (config_.developerKeys) handleDeveloperKeys();
 
     double now = secondsNow();
     simulate(game, now - previousTime_);
     previousTime_ = now;
 
-    if (CA::MetalDrawable* drawable = window_->nextDrawable()) {
+    CA::MetalDrawable* drawable = nullptr;
+    {
+        // Waiting here means the display (or the GPU behind it) is the limit, not the CPU.
+        Profiler::Scope timed(profiler, "Waiting for a drawable");
+        drawable = window_->nextDrawable();
+    }
+    if (drawable) {
+        Profiler::Scope timed(profiler, "Render");
         RenderTarget target;
         target.texture = drawable->texture();
         target.drawable = drawable;
         renderer_->render(scene, canvas_, target, time.elapsed);
     }
+    profiler.setGpuTime(renderer_->lastGpuMilliseconds());
+    // The device's heat, read now and then: hot, the scene is drawn smaller until it cools.
+    if (frameCount_++ % 120 == 0) {
+        int heat = deviceHeat();
+        renderer_->heatScale = heat >= 3 ? 0.6f : heat == 2 ? 0.75f : 1.0f;
+    }
+    profiler.setDrawStatistics(renderer_->stats.drawCalls, renderer_->stats.triangles, renderer_->stats.visibleObjects);
     if (!pendingScreenshot_.empty()) {
         Vec2 size = screenSize() * window_->contentScale();
         writeImage(pendingScreenshot_, int(size.x), int(size.y));
@@ -167,6 +191,7 @@ bool Engine::frame() {
     }
     input.endFrame();
     applyPendingScene();                    // a component asked for another scene: now that the frame is over
+    profiler.endFrame();
     return isRunning_ && !window_->shouldClose();
 }
 
@@ -185,10 +210,14 @@ void Engine::simulate(Game& game, double realDelta) {
     scene.updateTransforms();
     int steps = time.beginFrame(realDelta);
     for (int i = 0; i < steps; i++) {
-        game.fixedUpdate(*this, time.fixedDelta);
-        runBehaviors(true, time.fixedDelta);
-        runComponents(true, time.fixedDelta);
+        {
+            Profiler::Scope timed(profiler, "Fixed update");
+            game.fixedUpdate(*this, time.fixedDelta);
+            runBehaviors(true, time.fixedDelta);
+            runComponents(true, time.fixedDelta);
+        }
         if (!isSimulationPaused) {
+            Profiler::Scope timed(profiler, "Physics");
             prepareMeshColliders();
             physics.step(scene, time.fixedDelta);
             dispatchPhysicsEvents();        // components hear about collisions and triggers
@@ -198,14 +227,23 @@ void Engine::simulate(Game& game, double realDelta) {
     // Show bodies where they are between the last two steps, for smooth motion at any frame rate.
     if (!isSimulationPaused) physics.writeTransforms(scene, time.alpha);
 
-    game.update(*this, time.delta);
-    runBehaviors(false, time.delta);
-    runComponents(false, time.delta);
+    {
+        Profiler::Scope timed(profiler, "Update");
+        game.update(*this, time.delta);
+        runBehaviors(false, time.delta);
+        runComponents(false, time.delta);
+    }
     scene.flushDestroyed();
     scene.updateTransforms();
-    runComponents(false, time.delta, true);     // lateUpdate: cameras that follow, with everything where it will be drawn
+    {
+        Profiler::Scope timed(profiler, "Late update");
+        runComponents(false, time.delta, true);     // lateUpdate: cameras that follow, with everything where it will be drawn
+    }
     scene.updateTransforms();
-    updateParticles(scene, time.delta, renderer_->settings.wind, renderer_->settings.windGustiness, time.elapsed);
+    {
+        Profiler::Scope timed(profiler, "Particles");
+        updateParticles(scene, time.delta, renderer_->settings.wind, renderer_->settings.windGustiness, time.elapsed);
+    }
 
     // The canvas covers the screen, or, in an editor that shows the game in a view of its
     // own, that view: the game's interface is part of the picture of the game.
@@ -217,9 +255,12 @@ void Engine::simulate(Game& game, double realDelta) {
         canvasSize = Vec2{float(view.width), float(view.height)} / pixelsPerPoint;
     }
     canvas_.begin(canvasSize, pixelsPerPoint);
-    game.draw(*this, canvas_);
-    drawComponents(canvas_);                // the interface components draw: score, health, messages
-    game.drawOver(*this, canvas_);
+    {
+        Profiler::Scope timed(profiler, "Interface");       // in the editor, the editor's own windows too
+        game.draw(*this, canvas_);
+        drawComponents(canvas_);                // the interface components draw: score, health, messages
+        game.drawOver(*this, canvas_);
+    }
     if (showsColliders) drawColliders();
     if (showsStatistics) drawStatistics();
 }
@@ -274,6 +315,14 @@ void Engine::adjustSound(uint32_t sound, float volume, float pitch) {
 
 void Engine::panSound(uint32_t sound, float pan) {
     audio_->mixer().setPan(sound, pan);
+}
+
+int Engine::deviceHeat() const {
+    return int(thermalState());
+}
+
+bool Engine::isSavingBattery() const {
+    return isLowPowerModeOn();
 }
 
 bool Engine::listener(Mat4& world) {
@@ -372,7 +421,10 @@ bool Engine::writeImage(const std::string& path, int width, int height) {
 // ---------------------------------------------------------------- developer tools
 
 void Engine::handleDeveloperKeys() {
-    if (input.wasPressed(Key::F1)) showsStatistics = !showsStatistics;
+    if (input.wasPressed(Key::F1)) {
+        showsStatistics = !showsStatistics;
+        profiler.isEnabled = showsStatistics;           // the overlay shows where the time goes, too
+    }
     if (input.wasPressed(Key::F2)) showsColliders = !showsColliders;
     if (input.wasPressed(Key::F3)) window_->setFullscreen(!window_->isFullscreen());
     if (input.wasPressed(Key::F4)) saveScreenshot("screenshot.png");
@@ -384,9 +436,25 @@ void Engine::drawStatistics() {
     std::snprintf(text, sizeof(text), "%.0f fps   %.1f ms\n%d draw calls   %d triangles\n%d objects drawn   %d culled\n%d lights   %zu entities",
                   double(time.framesPerSecond), double(time.unscaledDelta) * 1000.0, stats.drawCalls, stats.triangles,
                   stats.visibleObjects, stats.culledObjects, stats.lights, scene.entityCount());
-    Vec2 size = canvas_.measureText(text, 14);
+    // The parts of the last frame that took longest, from the profiler.
+    std::string all = text;
+    if (const Profiler::Frame* last = profiler.lastFrame()) {
+        char line[128];
+        std::snprintf(line, sizeof(line), "\nCPU %.2f ms   GPU %.2f ms", double(last->cpuMs), double(last->gpuMs));
+        all += line;
+        std::vector<const Profiler::Section*> top;
+        for (const Profiler::Section& section : last->sections) {
+            if (section.depth <= 1) top.push_back(&section);
+        }
+        std::sort(top.begin(), top.end(), [](const Profiler::Section* a, const Profiler::Section* b) { return a->ms > b->ms; });
+        for (size_t i = 0; i < top.size() && i < 6; i++) {
+            std::snprintf(line, sizeof(line), "\n  %-24s %6.2f ms", top[i]->name.c_str(), double(top[i]->ms));
+            all += line;
+        }
+    }
+    Vec2 size = canvas_.measureText(all, 14);
     canvas_.rect(Vec2{8, 8}, size + Vec2{20, 16}, Vec4{0, 0, 0, 0.6f});
-    canvas_.text(text, Vec2{18, 16}, 14, Vec4{1, 1, 1, 1});
+    canvas_.text(all, Vec2{18, 16}, 14, Vec4{1, 1, 1, 1});
 }
 
 void Engine::drawColliders() {

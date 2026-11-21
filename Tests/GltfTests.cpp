@@ -3,6 +3,7 @@
 #include "Animation/Animator.hpp"
 #include "Assets/Gltf.hpp"
 #include "Core/Json.hpp"
+#include "Core/TextFile.hpp"
 #include "Kit/Kit.hpp"
 #include "Rendering/Material.hpp"
 
@@ -168,4 +169,127 @@ TEST(an_animator_plays_a_clip) {
     const Animator* played = stage.scene.get<Animator>(entity);
     CHECK(played->isFinished() && played->time == 1);
     CHECK(simd::length(stage.shown.positions[3] - Vec3{-1, 2, 0}) < 1e-3f);          // it stays at the end
+}
+
+TEST(an_animator_controller_is_read_and_written) {
+    const char* text = R"(molten-animator 1
+parameter float speed 0
+parameter bool grounded 1
+parameter trigger jump
+state Locomotion blend speed
+  motion Idle 0
+  motion Walk 2
+  motion Run 6
+state Jump loops 0
+  motion Jump
+  event Audio/jump.wav 0
+  event Land 0.8
+start Locomotion
+transition Locomotion -> Jump when jump
+transition Any Locomotion when grounded true and speed > 0.5 blend 0.1
+transition Jump Locomotion exit 0.9
+)";
+    std::string error;
+    std::optional<AnimatorController> controller = AnimatorController::parse(text, &error);
+    CHECK(controller.has_value());
+    if (!controller) {
+        printf("    %s\n", error.c_str());
+        return;
+    }
+    CHECK(controller->parameters.size() == 3 && controller->states.size() == 2 && controller->transitions.size() == 3);
+    CHECK(controller->states[0].blendBy == "speed" && controller->states[0].motions[2].at == 6 && !controller->states[1].loops);
+    CHECK(controller->transitions[0].to == "Jump" && controller->transitions[0].conditions[0].test == AnimatorController::Condition::Test::Triggered);
+    CHECK(controller->transitions[1].conditions.size() == 2 && controller->transitions[1].blend == 0.1f);
+    CHECK(controller->transitions[2].exitAt == 0.9f && controller->states[1].events[1].name == "Land");
+    std::optional<AnimatorController> again = AnimatorController::parse(controller->toText());
+    CHECK(again && again->toText() == controller->toText());
+    // A blend tree plays the two motions around the value, in proportion.
+    std::vector<float> weights = AnimatorController::blendWeights(controller->states[0].motions, 4);
+    CHECK(weights[0] == 0 && std::abs(weights[1] - 0.5f) < 1e-5f && std::abs(weights[2] - 0.5f) < 1e-5f);
+    CHECK(AnimatorController::blendWeights(controller->states[0].motions, -1)[0] == 1);
+    CHECK(AnimatorController::blendWeights(controller->states[0].motions, 9)[2] == 1);
+    // Mistakes are said, with their line.
+    CHECK(!AnimatorController::parse("molten-animator 1\nstate A\ntransition A B\n", &error) && error.find("B") != std::string::npos);
+    CHECK(!AnimatorController::parse("state A\n", &error));
+}
+
+TEST(an_animator_goes_from_state_to_state_as_its_parameters_say) {
+    Strip strip;
+    strip.writeGlb("/tmp/molten_strip.glb");
+    text::writeFile("/tmp/molten_strip.animator", R"(molten-animator 1
+parameter trigger jump
+parameter bool grounded 1
+state Stand
+  motion Bend
+  speed 0
+state Leap loops 0
+  motion Bend
+  event Up 0.5
+state Air
+  motion Bend
+transition Stand Leap when jump
+transition Leap Air exit 1
+transition Air Stand when grounded true
+)");
+    kit::registerKit();
+    Stage stage;
+    stage.assetRoot = "/tmp";
+    Entity entity = stage.scene.create("Sheet");
+    stage.scene.add(entity, Transform{});
+    Animator animator;
+    animator.model = "molten_strip.glb";
+    animator.controller = "molten_strip.animator";
+    stage.scene.add(entity, animator);
+    stage.advance(1.0 / 60.0);
+    Animator* playing = stage.scene.get<Animator>(entity);
+    CHECK(playing->currentState() == "Stand");
+    playing->setBool("grounded", false);
+    playing->setTrigger("jump");
+    stage.advance(1.0 / 60.0);
+    CHECK(playing->currentState() == "Leap" && playing->parameter("jump") == 0);      // the trigger was used up
+    bool heard = false;
+    for (int i = 0; i < 70 && playing->currentState() == "Leap"; i++) {
+        stage.advance(1.0 / 60.0);
+        for (const std::string& event : playing->firedEvents) heard = heard || event == "Up";
+    }
+    CHECK(heard);
+    CHECK(playing->currentState() == "Air");                                         // after the clip's end
+    playing->setBool("grounded", true);
+    stage.advance(1.0 / 60.0);
+    CHECK(playing->currentState() == "Stand");
+    CHECK(stage.count > 60);
+}
+
+TEST(two_bone_ik_puts_the_end_of_a_limb_on_its_target) {
+    // A leg standing straight up from the origin: hip, knee one meter up, foot one more.
+    GltfModel model;
+    model.nodes.resize(3);
+    model.nodes[0].name = "Hip";
+    model.nodes[1].name = "Knee";
+    model.nodes[1].parent = 0;
+    model.nodes[1].translation = Vec3{0, 1, 0};
+    model.nodes[2].name = "Foot";
+    model.nodes[2].parent = 1;
+    model.nodes[2].translation = Vec3{0, 1, 0};
+    model.nodes[0].children = {1};
+    model.nodes[1].children = {2};
+    auto footAt = [&](const GltfPose& pose) { return xyz(model.globalMatrices(pose)[2].columns[3]); };
+    for (Vec3 target : {Vec3{1, 1, 0}, Vec3{0.3f, 0.8f, 0.6f}, Vec3{-1.2f, 0.5f, 0.2f}}) {
+        GltfPose pose = model.restPose();
+        Vec3 pole{0, 1, 1};
+        CHECK(solveTwoBoneIK(model, pose, 2, target, &pole, 1.0f));
+        CHECK(simd::length(footAt(pose) - target) < 1e-3f);
+        // The knee bends toward the pole's side.
+        Vec3 knee = xyz(model.globalMatrices(pose)[1].columns[3]);
+        CHECK(knee.z > -1e-3f);
+    }
+    // Out of reach: as far toward it as the leg goes.
+    GltfPose pose = model.restPose();
+    solveTwoBoneIK(model, pose, 2, Vec3{3, 0, 0}, nullptr, 1.0f);
+    CHECK(footAt(pose).x > 1.95f);
+    // Half the weight: halfway there, more or less.
+    GltfPose half = model.restPose();
+    solveTwoBoneIK(model, half, 2, Vec3{1, 1, 0}, nullptr, 0.0f);
+    CHECK(simd::length(footAt(half) - Vec3{0, 2, 0}) < 1e-4f);
+    CHECK(!solveTwoBoneIK(model, half, 1, Vec3{1, 1, 0}, nullptr, 1.0f));              // the knee has no grandparent
 }

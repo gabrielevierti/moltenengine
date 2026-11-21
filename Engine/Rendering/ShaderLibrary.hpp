@@ -1,9 +1,10 @@
 // ShaderLibrary.hpp
 // Compiles the shaders and hands out render pipeline states.
 //
-// The shaders are compiled from source when the engine starts. That costs a fraction
-// of a second, and buys two things while developing: no build step for shaders, and
-// hot reloading. Save a .metal file while the game runs and the engine recompiles it;
+// The build compiles the shaders ahead of time (Shaders/Compiled, by Tools/compile_shaders.sh)
+// when the Metal compiler is installed; the engine loads those when no source is newer.
+// Otherwise it compiles the sources when it starts: a fraction of a second, no build step.
+// Either way, save a .metal file while the game runs and the engine recompiles it;
 // if the new version has an error, the message is logged and the old shaders stay.
 //
 // A pipeline state fixes the vertex and fragment functions, the formats of the
@@ -70,6 +71,8 @@ public:
 
 private:
     bool compile();
+    /// The library the build compiled ahead of time, if it is there and newer than every source file.
+    bool loadPrecompiled();
     bool compileVariant(const std::string& source, bool withRayTracing, bool withExtras, bool withSurfaces);
     std::filesystem::file_time_type newestFileTime() const;
 

@@ -7,6 +7,7 @@
 // a plain UIView whose layer is a CAMetalLayer: the same object Metal draws into on a Mac.
 #import <QuartzCore/CADisplayLink.h>
 #import <QuartzCore/CAMetalLayer.h>
+#import <GameController/GameController.h>
 #import <UIKit/UIKit.h>
 
 #include "Platform/Application.hpp"
@@ -278,7 +279,44 @@ bool Window::shouldClose() const {
 
 void Window::requestClose() {}
 
+namespace {
+
+/// The controller in use (the one last touched, or the first connected), as the engine reads controllers.
+void pollController(Input& input) {
+    GamepadState state;
+    GCController* controller = GCController.current ? GCController.current : GCController.controllers.firstObject;
+    GCExtendedGamepad* pad = controller.extendedGamepad;
+    if (pad) {
+        state.connected = true;
+        auto set = [&](GamepadButton button, GCControllerButtonInput* from) { state.buttons[size_t(button)] = from != nil && from.isPressed; };
+        set(GamepadButton::A, pad.buttonA);
+        set(GamepadButton::B, pad.buttonB);
+        set(GamepadButton::X, pad.buttonX);
+        set(GamepadButton::Y, pad.buttonY);
+        set(GamepadButton::LeftShoulder, pad.leftShoulder);
+        set(GamepadButton::RightShoulder, pad.rightShoulder);
+        set(GamepadButton::Back, pad.buttonOptions);
+        set(GamepadButton::Start, pad.buttonMenu);
+        set(GamepadButton::LeftStick, pad.leftThumbstickButton);
+        set(GamepadButton::RightStick, pad.rightThumbstickButton);
+        set(GamepadButton::DpadUp, pad.dpad.up);
+        set(GamepadButton::DpadDown, pad.dpad.down);
+        set(GamepadButton::DpadLeft, pad.dpad.left);
+        set(GamepadButton::DpadRight, pad.dpad.right);
+        state.axes[size_t(GamepadAxis::LeftX)] = pad.leftThumbstick.xAxis.value;
+        state.axes[size_t(GamepadAxis::LeftY)] = pad.leftThumbstick.yAxis.value;          // up is positive, as the engine has it
+        state.axes[size_t(GamepadAxis::RightX)] = pad.rightThumbstick.xAxis.value;
+        state.axes[size_t(GamepadAxis::RightY)] = pad.rightThumbstick.yAxis.value;
+        state.axes[size_t(GamepadAxis::LeftTrigger)] = pad.leftTrigger.value;
+        state.axes[size_t(GamepadAxis::RightTrigger)] = pad.rightTrigger.value;
+    }
+    input.handleGamepad(state);
+}
+
+}  // namespace
+
 void Window::pollEvents(Input& input) {
+    pollController(input);
     Shared& state = shared();
     input.isTouchScreen = true;                 // the screen is how a phone is played: touch controls show from the start
     // The first finger is also the mouse.

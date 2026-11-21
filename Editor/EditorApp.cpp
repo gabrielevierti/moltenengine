@@ -84,6 +84,7 @@ void EditorApp::start(Engine& engine) {
     registerAssetBrowserPanel(editor);
     registerAssetViewerPanel(editor);
     registerConsolePanel(editor);
+    registerProfilerPanel(editor);
     registerRenderingPanel(editor);
     registerProjectPanel(editor);
     registerVisualScriptPanel(editor);
@@ -329,12 +330,19 @@ void EditorApp::exportGame() {
     std::string player = (fs::path(executable).parent_path() / "molten-player").string();
     std::string engineRoot = findRootDirectory(executable);
     std::string application;
-    std::string error = exportMacApplication(editor.project, destination, player, engineRoot, &application);
+    std::string error = exportMacApplication(editor.project, destination, player, engineRoot, &application, exportsDevelopment_);
     if (!error.empty()) {
         editor.notify(error, ConsoleMessage::Level::Error);
         if (application.empty()) return;
     } else {
         editor.notify("Exported " + application);
+    }
+    // For other Macs: signed with the Developer ID and notarized, beside the editor (it takes minutes).
+    if (exportsForOtherMacs_ && error.empty()) {
+        deviceLines_.clear();
+        if (!deviceExport_.startScript(DeviceExport::notarizeScript(application, "molten"))) {
+            editor.notify("Something is already being built: notarize when it has finished", ConsoleMessage::Level::Warning);
+        }
     }
     platform::revealInFinder(application);
 }
@@ -484,6 +492,7 @@ void EditorApp::draw(Engine& engine, Canvas& canvas) {
     }
     drawUnsavedChangesDialog();
     drawAboutDialog();
+    drawCommandPalette();
     drawBuildWindow();
 drawNewScriptDialog();
     drawSaveLayoutDialog();
@@ -523,6 +532,7 @@ void EditorApp::handleShortcuts() {
     };
 
     if (pressed(ImGuiMod_Ctrl | ImGuiKey_Q)) editor.requestQuit();
+    if (pressed(ImGuiMod_Ctrl | ImGuiKey_K) && !(scene.isPlaying() && editor.gameViewHasFocus)) palette_.open();
     if (pressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_O)) chooseAndOpenProject();
     else if (!editor.hasProject && pressed(ImGuiMod_Ctrl | ImGuiKey_O)) chooseAndOpenScene();
     if (!editor.hasProject) return;
@@ -668,6 +678,8 @@ void EditorApp::drawMenuBar() {
         if (ImGui::MenuItem("Frame Selection", "F", false, hasSelection)) editor.frameSelectionRequested = true;
         if (ImGui::MenuItem("Align with View", "Shift+Cmd+F", false, hasSelection)) editor.alignWithViewRequested = true;
         if (ImGui::MenuItem("Align View with Selection", nullptr, false, hasSelection)) scene.alignViewWithSelection();
+        ImGui::Separator();
+        if (ImGui::MenuItem("Find Anything...", "Cmd+K")) palette_.open();
         drawRegisteredMenuItems("Edit");
         ImGui::Separator();
         if (ImGui::MenuItem("Project Settings...", nullptr, false, hasProject)) {
@@ -771,6 +783,120 @@ void EditorApp::drawMenuBar() {
     }
 
     ImGui::EndMainMenuBar();
+}
+
+// ---------------------------------------------------------------- Cmd+K
+
+std::vector<PaletteCommand> EditorApp::paletteCommands() {
+    EditorContext& editor = *context_;
+    SceneDocument& scene = editor.scene;
+    const bool hasProject = editor.hasProject, isEditing = hasProject && !scene.isPlaying(), hasSelection = !scene.selection().empty();
+    std::vector<PaletteCommand> commands;
+    auto add = [&](std::string title, std::string kind, std::string shortcut, bool isEnabled, std::function<void()> run) {
+        commands.push_back(PaletteCommand{std::move(title), std::move(kind), std::move(shortcut), isEnabled, std::move(run)});
+    };
+    // What the menus do.
+    add("New Scene", "File", "Cmd+N", isEditing, [&editor] { editor.requestNewScene(); });
+    add("Open Scene...", "File", "Cmd+O", true, [this] { chooseAndOpenScene(); });
+    add("Save Scene", "File", "Cmd+S", isEditing, [this] { saveScene(false); });
+    add("Save Scene As New File", "File", "Shift+Cmd+S", isEditing, [this] { saveScene(true); });
+    add("Open Project...", "File", "Shift+Cmd+O", true, [this] { chooseAndOpenProject(); });
+    add("Undo", "Edit", "Cmd+Z", isEditing && scene.canUndo(), [&scene] { scene.undo(); });
+    add("Redo", "Edit", "Shift+Cmd+Z", isEditing && scene.canRedo(), [&scene] { scene.redo(); });
+    add("Duplicate", "Edit", "Cmd+D", hasSelection, [&scene] { scene.duplicateSelection(); });
+    add("Delete", "Edit", "Del", hasSelection, [&scene] { scene.deleteSelection(); });
+    add("Select All", "Edit", "Cmd+A", isEditing, [&scene] { scene.selectAll(); });
+    add("Frame Selection", "Edit", "F", hasSelection, [&editor] { editor.frameSelectionRequested = true; });
+    add("Align with View", "Edit", "Shift+Cmd+F", hasSelection, [&editor] { editor.alignWithViewRequested = true; });
+    add("Align View with Selection", "Edit", "", hasSelection, [&scene] { scene.alignViewWithSelection(); });
+    add("Project Settings", "Edit", "", hasProject, [&editor] {
+        if (Panel* panel = editor.registry.findPanel("Project Settings")) panel->isOpen = true;
+    });
+    add(scene.isPlaying() ? "Stop" : "Play", "Play", "Cmd+P", hasProject, [&scene] { scene.setPlaying(!scene.isPlaying()); });
+    add(scene.isPaused() ? "Resume" : "Pause", "Play", "Shift+Cmd+P", scene.isPlaying(), [&scene] { scene.setPaused(!scene.isPaused()); });
+    add("Step One Frame", "Play", "Alt+Cmd+P", scene.isPlaying(), [&scene] { scene.stepFrame(); });
+    add("New Script...", "Game", "", hasProject, [this] {
+        showsNewScript_ = true;
+        newScriptError_.clear();
+    });
+    add("Build Scripts Now", "Game", "Cmd+B", hasProject, [this] { buildGame(); });
+    add("Build and Export...", "Game", "Shift+Cmd+B", hasProject, [this] { showsBuild_ = true; });
+    add("Show Scripts Folder", "Game", "", hasProject, [&editor] { platform::revealInFinder(editor.project.sourceDirectory()); });
+    add(editor.engine.showsColliders ? "Hide All Colliders" : "Show All Colliders", "Window", "", true,
+        [&editor] { editor.engine.showsColliders = !editor.engine.showsColliders; });
+    add("Reset Layout", "Window", "", true, [this] { pendingLayout_ = "Default"; });
+    add("About Molten Metal Engine", "Help", "", true, [this] { showsAbout_ = true; });
+    // The windows: opened and brought to the front.
+    for (auto& item : editor.registry.panels) {
+        Panel* panel = item.value.get();
+        add(panel->title, "Window", "", true, [panel] {
+            panel->isOpen = true;
+            ImGui::SetWindowFocus(panel->title.c_str());
+        });
+    }
+    // What plugins put in the menus.
+    for (const auto& item : editor.registry.menuItems) {
+        std::string path = item.value.path;
+        size_t slash = path.find('/');
+        std::string title = path.substr(path.rfind('/') + 1), kind = slash == std::string::npos ? std::string() : path.substr(0, slash);
+        bool isEnabled = !item.value.isEnabled || item.value.isEnabled(editor);
+        std::function<void(EditorContext&)> action = item.value.action;
+        add(title, kind, item.value.shortcut, isEnabled && action != nullptr, [action, &editor] { action(editor); });
+    }
+    // The Create menu.
+    for (const auto& item : editor.registry.createEntries) {
+        CreateEntry entry = item.value;
+        std::string title = entry.path.substr(entry.path.rfind('/') + 1);
+        add("Create " + title, "Create", "", isEditing, [entry, &editor] { createFromEntry(editor, entry, Entity{}); });
+    }
+    // The scene's entities: chosen, and the view goes to them.
+    Scene& world = editor.engine.scene;
+    world.each<Name>([&](Entity entity, Name& name) {
+        if (name.value.empty()) return;
+        // Where it is: "Rival 2 / Model", so that the many "Wheels" can be told apart, and found.
+        std::string path;
+        const Transform* transform = world.get<Transform>(entity);
+        for (int depth = 0; transform && world.isAlive(transform->parent) && depth < 16; depth++) {
+            const Name* parent = world.get<Name>(transform->parent);
+            path = (parent ? parent->value : std::string("?")) + (path.empty() ? "" : " / " + path);
+            transform = world.get<Transform>(transform->parent);
+        }
+        add(name.value, path.empty() ? "Entity" : path, "", hasProject, [&editor, entity] {
+            editor.selectedAsset.clear();
+            editor.scene.select(entity);
+            editor.frameSelectionRequested = true;
+        });
+        commands.back().context = path;
+    });
+    // The project's assets: a scene opens, a visual script is edited, anything else is shown in the Explorer.
+    if (hasProject) {
+        for (const AssetInfo& asset : editor.assets.assets()) {
+            if (asset.isFolder()) continue;
+            std::string path = asset.path, folder = asset.parent();
+            AssetType type = asset.type;
+            add(asset.path, type == AssetType::Scene ? "Scene" : "Asset", "", true, [&editor, path, folder, type] {
+                if (type == AssetType::Scene) {
+                    editor.requestOpenScene(editor.assets.absolutePath(path));
+                } else if (type == AssetType::Graph) {
+                    editor.editGraph(path);
+                } else {
+                    editor.scene.clearSelection();
+                    editor.currentFolder = folder;
+                    editor.selectedAsset = path;
+                    if (Panel* panel = editor.registry.findPanel("Explorer")) {
+                        panel->isOpen = true;
+                        ImGui::SetWindowFocus("Explorer");
+                    }
+                }
+            });
+        }
+    }
+    return commands;
+}
+
+void EditorApp::drawCommandPalette() {
+    if (!palette_.isOpen()) return;
+    palette_.draw(paletteCommands());
 }
 
 void EditorApp::drawAboutDialog() {
@@ -951,9 +1077,26 @@ void EditorApp::drawBuildWindow() {
         ImGui::TextWrapped("An application that runs by itself: the game, its assets and the engine in one. You choose the folder it is put in.");
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.86f, 0.42f, 0.16f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.95f, 0.5f, 0.2f, 1.0f));
+        ImGui::BeginDisabled(deviceExport_.isRunning());
         bool wantsExport = ImGui::Button("Export for Mac...", ImVec2(200, 34));
+        ImGui::EndDisabled();
         ImGui::PopStyleColor(2);
         if (wantsExport) exportGame();          // saves the scene and builds the scripts first
+        ImGui::SameLine();
+        ImGui::Checkbox("Development", &exportsDevelopment_);
+        ui::tooltip("A development build: F1 shows the frame rate, the draw calls and where each frame's time goes; F2 the colliders.\n"
+                    "Leave it off for the build you give to players.");
+        ImGui::SameLine();
+        ImGui::Checkbox("For other Macs", &exportsForOtherMacs_);
+        ui::tooltip("Signed with your Developer ID certificate and notarized by Apple, so that it opens on any Mac without warnings.\n"
+                    "Needs a paid developer account, the certificate (Xcode > Settings > Accounts > Manage Certificates), and once, in Terminal:\n"
+                    "xcrun notarytool store-credentials molten --apple-id <your Apple ID> --team-id <your team>\n"
+                    "Without it the game runs on this Mac only.");
+        if (deviceExport_.isRunning()) ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.3f, 1.0f), "Notarizing%s", &"..."[2 - int(ImGui::GetTime() * 2) % 3]);
+        for (size_t i = deviceLines_.size() > 4 ? deviceLines_.size() - 4 : 0; i < deviceLines_.size(); i++) {
+            bool isError = deviceLines_[i].find("error") != std::string::npos;
+            ImGui::TextColored(isError ? ImVec4(1.0f, 0.45f, 0.4f, 1.0f) : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled), "%s", deviceLines_[i].c_str());
+        }
     } else {
         // Three programs do this (CMake, Xcode, the device's own tools): the editor runs them,
         // beside itself, and says here and in the Console what they say.
@@ -990,7 +1133,14 @@ void EditorApp::drawBuildWindow() {
         if (appleTeam_.size() < 6) ui::tooltip("Fill in Team first: an application for a device has to be signed");
         ImGui::SameLine();
         if (ImGui::Button("Open in Xcode", ImVec2(0, 34))) begin(DeviceExport::Goal::OpenInXcode);
-        ui::tooltip("Makes the Xcode project with the game in it and opens it: for choosing a simulator, seeing a signing problem, or sending it to the App Store");
+        ui::tooltip("Makes the Xcode project with the game in it and opens it: for choosing a simulator, or seeing a signing problem");
+        ImGui::SameLine();
+        ImGui::BeginDisabled(appleTeam_.size() < 6);
+        if (ImGui::Button("Send to App Store Connect", ImVec2(0, 34))) begin(DeviceExport::Goal::AppStore);
+        ImGui::EndDisabled();
+        ui::tooltip("Archives the game for release and sends it to App Store Connect, where it appears under TestFlight and can be sent for review.\n"
+                    "Before the first time: create the app in App Store Connect with the project's identifier (Project Settings), and sign in to Xcode with your account.\n"
+                    "The version is the project's; the build number is the date and time, so each one sent is new.");
         ImGui::EndDisabled();
         if (isBusy) {
             ImGui::SameLine();

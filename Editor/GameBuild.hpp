@@ -39,7 +39,7 @@ BuildResult buildGameCode(const Project& project, const std::string& hostExecuta
 /// Puts together `destination`/<Name>.app from the player, the engine's shaders and
 /// assets, the project and its built code. Returns "" or what went wrong.
 std::string exportMacApplication(const Project& project, const std::string& destination, const std::string& playerExecutable,
-                                 const std::string& engineRoot, std::string* applicationPath = nullptr);
+                                 const std::string& engineRoot, std::string* applicationPath = nullptr, bool isDevelopment = false);
 
 /// The path of the program that is running.
 std::string currentExecutablePath();

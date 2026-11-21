@@ -8,6 +8,7 @@
 #include "Assets/Gltf.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <filesystem>
 #include <map>
@@ -94,6 +95,133 @@ void World::setPreference(const std::string& name, float value) {
     if (!text::writeFile(preferencesFile, text)) logError("cannot save the preferences in %s", preferencesFile.c_str());
 }
 
+// ---------------------------------------------------------------- languages
+
+std::string World::translate(const std::string& text) const {
+    if (language.empty() || text.empty()) return text;
+    if (translationsFor_ != language) {
+        translationsFor_ = language;
+        translations_.clear();
+        std::optional<std::string> file = text::readFile(assetPath("Localization/" + language + ".txt"));
+        if (!file) {
+            logWarning("there is no Localization/%s.txt: texts are shown as written", language.c_str());
+            return text;
+        }
+        // "as written" = "translated", with \n for a new line and \" for a quote.
+        auto quoted = [](const std::string& line, size_t& at, std::string& out) {
+            at = line.find('"', at);
+            if (at == std::string::npos) return false;
+            out.clear();
+            for (at++; at < line.size(); at++) {
+                if (line[at] == '\\' && at + 1 < line.size()) {
+                    char next = line[++at];
+                    out += next == 'n' ? '\n' : next;
+                } else if (line[at] == '"') {
+                    at++;
+                    return true;
+                } else {
+                    out += line[at];
+                }
+            }
+            return false;
+        };
+        size_t start = 0;
+        while (start < file->size()) {
+            size_t end = file->find('\n', start);
+            std::string line = file->substr(start, end == std::string::npos ? std::string::npos : end - start);
+            start = end == std::string::npos ? file->size() : end + 1;
+            size_t at = line.find_first_not_of(" \t");
+            if (at == std::string::npos || line[at] == '#') continue;          // a comment
+            at = 0;
+            std::string from, to;
+            if (quoted(line, at, from) && line.find('=', at) != std::string::npos && quoted(line, at, to)) translations_[from] = to;
+        }
+    }
+    auto found = translations_.find(text);
+    return found == translations_.end() ? text : found->second;
+}
+
+std::vector<std::string> World::languages() const {
+    std::vector<std::string> found;
+    std::error_code code;
+    for (const auto& entry : std::filesystem::directory_iterator(assetPath("Localization"), code)) {
+        if (entry.path().extension() == ".txt") found.push_back(entry.path().stem().string());
+    }
+    std::sort(found.begin(), found.end());
+    return found;
+}
+
+// ---------------------------------------------------------------- saved games
+
+std::string World::saveFileOf(const std::string& slot) const {
+    if (preferencesFile.empty()) return "";
+    // A slot's name as a file name: letters, digits, spaces, - and _ kept, the rest made _.
+    std::string file;
+    for (char c : slot) file += (std::isalnum(static_cast<unsigned char>(c)) || c == ' ' || c == '-' || c == '_') ? c : '_';
+    if (file.empty()) file = "Save";
+    return (std::filesystem::path(preferencesFile).parent_path() / "Saves" / (file + ".save")).string();
+}
+
+bool World::saveGame(const SaveGame& save, const std::string& slot) {
+    std::string path = saveFileOf(slot);
+    if (path.empty()) {
+        savesInMemory_[slot] = save.toText();
+        return true;
+    }
+    std::error_code code;
+    std::filesystem::create_directories(std::filesystem::path(path).parent_path(), code);
+    // Written beside, then put in place: a game that stops halfway leaves the old save whole.
+    std::string partial = path + ".partial";
+    if (!text::writeFile(partial, save.toText())) {
+        logError("cannot save the game in %s", path.c_str());
+        return false;
+    }
+    std::filesystem::rename(partial, path, code);
+    if (code) logError("cannot save the game in %s: %s", path.c_str(), code.message().c_str());
+    return !code;
+}
+
+std::optional<SaveGame> World::loadGame(const std::string& slot) const {
+    std::string path = saveFileOf(slot);
+    if (path.empty()) {
+        auto found = savesInMemory_.find(slot);
+        if (found == savesInMemory_.end()) return std::nullopt;
+        return SaveGame::fromText(found->second);
+    }
+    std::optional<std::string> contents = text::readFile(path);
+    if (!contents) return std::nullopt;
+    return SaveGame::fromText(*contents);
+}
+
+bool World::hasSavedGame(const std::string& slot) const {
+    std::string path = saveFileOf(slot);
+    if (path.empty()) return savesInMemory_.count(slot) > 0;
+    std::error_code code;
+    return std::filesystem::exists(path, code);
+}
+
+bool World::deleteSavedGame(const std::string& slot) {
+    std::string path = saveFileOf(slot);
+    if (path.empty()) return savesInMemory_.erase(slot) > 0;
+    std::error_code code;
+    return std::filesystem::remove(path, code);
+}
+
+std::vector<std::string> World::savedGames() const {
+    std::vector<std::string> slots;
+    if (preferencesFile.empty()) {
+        for (const auto& entry : savesInMemory_) slots.push_back(entry.first);
+    } else {
+        std::error_code code;
+        std::filesystem::path folder = std::filesystem::path(preferencesFile).parent_path() / "Saves";
+        for (const auto& entry : std::filesystem::directory_iterator(folder, code)) {
+            if (entry.path().extension() == ".save") slots.push_back(entry.path().stem().string());
+        }
+    }
+    std::sort(slots.begin(), slots.end());
+    return slots;
+}
+
 // ---------------------------------------------------------------- entities
 
 namespace {
@@ -175,6 +303,7 @@ Entity World::spawnFromText(const std::string& prefabText, Vec3 position) {
     assets.mesh = [this](const std::string& name) { return loadMesh(name); };
     assets.texture = [this](const std::string& name, TextureFormat format) { return loadTexture(name, format); };
     assets.material = [this](const std::string& name) { return loadMaterial(name); };
+    assets.prefabText = [this](const std::string& name) { return text::readFile(assetPath(name)); };
     // A prefab is a scene file with a few entities in it. Its materials stay alive through
     // the meshes that use them; its settings are not the scene's and are dropped.
     std::vector<NamedMaterial> prefabMaterials;
@@ -293,6 +422,7 @@ bool World::loadSceneText(const std::string& name, const std::string& sceneText)
     assets.mesh = [this](const std::string& meshName) { return loadMesh(meshName); };
     assets.texture = [this](const std::string& textureName, TextureFormat format) { return loadTexture(textureName, format); };
     assets.material = [this](const std::string& materialName) { return loadMaterial(materialName); };
+    assets.prefabText = [this](const std::string& prefabName) { return text::readFile(assetPath(prefabName)); };
     std::string contents = sceneText;       // a copy: the text may be the one this world holds
     stopSounds();                           // what was sounding belonged to the scene that is leaving
     scene.clear();
@@ -384,6 +514,8 @@ void World::runComponents(bool isFixedStep, float dt, bool isLate) {
         // entities and components, its own included.
         scratchEntities_.clear();
         type.collect(scene, scratchEntities_);
+        if (scratchEntities_.empty()) continue;
+        Profiler::Scope timed(profiler, type.name);     // each kind of component its own line in the profiler
         std::unordered_set<uint64_t>& started = startedComponents_[type.name];
         std::vector<Entity> entities = scratchEntities_;
         for (Entity entity : entities) {
@@ -465,11 +597,16 @@ void World::drawComponents(Canvas& canvas) {
 void World::advance(double realDelta) {
     // What was created or moved since the last frame (by an editor, by code between frames)
     // has its place in the world before any component asks for it.
+    profiler.beginFrame();
     scene.updateTransforms();
     int steps = time.beginFrame(realDelta);
     for (int i = 0; i < steps; i++) {
-        runComponents(true, time.fixedDelta);
+        {
+            Profiler::Scope timed(profiler, "Fixed update");
+            runComponents(true, time.fixedDelta);
+        }
         if (!isSimulationPaused) {
+            Profiler::Scope timed(profiler, "Physics");
             prepareMeshColliders();
             physics.step(scene, time.fixedDelta);
             dispatchPhysicsEvents();
@@ -477,14 +614,24 @@ void World::advance(double realDelta) {
         scene.flushDestroyed();
     }
     if (!isSimulationPaused) physics.writeTransforms(scene, time.alpha);
-    runComponents(false, time.delta);
+    {
+        Profiler::Scope timed(profiler, "Update");
+        runComponents(false, time.delta);
+    }
     scene.flushDestroyed();
     scene.updateTransforms();
-    runComponents(false, time.delta, true);     // lateUpdate: cameras that follow, with everything where it will be drawn
+    {
+        Profiler::Scope timed(profiler, "Late update");
+        runComponents(false, time.delta, true);     // lateUpdate: cameras that follow, with everything where it will be drawn
+    }
     scene.updateTransforms();
-    updateParticles(scene, time.delta, materials_->settings.wind, materials_->settings.windGustiness, time.elapsed);
+    {
+        Profiler::Scope timed(profiler, "Particles");
+        updateParticles(scene, time.delta, materials_->settings.wind, materials_->settings.windGustiness, time.elapsed);
+    }
     applyPendingScene();
     input.endFrame();
+    profiler.endFrame();
 }
 
 std::optional<MeshData> World::readMeshData(const std::string& name) const {
@@ -530,6 +677,7 @@ void World::prepareMeshColliders() {
     };
     scene.each<Collider, Transform>([&](Entity, Collider& collider, Transform& transform) {
         if (collider.shape != ColliderShape::Mesh) return;
+        if (collider.meshName.empty()) return;          // its triangles come from a script (a SplineRoad), not from a file
         Vec3 scale = transform.scale;
         bool hasWhatItNeeds = collider.isConvex ? collider.convex != nullptr : collider.mesh != nullptr;
         if (hasWhatItNeeds && simd::length_squared(scale - collider.meshScale) < 1e-10f) return;

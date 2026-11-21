@@ -597,6 +597,26 @@ def driving():
     s.entity("Weather").component("Weather", weather=0, changeEvery=90)
     add_menus(s)
     write(folder + "/Assets/Scenes/Main.scene", s.text())
+    # The game in Italian: each text as the game writes it, and as it is shown in Italian.
+    italian = {
+        "RACE": "GARA", "SETTINGS": "IMPOSTAZIONI", "RESUME": "RIPRENDI", "START OVER": "RICOMINCIA", "BACK ON THE WHEELS": "RIMETTI SULLE RUOTE",
+        "MAIN MENU": "MENU PRINCIPALE", "BACK": "INDIETRO", "RACE AGAIN": "RIFAI LA GARA", "PAUSED": "PAUSA", "RESULTS": "RISULTATI",
+        "A FIAT 500 ON A LITTLE CIRCUIT": "UNA FIAT 500 SU UN PICCOLO CIRCUITO", "BEST LAP   {bestLap:time}": "GIRO MIGLIORE   {bestLap:time}",
+        "LAP {lap}": "GIRO {lap}", "BEST": "MIGLIORE", "LAP {raceLap} / {raceLaps}": "GIRO {raceLap} / {raceLaps}", "OF {cars}": "SU {cars}",
+        "LAP INVALID  -  TRACK LIMITS": "GIRO NON VALIDO  -  LIMITI DELLA PISTA", "{tyreWear}% WORN": "USURA {tyreWear}%",
+        "PIT LANE   60 KM/H": "CORSIA BOX   60 KM/H", "STOP IN YOUR BOX FOR NEW TYRES": "FERMATI NELLA TUA PIAZZOLA PER LE GOMME NUOVE",
+        "CHANGING TYRES  1": "CAMBIO GOMME  1", "CHANGING TYRES  2": "CAMBIO GOMME  2", "CHANGING TYRES  3": "CAMBIO GOMME  3", "CHANGING TYRES  4": "CAMBIO GOMME  4",
+        "SOFT": "MORBIDE", "MEDIUM": "MEDIE", "HARD": "DURE", "WET": "BAGNATO", "SUN": "SOLE", "CLOUDS": "NUVOLE", "RAIN": "PIOGGIA", "CHANGING": "VARIABILE",
+        "LANGUAGE": "LINGUA", "TIME TRIAL": "GIRO A TEMPO", "LAPS": "GIRI", "GRAPHICS": "GRAFICA", "LOW": "BASSA", "HIGH": "ALTA", "WEATHER": "METEO",
+        "TYRES AT THE START": "GOMME ALLA PARTENZA", "TOUCH BUTTONS": "TASTI TOUCH", "SMALL": "PICCOLI", "LARGE": "GRANDI", "SOUND": "AUDIO",
+        "OFF": "NO", "ON": "SI", "HALF": "MEZZO", "FULL": "PIENO", "ABS OFF": "ABS SPENTO", "GAS": "GAS", "BRAKE": "FRENO",
+        "W A S D  drive      Space  handbrake: drift": "W A S D  guida      Spazio  freno a mano: derapata",
+        "B  ABS      L  lamps      R  back on the wheels      T  touch controls      Esc  pause": "B  ABS      L  luci      R  rimetti sulle ruote      T  comandi touch      Esc  pausa",
+    }
+    lines = ["# Driving in Italian: \"as the game writes it\" = \"as it is shown\". Chosen in Settings, or by the system's language."]
+    for written, shown in italian.items():
+        lines.append('"%s" = "%s"' % (written, shown))
+    write(folder + "/Assets/Localization/it.txt", "\n".join(lines) + "\n")
 
 def add_menus(s):
     """The title, the pause and the settings, as interface pieces in groups that GameMenu shows and hides."""
@@ -631,7 +651,8 @@ def add_menus(s):
     settings = group("Settings Screen")
     piece(settings, "Settings Backdrop", "UIPanel", anchor=(0.5, 0.5), offset=(0, 0), size=(5000, 5000), color=(0.02, 0.022, 0.03, 0.8))
     piece(settings, "Settings Title", "HudText", text="SETTINGS", anchor=(0.5, 0.5), offset=(0, -300), size=34, color=(1, 1, 1, 1))
-    rows = (("RACE", "mode", ("RACE", "TIME TRIAL")),
+    rows = (("LANGUAGE", "language", ("ENGLISH", "ITALIANO")),
+            ("RACE", "mode", ("RACE", "TIME TRIAL")),
             ("LAPS", "laps", ("3", "5", "10")),
             ("GRAPHICS", "quality", ("LOW", "MEDIUM", "HIGH")),
             ("WEATHER", "weather", ("SUN", "CLOUDS", "RAIN", "CHANGING")),
@@ -640,14 +661,14 @@ def add_menus(s):
             ("ABS", "abs", ("OFF", "ON")),
             ("SOUND", "volume", ("OFF", "HALF", "FULL")))
     for r, (label, key, choices) in enumerate(rows):
-        y = -226 + r * 58
+        y = -232 + r * 54
         piece(settings, "Setting %s" % label.title(), "HudText", text=label, anchor=(0.5, 0.5), offset=(-400, y - 9), size=14, color=(1, 1, 1, 0.7))
         for c, choice in enumerate(choices):
             # The value kept is the button's place in the row, or for laps the number itself.
             value = int(choice) if key == "laps" else c
             piece(settings, "Option %s %d" % (key, value), "UIButton", label=choice, anchor=(0.5, 0.5), offset=(-200 + c * 140, y), size=(128, 48),
                   color=orange, textColor=(0.05, 0.05, 0.06, 1))
-    button(settings, "Settings Back", "BACK", 250)
+    button(settings, "Settings Back", "BACK", 262)
 
 def then(first, second):
     """Two rotations as one: `second` in the frame `first` makes (quaternions x y z w)."""

@@ -27,6 +27,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <optional>
 #include <vector>
 
 namespace molten {
@@ -41,6 +42,29 @@ struct NamedMaterial {
 /// it is never written to a file.
 struct EditorOnly {};
 
+/// A copy of a prefab placed in a scene, by reference: the scene keeps only this entity (its
+/// name, its place, the prefab's file); what the prefab holds is put under it each time the
+/// scene is read, so that a change to the prefab shows in every scene that has it. Prefabs
+/// may hold such copies of other prefabs.
+struct PrefabInstance {
+    std::string prefab;                 // "Prefabs/Wheel.prefab"
+};
+/// Marks what a PrefabInstance put under itself: it comes from the prefab, and is not written.
+struct FromPrefab {};
+
+/// A prefab variant: a prefab made from another (its base) with some values changed, as text:
+///
+///   molten-variant 1
+///   base "Prefabs/Enemy.prefab"
+///   name "Fast Enemy"                                    the root's name
+///   set "" NavAgent speed "6"                            on the root
+///   set "Body" MeshRenderer material "Materials/Red.material"
+///   set "Body/Hat" Transform scale "1.5 1.5 1.5"
+///
+/// An entity is named by the path of names below the root. Transform takes position, rotation
+/// (degrees about x, y and z) and scale; MeshRenderer takes material; any component a game or the
+/// kit declares takes its fields by name.
+bool isPrefabVariant(const std::string& text);
 /// How the names in a file become assets. Usually both lead to Assets (see sceneAssets());
 /// either may be empty, and then meshes or textures are simply left out.
 struct SceneAssets {
@@ -48,6 +72,8 @@ struct SceneAssets {
     std::function<std::shared_ptr<Texture>(const std::string&, TextureFormat)> texture;
     /// A material that is an asset of its own, by its file's name in Assets.
     std::function<std::shared_ptr<Material>(const std::string&)> material;
+    /// A prefab's text, by its file's name in Assets: for prefabs inside prefabs, and variants.
+    std::function<std::optional<std::string>(const std::string&)> prefabText;
 };
 
 /// A material as the text of a `.material` file, and back. `texture` loads the textures

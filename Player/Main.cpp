@@ -18,6 +18,7 @@
 
 #include "Core/Paths.hpp"
 #include "Platform/Application.hpp"
+#include "Platform/DeviceState.hpp"
 #include "Project/Project.hpp"
 
 #include <algorithm>
@@ -51,6 +52,16 @@ public:
             // What the game keeps for the player: settings, records. In the player's own folder,
             // named after the game (on a phone, inside the application's own).
             engine.preferencesFile = userDataDirectory(project->name.empty() ? std::string("Molten Game") : project->name) + "/Preferences.txt";
+            // The person's language, when the game has a table for it (Localization/<language>.txt).
+            std::string spoken = preferredLanguage();
+            for (const std::string& offered : engine.languages()) {
+                if (offered == spoken) engine.language = spoken;
+            }
+            // A development build (the editor's export marks it): the developer keys, the profiler's overlay with F1.
+            if (fs::exists(fs::path(projectPath) / "Development", code)) {
+                engine.setDeveloperKeys(true);
+                logInfo("a development build: F1 statistics and profiler, F2 colliders, F3 full screen, F4 screenshot");
+            }
             if (Window* window = engine.window()) {
                 window->setTitle(project->name);
                 if (!project->icon.empty()) window->setIcon(project->assetsDirectory() + "/" + project->icon);

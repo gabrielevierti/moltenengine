@@ -5,6 +5,7 @@
 #include "Rendering/GPUTypes.hpp"
 #include "Rendering/ShaderSource.hpp"
 
+#include <TargetConditionals.h>
 #include <cstdlib>
 
 namespace molten {
@@ -73,6 +74,10 @@ bool ShaderLibrary::compile() {
         return false;
     }
 
+    // Compiled ahead of time by the build (Tools/compile_shaders.sh), from these same files:
+    // used when no file has changed since, and the project has no surface shaders of its own.
+    if (surfaceCode_.empty() && loadPrecompiled()) return true;
+
     // The fullest shaders first, then with less: if only the extras fail (a mistake in
     // them, an older system), or only the ray tracing, the game still runs with the rest.
     struct Variant {
@@ -93,6 +98,39 @@ bool ShaderLibrary::compile() {
         }
         if (compileVariant(source.text, variant.rayTracing, variant.extras, false)) return true;
         logWarning("the shaders did not compile%s%s; trying with less", variant.rayTracing ? " with ray tracing" : "", variant.extras ? " with the extras" : "");
+    }
+    return false;
+}
+
+bool ShaderLibrary::loadPrecompiled() {
+#if TARGET_OS_OSX
+    const char* platform = "macos";
+#else
+    const char* platform = nullptr;         // iPhone and iPad: compiled when the game starts, for now
+#endif
+    if (!platform) return false;
+    for (bool withRayTracing : {true, false}) {
+        if (withRayTracing && !allowRayTracing_) continue;
+        std::filesystem::path path = std::filesystem::path(directory_) / "Compiled" /
+                                     (std::string("Molten-") + platform + (withRayTracing ? "-rt" : "-plain") + ".metallib");
+        std::error_code code;
+        auto made = std::filesystem::last_write_time(path, code);
+        if (code || made < loadedTime_) continue;        // missing, or older than the sources: compiled from them instead
+        NS::Error* error = nullptr;
+        auto loaded = NS::TransferPtr(device_->newLibrary(NS::URL::fileURLWithPath(toNSString(path.string())), &error));
+        if (!loaded) {
+            logWarning("the precompiled shaders %s could not be loaded (%s): compiling the sources", path.string().c_str(),
+                       error ? error->localizedDescription()->utf8String() : "unknown error");
+            continue;
+        }
+        library_ = loaded;
+        hasRayTracing_ = withRayTracing;
+        hasExtras_ = true;
+        hasSurfaceCode_ = false;
+        pipelines_.clear();
+        lastError_.clear();
+        logInfo("shaders loaded precompiled from %s", path.string().c_str());
+        return true;
     }
     return false;
 }

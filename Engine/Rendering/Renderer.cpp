@@ -377,6 +377,21 @@ bool Renderer::buildSceneAccelerationStructure(MTL::CommandBuffer* commandBuffer
     return true;
 }
 
+void Renderer::adjustDynamicScale() {
+    if (!settings.dynamicResolution) {
+        dynamicScale_ = 1.0f;
+        return;
+    }
+    // In steps, and not more often than every half second: each change makes new targets.
+    framesSinceScaleChange_++;
+    float gpu = lastGpuMilliseconds(), budget = 1000.0f / std::max(settings.targetFrameRate, 1.0f);
+    if (gpu <= 0 || framesSinceScaleChange_ < 30) return;
+    float lowest = std::clamp(settings.lowestDynamicScale, 0.25f, 1.0f), before = dynamicScale_;
+    if (gpu > budget * 0.92f) dynamicScale_ = std::max(lowest, dynamicScale_ - 0.1f);           // behind: smaller, quickly
+    else if (gpu < budget * 0.7f) dynamicScale_ = std::min(1.0f, dynamicScale_ + 0.05f);      // room to spare: larger, slowly
+    if (dynamicScale_ != before) framesSinceScaleChange_ = 0;
+}
+
 void Renderer::swapTargets(size_t slot) {
     if (targetSets_.size() <= slot) targetSets_.resize(slot + 1);
     TargetSet& kept = targetSets_[slot];
@@ -392,17 +407,22 @@ void Renderer::swapTargets(size_t slot) {
     std::swap(kept.occlusionRaw, occlusionRaw_);
     std::swap(kept.occlusion, occlusion_);
     std::swap(kept.bloom, bloom_);
+    std::swap(kept.upscaler, upscaler_);
 }
 
 void Renderer::render(Scene& scene, const Canvas& canvas, const RenderTarget& target, double time) {
     if (!target.texture) return;
 
     // At most three frames may be waiting for the GPU. If it is behind, wait here.
-    dispatch_semaphore_wait(frameSemaphore_, DISPATCH_TIME_FOREVER);
+    {
+        Profiler::Scope timed(profilerOrIdle(), "Waiting for the GPU");
+        dispatch_semaphore_wait(frameSemaphore_, DISPATCH_TIME_FOREVER);
+    }
     frameIndex_ = (frameIndex_ + 1) % kFramesInFlight;
     allocator().reset();
     frameNumber_++;
     stats = RenderStats{};
+    adjustDynamicScale();
     hasSceneStructureThisFrame_ = false;
     // What was replaced during the last frame has been drawn with for the last time.
     retiredTextures_.clear();
@@ -452,28 +472,40 @@ void Renderer::render(Scene& scene, const Canvas& canvas, const RenderTarget& ta
         sceneViewport = viewportBefore;
         drawsDebugLines_ = true;
         bool canvasIsInAView = canvasView >= 0 && size_t(canvasView) < views.size() && views[size_t(canvasView)].width > 0;
+        Profiler::Scope timed(profilerOrIdle(), "Windows over the views");
         renderInterface(commandBuffer, canvasIsInAView ? noCanvas : canvas, target);
     }
     debug.clear();
 
     if (target.drawable) commandBuffer->presentDrawable(target.drawable);
     dispatch_semaphore_t semaphore = frameSemaphore_;
-    commandBuffer->addCompletedHandler([semaphore](MTL::CommandBuffer*) { dispatch_semaphore_signal(semaphore); });
+    std::atomic<float>* gpuTime = &lastGpuMilliseconds_;
+    commandBuffer->addCompletedHandler([semaphore, gpuTime](MTL::CommandBuffer* finished) {
+        double seconds = finished->GPUEndTime() - finished->GPUStartTime();
+        if (seconds > 0) gpuTime->store(float(seconds * 1000.0), std::memory_order_relaxed);
+        dispatch_semaphore_signal(semaphore);
+    });
     commandBuffer->commit();
 }
 
 void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const Canvas& canvas, const RenderTarget& target, double time,
                           bool withOverlay) {
     Rect area = sceneRect(target.texture);
-    int width = std::max(1, int(float(area.width) * settings.renderScale));
-    int height = std::max(1, int(float(area.height) * settings.renderScale));
+    float scale = settings.renderScale * dynamicScale_ * (settings.followsDeviceHeat ? heatScale : 1.0f);
+    int width = std::max(1, int(float(area.width) * scale));
+    int height = std::max(1, int(float(area.height) * scale));
     ensureTargets(width, height);
     ensureShadowMap();
 
     // ---- what is in the scene
+    Profiler& timing = profilerOrIdle();
+    Profiler::Scope timedView(timing, withOverlay ? "The picture" : "A view of the editor");
     View view = findView(scene, float(width) / float(height));
     std::vector<DrawItem> items;
-    collectItems(scene, view, items);
+    {
+        Profiler::Scope timed(timing, "Collect and cull");
+        collectItems(scene, view, items);
+    }
 
     gpu::FrameUniforms frame{};
     gpu::LightData lights[gpu::MMMaxLights];
@@ -542,7 +574,10 @@ void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const
     // The structure rays are traced against holds everything that casts a shadow, seen
     // by the camera or not: what is behind the camera still shades what is in front.
     // It is the same for every picture of a frame: built for the first that wants it.
-    if (wantsTracedShadows && !hasSceneStructureThisFrame_) hasSceneStructureThisFrame_ = buildSceneAccelerationStructure(commandBuffer, items);
+    if (wantsTracedShadows && !hasSceneStructureThisFrame_) {
+        Profiler::Scope timed(timing, "Ray tracing structure");
+        hasSceneStructureThisFrame_ = buildSceneAccelerationStructure(commandBuffer, items);
+    }
     tracesRaysThisFrame_ = wantsTracedShadows && hasSceneStructureThisFrame_;
     frame.shadowRayCount = tracesRaysThisFrame_ ? uint32_t(std::clamp(settings.shadowRayCount, 1, 16)) : 0u;
     frame.occlusionRayCount = tracesRaysThisFrame_ && settings.rayTracedOcclusion ? uint32_t(std::clamp(settings.occlusionRayCount, 1, 16)) : 0u;
@@ -556,12 +591,25 @@ void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const
     FrameAllocator::Allocation frameUniforms = allocator().copy(frame);
     FrameAllocator::Allocation lightBuffer = allocator().copyArray(lights, size_t(lightCount));
 
+    // What each pass costs to prepare and encode on the CPU (the GPU's time is the frame's, below).
     environment_.updateIfNeeded(commandBuffer, frame);
-    if (frame.cascadeCount > 0) renderShadows(commandBuffer, items, cascades);
-    if (settings.ambientOcclusionEnabled) renderOcclusion(commandBuffer, opaque, view, passUniforms);
-    renderScene(commandBuffer, scene, opaque, transparent, view, passUniforms, frameUniforms, lightBuffer);
-    renderBloom(commandBuffer);
-    renderFinal(commandBuffer, canvas, target, withOverlay);
+    if (frame.cascadeCount > 0) {
+        Profiler::Scope timed(timing, "Shadow maps");
+        renderShadows(commandBuffer, items, cascades);
+    }
+    if (settings.ambientOcclusionEnabled) {
+        Profiler::Scope timed(timing, "Ambient occlusion");
+        renderOcclusion(commandBuffer, opaque, view, passUniforms);
+    }
+    {
+        Profiler::Scope timed(timing, "Scene pass");
+        renderScene(commandBuffer, scene, opaque, transparent, view, passUniforms, frameUniforms, lightBuffer);
+    }
+    {
+        Profiler::Scope timed(timing, "Bloom and final");
+        renderBloom(commandBuffer);
+        renderFinal(commandBuffer, canvas, target, withOverlay);
+    }
 }
 
 }  // namespace molten

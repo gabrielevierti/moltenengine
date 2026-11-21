@@ -151,6 +151,26 @@ In the editor, Play runs the scene as it is open, saved or not, and starting ove
 
 **Layouts.** The default is Unity's: Hierarchy at the left, Inspector at the right with a small Viewer under it, Scene and Game as tabs in the middle, and Explorer, Console, Input and Visual Script as tabs along the bottom. Run, Hold and Frame are at the top right, beside the layout menu, which has four arrangements (Default, 2 by 3, Tall and Wide). Arrange the windows as you like and choose Save Layout: it joins the list, on this Mac, for every project. **Export Layout...** writes it to a file to keep or pass on; **Import Layout...** takes one back. The Scene and Game views never get smaller than 360 by 240.
 
+**Where the time goes.** Window > Profiler shows the last five seconds, a bar per frame for the CPU and a line for the GPU, and below them the parts of a frame (events, fixed update, physics, update and each kind of component in it, particles, interface, each pass the renderer prepares, and the time spent waiting for the GPU or the display) with their times: the average of the last second, or one frame's when its bar is clicked. When the CPU's bar is short and the GPU's line is high, the GPU is the limit; much time "Waiting for the GPU" says the same. In a running game, F1 shows the slowest parts of the last frame. Your own code can add parts: `Profiler::Scope timed(world.profiler, "Pathfinding");` times the rest of its block.
+
+**Saving the game.** Preferences hold settings and records; a game in progress goes in a `SaveGame`: numbers, words and positions by name, kept in a slot (a file in the game's Saves folder).
+
+```cpp
+SaveGame save;
+save.setNumber("level", 3);
+save.setVector("player", position);
+world.saveGame(save);                        // the slot "Save"; world.saveGame(save, "Slot 2") for another
+if (std::optional<SaveGame> saved = world.loadGame()) level = int(saved->number("level", 1));
+```
+
+`world.hasSavedGame()`, `world.deleteSavedGame()` and `world.savedGames()` (the slots there are) go with them.
+
+**Phones that heat up.** `world.deviceHeat()` says how hot the device is (0 cool to 3 very hot) and `world.isSavingBattery()` whether Low Power Mode is on. When it is hot the renderer already draws the scene smaller until it cools (Rendering > Quality); a game can do more, such as fewer effects. **Dynamic Resolution** (in the same place) draws the scene smaller whenever the GPU falls behind the frame rate it is given, and **MetalFX Upscaling** makes a smaller picture the screen's size with sharp edges.
+
+**Shipping.** In the Build window, **Send to App Store Connect** archives an iPhone and iPad game for release and uploads it: it appears under TestFlight, and from there goes to review. The app must exist in App Store Connect with the project's identifier, and Xcode must be signed in to your account; the build number is the date and time, so each upload is new. For the Mac, **For other Macs** signs the exported game with your Developer ID certificate and has Apple notarize it, so it opens on any Mac; once, in Terminal: `xcrun notarytool store-credentials molten --apple-id <your Apple ID> --team-id <your team>`. **Development** marks an export as a development build, where F1 shows the statistics and the profiler.
+
+**Shaders ahead of time.** With the Metal compiler installed (Xcode > Settings > Components > Metal Toolchain), `build.command` compiles the engine's shaders first: a mistake in them is reported there, and the engine starts without compiling them. Without it, nothing changes: the engine compiles them as it starts.
+
 **What the Scene view shows.** The arrow beside Snap opens its steps and the list of what is drawn over the scene: the grid (1 m squares near the ground, 10 m and 100 m from higher up, so it is there from far away too), the outline of what is selected, the colliders of everything, lights, cameras, particle effects, sounds, and what plugins draw. Each kind can be switched off, and its icons are then not clicked either. **Sound** at the right of the Game view's bar silences the game while you work, without changing its own settings. Pieces of the interface that are switched off (a menu the game opens later) are not chosen or moved by clicks in the Game view; choose them in the Hierarchy and switch them on to lay them out.
 
 **Explorer.** Right-click anywhere in it (the folder tree, a folder, the empty space, inside any folder) for New with every kind of asset, Import and Reveal. The size slider goes down to a list. **Console** is Unity's: errors, warnings, info and debug messages, each kind shown or hidden by its button with its count; Collapse folds repeats into one row with a count; Clear on Play; a search; click a row for the whole message below, to copy.
@@ -158,6 +178,40 @@ In the editor, Play runs the scene as it is open, saved or not, and starting ove
 In the Scene view, several selected objects move, turn and scale together. **Center** in the toolbar puts the handles at the middle of them all, which they turn and scale around; **Pivot** puts them on the last one chosen.
 
 In the scene view a camera is drawn as the pyramid of what it sees, a directional light as its rays, a spot light as its cone. A camera's scale changes nothing about its picture.
+
+## Curves: roads, rails, paths
+
+**Create > Paths > Spline** makes a curve; **Create > Paths > Road** makes one that is closed,
+with a road along it. A Spline's points are its children, named **Point 1**, **Point 2** and so
+on: the curve goes through them in the order of those numbers, smoothly. Move them in the Scene
+view like anything else; the curve is drawn there in blue (orange when it or one of its points
+is chosen), with an arrow that says which way it goes.
+
+**Edit > Add Spline Point** (or Cmd+K, "add point") puts a point after the one that is chosen,
+halfway to the next, or at the end when the Spline itself is chosen, and numbers them again.
+
+- **Spline**: `closed` joins the end to the start; `smoothness` is how many points are made
+  between two of its points.
+- **Spline Follower**, on anything: goes along the Spline whose entity is named in `spline`, at
+  `speed` meters a second; at the end it goes round again, comes back, or stops (`ending` 0, 1, 2).
+  `offset` moves it to a side of the curve, for a second lane.
+- **Spline Road**, on the Spline's own entity: a strip `width` meters wide, laid again as soon as a
+  point moves, with a collider to drive on. Give it a material in its Mesh Renderer.
+
+In code, `findSpline(world, "Track")->path` gives `pointAt(meters)`, `directionAt(meters)`,
+`length()` and `closestDistance(point)`: how far along the curve something is.
+
+## Finding anything: Cmd+K
+
+**Cmd+K** (or **Edit > Find Anything**) opens one field that finds by name everything the editor
+has: what the menus do, the windows, the Create menu, every entity of the scene and every asset
+of the project. A few letters are enough, in order: `svsc` finds Save Scene, `cpl` Create Point
+Light. Up and Down choose, Enter does it, Esc closes.
+
+An entity is chosen and the view goes to it; the place it is in is shown at the right and is
+searched too, so `rival 2 wheel` finds the wheels of that car and not the others. A scene opens,
+a visual script opens to be edited, any other asset is shown in the Explorer. Items plugins add
+to the menus are found as well.
 
 ## Reacting to what happens, in your own components
 
@@ -419,6 +473,28 @@ click in the Game view, and press, drag and click them there. A game that also h
 can hide its touch controls until the screen is touched (**Only On Touch Screens**).
 From code: `input.setVirtualAxis(...)`, `input.setVirtualButton(...)`.
 
+## The game in other languages
+
+Write the texts of the interface in one language, the one you work in. For every other
+language, add a file to **Assets/Localization**, named for the language (`it.txt`, `fr.txt`,
+`de.txt`), with a line per text: the text as the game writes it, then the text shown.
+
+```
+# Driving in Italian
+"RACE" = "GARA"
+"BEST LAP   {bestLap:time}" = "GIRO MIGLIORE   {bestLap:time}"
+"RAIN" = "PIOGGIA"
+```
+
+Texts, button labels and the words chosen by `{weather:SUN|CLOUDS|RAIN}` are all looked up.
+A text with no line is shown as written, so a table can start small. `\n` is a new line and
+`\"` a quote; lines that start with `#` are notes.
+
+A game made with **Build** starts in the language of the system, when it has a table for it.
+A script can change it with `world.language = "it"` (empty: as written), and
+`world.languages()` lists the tables the game has. Driving has a LANGUAGE row in its
+Settings that does this.
+
 ## Models in parts
 
 A glTF file with several materials is several meshes: `Models/car.glb#0`, `#1`, … one for each material, in the order the file
@@ -446,3 +522,48 @@ A **LOD Group** on a model draws a lighter version of it from far away. Under th
 ## Sounds that come from somewhere
 
 `world.placeSound(sound, position, fullWithin, silentBeyond)` puts a sound started with `world.startSound` at a place in the world: it is heard from that side of the camera, at full volume within `fullWithin` meters and fading to nothing at `silentBeyond`. Call it again as the thing moves. The rivals' engines in the Driving example are placed this way; the player's own is not, as it is always just there.
+
+## Characters
+
+A character is a **Character Controller** (a capsule the size of someone: radius, height, the step it climbs, the slope it walks) moved rather than pushed: it slides along walls, goes up steps and curbs, stands on slopes it can walk and slides off the steeper ones, and shoves crates out of its way. Its entity's position is its feet. Code moves it with `controller->move(world, self, displacement)`.
+
+For a player, add a **Character Mover**: it walks (and runs with Shift or the action "run") where the move actions say, as seen from the camera, jumps with the jump action, and turns to face where it goes. An **Orbit Camera** on the camera follows it from behind, turned by dragging with the mouse or with the right stick, and comes closer rather than go behind a wall.
+
+**Animation with states.** An Animator with a `controller` (a `.animator` file) plays states instead of one clip: the parameters the game sets, states that are a clip or a blend tree (Idle, Walk and Run by speed, kept in step), and transitions when the parameters say so. The Character Mover sets `speed`, `grounded`, `verticalSpeed` and the trigger `jump` on the Animator of its model by itself. The format is in Engine/Animation/AnimatorController.hpp; for example:
+
+```
+molten-animator 1
+parameter float speed 0
+parameter bool grounded 1
+parameter trigger jump
+state Locomotion blend speed
+  motion Idle 0
+  motion Walk 2.2
+  motion Run 5.5
+state Jump loops 0
+  motion Jump
+  event Audio/jump.wav 0
+start Locomotion
+transition Locomotion Jump when jump
+transition Jump Locomotion exit 0.9 blend 0.15
+```
+
+A **Two Bone IK** on the same entity puts the end of a limb (a foot, a hand, by its bone's name) on a target entity, bending the knee or elbow toward a pole.
+
+**Finding the way.** A **Navigation Area** looks at a rectangle of the world when the game starts: which ground can be walked (not too steep, with room above it for the agents' size) and which steps join it. A **Nav Agent** then walks to an entity (its `target`) or to a point (`agent->goTo(point)`) along the shortest path, round walls, with its Character Controller if it has one. A **Guard** on a Nav Agent walks a round of points ("Patrol Point 1", "Patrol Point 2"...), chases the player when it sees them, searches where it saw them last and goes back to its round.
+
+## Prefabs in prefabs, and variants
+
+A prefab dragged into a scene is a copy by reference (its name in blue in the Hierarchy): the scene keeps only where it is, and what the prefab holds is put under it each time the scene is opened, so that a change to the prefab shows in every scene. A prefab can hold copies of other prefabs in the same way. **Unpack Prefab** (right click in the Hierarchy) makes a copy the scene's own, to change freely.
+
+A **variant** (right click on a prefab in the Explorer: Create Variant) is its base with some values changed, written as the changes:
+
+```
+molten-variant 1
+base "Prefabs/Enemy.prefab"
+name "Fast Enemy"
+set "" NavAgent speed "6"
+set "Body" MeshRenderer material "Materials/Red.material"
+set "Body" Transform scale "1.2 1.2 1.2"
+```
+

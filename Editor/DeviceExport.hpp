@@ -21,6 +21,7 @@ public:
     enum class Goal {
         OpenInXcode,        // make the Xcode project and open it: the device is chosen and Run is pressed there
         Install,            // build it, put it on the device that is plugged in and start it
+        AppStore,           // archive it for release and send it to App Store Connect (TestFlight, then review)
     };
 
     ~DeviceExport();
@@ -28,6 +29,12 @@ public:
     /// Starts the work. `team` is the Apple developer team that signs the application; it may
     /// be empty for OpenInXcode (it is then chosen in Xcode). False if one is already running.
     bool start(const Project& project, const std::string& engineRoot, const std::string& team, Goal goal);
+    /// Runs any script the same way: beside the editor, its lines kept for takeLines().
+    bool startScript(const std::string& text);
+    /// A Mac application made ready for other Macs: signed with the Developer ID certificate in
+    /// this Mac's keychain, sent to Apple to be notarized (with the credentials kept by
+    /// `xcrun notarytool store-credentials <profile>`), and stapled.
+    static std::string notarizeScript(const std::string& application, const std::string& profile);
 
     bool isRunning() const { return isRunning_; }
     /// True once a run has ended, until the next starts; `succeeded` says how.
