@@ -30,6 +30,14 @@ struct Animator {
     /// A .animator file (see AnimatorController.hpp): states, parameters and transitions. With
     /// one, the animator plays its states instead of `clip`, as the parameters say.
     std::string controller;
+    /// Root motion: the entity goes where the animation walks it (a step that covers the ground it
+    /// should, a dodge, a climb), instead of the model walking away from its entity. The root
+    /// bone's movement across the ground moves the entity (with its Character Controller if it
+    /// has one, so that it still stops at walls); the bone itself stays over it.
+    bool rootMotion = false;
+    std::string rootBone;               // the bone that carries the body: empty for the skeleton's first
+    /// Set by a Ragdoll while it is limp: the bones follow its bodies, and the animation waits.
+    bool isHeldByRagdoll = false;
 
     void update(World& world, Entity self, float dt);
 
@@ -67,6 +75,26 @@ struct Animator {
     float progress = 0;                 // 0 to 1 through the state; past 1 for a state that has looped
     float stateBlendTime = 0.2f;        // of the transition being eased through
     void updateStates(World& world, float dt);
+    /// What one set of states plays: the base's, or a layer's.
+    struct Playing {
+        int state = -1;
+        float progress = 0;
+        float blend = 1;
+        float stateBlendTime = 0.2f;
+        GltfPose pose, blendFrom;
+    };
+    std::vector<Playing> layerPlaying;  // one for each layer of the controller
+    std::vector<std::vector<float>> layerMasks;   // for each layer, how much of it each node takes (0 or 1)
+    void runStates(World& world, float dt, const std::vector<AnimatorController::State>& states,
+                   const std::vector<AnimatorController::Transition>& transitions, Playing& run, bool isBase);
+    void putLayers(World& world, float dt);
+    void moveWithRoot(World& world, Entity self);
+    Vec3 lastRoot{0, 0, 0};
+    float lastRootTime = 0;
+    int lastRootAnimation = -1;
+    bool hasLastRoot = false;
+    Vec3 lastStep{0, 0, 0};
+    Vec3 rootMoved{0, 0, 0};            // how far root motion moved the entity this frame, in the world
     void reachWithLimbs(World& world, Entity self);
 };
 

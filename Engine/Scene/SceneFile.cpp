@@ -80,6 +80,7 @@ void writeMaterialProperties(std::string& out, const Material& m, int indent) {
     Line("doubleSided", indent).flag(m.isDoubleSided).to(out);
     Line("unlit", indent).flag(m.isUnlit).to(out);
     if (m.isWater) Line("water", indent).number(m.waveScale).number(m.waveHeight).to(out);
+    if (m.sway > 0) Line("sway", indent).number(m.sway).to(out);
     if (!m.shader.empty()) {
         Line("surfaceShader", indent).string(m.shader).to(out);
         for (const Material::ShaderValue& item : m.shaderValues) Line("shaderValue", indent).word(item.name.c_str()).vec(item.value).to(out);
@@ -171,6 +172,7 @@ void readMaterialProperty(Words& words, Material& material, const TextureLoader&
         material.waveScale = words.number(1);
         material.waveHeight = words.number(1);
     }
+    else if (key == "sway") material.sway = words.number(0);
     else if (key == "surfaceShader") material.shader = words.string();
     else if (key == "shaderValue") {
         std::string name = words.string();
@@ -250,6 +252,15 @@ std::string writeScene(Scene& scene, const std::vector<NamedMaterial>& materials
         Line("clouds").number(settings.sky.cloudCoverage).number(settings.sky.cloudScale).to(out);
         Line("volumetrics").flag(settings.sky.cloudsHaveDepth).integer(settings.fogShaftSteps).to(out);
         Line("lens").number(settings.lensDistortion).number(settings.chromaticAberration).number(settings.filmGrain).to(out);
+        if (settings.sky.isPhysical || settings.sky.stars > 0)
+            Line("physicalSky").flag(settings.sky.isPhysical).number(settings.sky.haze).number(settings.sky.stars).to(out);
+        if (!settings.colorGrading.empty()) Line("colorGrading").string(settings.colorGrading).number(settings.colorGradingAmount).to(out);
+        if (settings.autoExposure)
+            Line("autoExposure").flag(true).number(settings.exposureCompensation).number(settings.exposureAdaptSpeed)
+                .number(settings.darkestExposure).number(settings.brightestExposure).to(out);
+        if (settings.depthOfField)
+            Line("depthOfField").flag(true).number(settings.focusDistance).number(settings.focusRange).number(settings.focusBlur).to(out);
+        if (settings.motionBlur) Line("motionBlur").flag(true).number(settings.motionBlurAmount).to(out);
     }
 
     // ---- materials: the named ones, then any other that an entity uses
@@ -303,7 +314,12 @@ std::string writeScene(Scene& scene, const std::vector<NamedMaterial>& materials
         Line("transform").vec(t.position).vec(t.rotation.vector).vec(t.scale).to(out);
         if (scene.isAlive(t.parent) && fileIndex.count(t.parent.index)) Line("parent").integer(fileIndex[t.parent.index]).to(out);
         if (!t.isActive) Line("inactive").to(out);
-        if (const PrefabInstance* instance = scene.get<PrefabInstance>(entity)) Line("prefab").string(instance->prefab).to(out);
+        if (const PrefabInstance* instance = scene.get<PrefabInstance>(entity)) {
+            Line("prefab").string(instance->prefab).to(out);
+            for (const PrefabOverride& change : instance->overrides) {
+                Line("override").string(change.path).string(change.component).string(change.field).string(change.value).to(out);
+            }
+        }
         if (const Tag* tag = scene.get<Tag>(entity); tag && (tag->value != "Untagged" || tag->layer != 0)) {
             Line("tag").string(tag->value).integer(tag->layer).to(out);
         }
@@ -374,6 +390,9 @@ namespace {
 /// How deep prefabs inside prefabs (and variants of variants) go: a prefab that holds itself stops here.
 thread_local int gPrefabDepth = 0;
 
+
+}  // namespace
+
 /// An entity under `root` by the path of names below it ("Body/Hat"); "" is the root itself.
 Entity entityAtPath(Scene& scene, Entity root, const std::string& path) {
     Entity at = root;
@@ -393,6 +412,92 @@ Entity entityAtPath(Scene& scene, Entity root, const std::string& path) {
     }
     return at;
 }
+
+bool pathBelow(const Scene& scene, Entity root, Entity entity, std::string& path) {
+    path.clear();
+    std::vector<std::string> names;
+    Entity at = entity;
+    for (int depth = 0; depth < 64; depth++) {
+        if (at == root) {
+            for (size_t k = names.size(); k-- > 0;) path += names[k] + (k > 0 ? "/" : "");
+            return true;
+        }
+        const Transform* place = scene.get<Transform>(at);
+        const Name* name = scene.get<Name>(at);
+        if (!place || !scene.isAlive(place->parent)) break;
+        names.push_back(name ? name->value : std::string());
+        at = place->parent;
+    }
+    path.clear();
+    return false;
+}
+
+bool PrefabInstance::setOverride(const PrefabOverride& change) {
+    for (PrefabOverride& existing : overrides) {
+        if (existing.path == change.path && existing.component == change.component && existing.field == change.field) {
+            if (existing.value == change.value) return false;
+            existing.value = change.value;
+            return true;
+        }
+    }
+    overrides.push_back(change);
+    return true;
+}
+
+bool PrefabInstance::removeOverride(const std::string& path, const std::string& component, const std::string& field) {
+    size_t before = overrides.size();
+    overrides.erase(std::remove_if(overrides.begin(), overrides.end(),
+                                   [&](const PrefabOverride& o) { return o.path == path && o.component == component && o.field == field; }),
+                    overrides.end());
+    return overrides.size() != before;
+}
+
+const PrefabOverride* PrefabInstance::findOverride(const std::string& path, const std::string& component, const std::string& field) const {
+    for (const PrefabOverride& existing : overrides) {
+        if (existing.path == path && existing.component == component && existing.field == field) return &existing;
+    }
+    return nullptr;
+}
+
+bool applyPrefabValue(Scene& scene, Entity root, const PrefabOverride& change, const SceneAssets& assets) {
+    Entity target = entityAtPath(scene, root, change.path);
+    if (!target.isValid()) return false;
+    const std::string &component = change.component, &field = change.field, &value = change.value;
+    if (component == "Transform") {
+        Transform* place = scene.get<Transform>(target);
+        Words numbers("value " + value);         // the first word of a line is its key
+        if (!place) return false;
+        if (field == "position") place->position = numbers.vec3(place->position);
+        else if (field == "scale") place->scale = numbers.vec3(place->scale);
+        else if (field == "rotation") {
+            Vec3 degrees = numbers.vec3();
+            place->rotation = simd::normalize(axisAngle(Vec3{0, 1, 0}, radians(degrees.y)) * axisAngle(Vec3{1, 0, 0}, radians(degrees.x)) *
+                                              axisAngle(Vec3{0, 0, 1}, radians(degrees.z)));
+        } else if (field == "active") {
+            place->isActive = value != "0";
+        } else {
+            return false;
+        }
+        return true;
+    }
+    if (component == "MeshRenderer" && field == "material") {
+        MeshRenderer* renderer = scene.get<MeshRenderer>(target);
+        if (!renderer) return false;
+        if (assets.material) {
+            if (std::shared_ptr<Material> material = assets.material(value)) renderer->material = material;
+        }
+        return true;
+    }
+    const ComponentType* type = ComponentRegistry::instance().find(component);
+    if (!type) return false;
+    const Field* declared = type->findField(field);
+    void* instance = type->get ? type->get(scene, target) : nullptr;
+    if (!declared || !instance) return false;
+    declared->setValueText(instance, value);
+    return true;
+}
+
+namespace {
 
 bool readVariant(const std::string& text, Scene& scene, std::vector<NamedMaterial>& materials, RenderSettings& settings, const SceneAssets& assets,
                  std::vector<Entity>* created);
@@ -504,6 +609,27 @@ bool readScene(const std::string& text, Scene& scene, std::vector<NamedMaterial>
             } else if (key == "clouds") {
                 settings.sky.cloudCoverage = words.number();
                 settings.sky.cloudScale = words.number(1);
+            } else if (key == "physicalSky") {
+                settings.sky.isPhysical = words.flag(false);
+                settings.sky.haze = words.number(0.3f);
+                settings.sky.stars = words.number(0);
+            } else if (key == "colorGrading") {
+                settings.colorGrading = words.string();
+                settings.colorGradingAmount = words.number(1);
+            } else if (key == "autoExposure") {
+                settings.autoExposure = words.flag(false);
+                settings.exposureCompensation = words.number(0);
+                settings.exposureAdaptSpeed = words.number(1.5f);
+                settings.darkestExposure = words.number(0.25f);
+                settings.brightestExposure = words.number(8);
+            } else if (key == "depthOfField") {
+                settings.depthOfField = words.flag(false);
+                settings.focusDistance = words.number(10);
+                settings.focusRange = words.number(4);
+                settings.focusBlur = words.number(8);
+            } else if (key == "motionBlur") {
+                settings.motionBlur = words.flag(false);
+                settings.motionBlurAmount = words.number(0.5f);
             } else if (key == "lens") {
                 settings.lensDistortion = words.number();
                 settings.chromaticAberration = words.number();
@@ -557,7 +683,16 @@ bool readScene(const std::string& text, Scene& scene, std::vector<NamedMaterial>
             } else if (key == "parent") {
                 parents.push_back({entity, words.integer(-1)});
             } else if (key == "prefab") {
-                scene.add(entity, PrefabInstance{words.string()});
+                scene.add(entity, PrefabInstance{words.string(), {}});
+            } else if (key == "override") {
+                if (PrefabInstance* instance = scene.get<PrefabInstance>(entity)) {
+                    PrefabOverride change;
+                    change.path = words.string();
+                    change.component = words.string();
+                    change.field = words.string();
+                    change.value = words.string();
+                    instance->overrides.push_back(change);
+                }
             } else if (key == "camera") {
                 Camera c;
                 c.fovY = words.number(c.fovY);
@@ -700,6 +835,14 @@ bool readScene(const std::string& text, Scene& scene, std::vector<NamedMaterial>
             }
             nested.push_back(part);
         }
+        // What this copy changes of its prefab.
+        if (const PrefabInstance* changed = scene.get<PrefabInstance>(instance)) {
+            std::vector<PrefabOverride> overrides = changed->overrides;
+            scene.updateTransforms();
+            for (const PrefabOverride& change : overrides) {
+                if (!applyPrefabValue(scene, instance, change, assets)) logError("the copy of %s has nothing at \"%s\" for its change", path.c_str(), change.path.c_str());
+            }
+        }
     }
     if (created) {
         *created = entities;
@@ -754,33 +897,8 @@ bool readVariant(const std::string& text, Scene& scene, std::vector<NamedMateria
         if (Name* named = scene.get<Name>(root)) named->value = name;
     }
     for (const std::vector<std::string>& set : sets) {
-        const std::string &path = set[0], &component = set[1], &field = set[2], &value = set[3];
-        Entity target = entityAtPath(scene, root, path);
-        if (!target.isValid()) {
-            logError("prefab variant: the base has no \"%s\"", path.c_str());
-            continue;
-        }
-        if (component == "Transform") {
-            Transform* place = scene.get<Transform>(target);
-            Words numbers("value " + value);         // the first word of a line is its key
-            if (!place) continue;
-            if (field == "position") place->position = numbers.vec3(place->position);
-            else if (field == "scale") place->scale = numbers.vec3(place->scale);
-            else if (field == "rotation") {
-                Vec3 degrees = numbers.vec3();
-                place->rotation = simd::normalize(axisAngle(Vec3{0, 1, 0}, radians(degrees.y)) * axisAngle(Vec3{1, 0, 0}, radians(degrees.x)) *
-                                                  axisAngle(Vec3{0, 0, 1}, radians(degrees.z)));
-            }
-        } else if (component == "MeshRenderer" && field == "material") {
-            if (MeshRenderer* renderer = scene.get<MeshRenderer>(target); renderer && assets.material) {
-                if (std::shared_ptr<Material> material = assets.material(value)) renderer->material = material;
-            }
-        } else if (const ComponentType* type = ComponentRegistry::instance().find(component)) {
-            const Field* declared = type->findField(field);
-            void* instance = type->get ? type->get(scene, target) : nullptr;
-            if (declared && instance) declared->setValueText(instance, value);
-            else logError("prefab variant: \"%s\" has no %s with a field %s", path.c_str(), component.c_str(), field.c_str());
-        }
+        PrefabOverride change{set[0], set[1], set[2], set[3]};
+        if (!applyPrefabValue(scene, root, change, assets)) logError("prefab variant: the base has no \"%s\" with that", set[0].c_str());
     }
     if (created) *created = made;
     return true;

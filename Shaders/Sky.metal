@@ -66,12 +66,76 @@ static float cloudAmount(float3 at, float base, float top, constant FrameUniform
 }
 #endif
 
+// ---------------------------------------------------------------- the sky from the air itself
+
+// Sunlight scattered by the air (Rayleigh: blue, all round) and by haze (Mie: white, toward
+// the sun), along the line of sight, after Preetham, Shirley and Smits, "A Practical Analytic
+// Model for Daylight". The sun's height decides everything: blue at noon, gold and red as it
+// sets, dark when it has gone.
+static float3 physicalSkyColor(float3 d, float3 toSun, float haze) {
+    const float3 up = float3(0.0, 1.0, 0.0);
+    float sunHeight = dot(toSun, up);
+    // How much sunlight there is at all: less as the sun nears the horizon, none well below it.
+    float sunLight = 1000.0 * max(0.0, 1.0 - exp(-((kPi / 1.95 - acos(clamp(sunHeight, -1.0, 1.0))) / 1.5)));
+    float sunFade = 1.0 - saturate(1.0 - exp(sunHeight));
+    float3 rayleigh = float3(5.804542996e-6, 1.356291141e-5, 3.026590246e-5) * (1.0 - (1.0 - sunFade));
+    float turbidity = 2.0 + haze * 8.0;
+    float3 mie = 0.434 * (0.2 * turbidity * 10e-18) * float3(1.839991851e14, 2.779802391e14, 4.079047954e14) * 0.005;
+    // How much air the eye looks through: more toward the horizon.
+    float zenith = acos(max(0.0, dot(up, d)));
+    float air = 1.0 / (cos(zenith) + 0.15 * pow(max(93.885 - zenith * 180.0 / kPi, 0.001), -1.253));
+    float3 through = exp(-(rayleigh * 8.4e3 * air + mie * 1.25e3 * air));
+    float cosine = dot(d, toSun);
+    float rayleighPhase = 3.0 / (16.0 * kPi) * (1.0 + pow(cosine * 0.5 + 0.5, 2.0));
+    const float g = 0.8;
+    float miePhase = 1.0 / (4.0 * kPi) * (1.0 - g * g) / pow(max(1.0 - 2.0 * g * cosine + g * g, 0.0001), 1.5);
+    float3 scattered = (rayleigh * rayleighPhase + mie * miePhase) / max(rayleigh + mie, float3(1e-12));
+    float3 light = pow(sunLight * scattered * (1.0 - through), float3(1.5));
+    light *= mix(float3(1.0), pow(max(sunLight * scattered * through, float3(0.0)), float3(0.5)), saturate(pow(1.0 - sunHeight, 5.0)));
+    float3 color = (light + 0.1 * through) * 0.04 + float3(0.0, 0.0003, 0.00075);
+    return color * 0.35;
+}
+
+// A field of stars, fixed to the sky and turning with it, each twinkling.
+static float3 starsAt(float3 d, float time, float brightness) {
+    // The sky turns about the pole, once a day.
+    float turn = time * (2.0 * kPi / 86400.0);
+    float c = cos(turn), s = sin(turn);
+    float3 p = float3(d.x * c - d.z * s, d.y, d.x * s + d.z * c) * 160.0;
+    float3 cell = floor(p);
+    float3 inCell = p - cell;
+    float3 seed = fract(sin(float3(dot(cell, float3(127.1, 311.7, 74.7)), dot(cell, float3(269.5, 183.3, 246.1)),
+                                   dot(cell, float3(113.5, 271.9, 124.6)))) * 43758.5453);
+    if (seed.x < 0.93) {
+        return float3(0.0);                                     // most cells have no star
+    }
+    float3 at = 0.2 + 0.6 * seed;
+    float distance = length(inCell - at);
+    float size = 0.06 + 0.06 * seed.y;
+    float glow = smoothstep(size, 0.0, distance);
+    float twinkle = 0.75 + 0.25 * sin(time * (2.0 + seed.z * 5.0) + seed.y * 40.0);
+    float strength = pow((seed.x - 0.93) / 0.07, 6.0) * 3.0 + 0.15;
+    // Some a little blue, some a little gold.
+    float3 tint = mix(float3(1.0, 0.85, 0.7), float3(0.75, 0.85, 1.0), seed.z);
+    return tint * glow * twinkle * strength * brightness;
+}
+
 static float3 skyRadiance(float3 direction, constant FrameUniforms &frame, bool withSunDisk) {
     float3 d = normalize(direction);
     float3 toSun = -frame.sunDirection;
 
-    // Horizon to zenith. The square root keeps the horizon band thin, as in a real sky.
-    float3 color = mix(frame.skyHorizonColor, frame.skyZenithColor, sqrt(saturate(d.y)));
+    float3 color;
+    if (frame.physicalSky != 0u) {
+        color = physicalSkyColor(d, toSun, frame.skyHaze);
+    } else {
+        // Horizon to zenith. The square root keeps the horizon band thin, as in a real sky.
+        color = mix(frame.skyHorizonColor, frame.skyZenithColor, sqrt(saturate(d.y)));
+    }
+    // The stars, when the sun is down; dimmed toward the horizon, where the air is thick.
+    if (frame.starBrightness > 0.0 && withSunDisk && d.y > 0.0) {
+        float night = smoothstep(0.05, -0.12, toSun.y);
+        if (night > 0.0) color += starsAt(d, frame.starTime, frame.starBrightness) * night * smoothstep(0.0, 0.25, d.y);
+    }
     // Below the horizon, blend quickly into the ground color.
     color = mix(frame.skyGroundColor, color, smoothstep(-0.12, 0.0, d.y));
 

@@ -50,6 +50,12 @@ struct SkySettings {
     bool cloudsHaveDepth = false;               // clouds as volumes one looks through, lit from the sun's side, instead of a flat layer
     float cloudScale = 1.0f;                    // larger numbers make smaller clouds
     Vec2 cloudSpeed{0.012f, 0.004f};            // how fast the wind carries them
+    /// The sky worked out from how sunlight scatters in the air: blue by day, red and gold as
+    /// the sun goes down, dark at night, all from the sun's height; the three colors above are
+    /// then not used (the ground's still is).
+    bool isPhysical = false;
+    float haze = 0.3f;                          // 0 clear mountain air, 1 a hazy summer day
+    float stars = 0.0f;                         // at night: 0 none, 1 a clear night far from any town
 };
 
 struct RenderSettings {
@@ -123,6 +129,27 @@ struct RenderSettings {
     float chromaticAberration = 0.0f;           // colors separate toward the corners; 0.01 is plenty
     float filmGrain = 0.0f;                     // fine noise; 0.03 is visible
     float interference = 0.0f;                  // 0 clean, 1 an analog video link about to drop
+
+    // The colors graded with a lookup table: a picture in Assets of 32 squares 32 pixels wide
+    // side by side (1024 by 32, or 16 of 16: 256 by 16), red across each square, green down it,
+    // blue from square to square. Assets/Grading/Neutral 32.png changes nothing: paint over a
+    // copy of it, or make one in a photo editor from a screenshot.
+    std::string colorGrading;
+    float colorGradingAmount = 1.0f;
+    /// Exposure that adapts, as an eye does: brighter in a tunnel, darker in the sun.
+    bool autoExposure = false;
+    float exposureCompensation = 0.0f;          // in stops, on top of what it adapts to
+    float exposureAdaptSpeed = 1.5f;            // how quickly: 1 is about a second
+    float darkestExposure = 0.25f, brightestExposure = 8.0f;
+
+    /// Depth of field: what is nearer or farther than the focus is blurred, as by a camera's lens.
+    bool depthOfField = false;
+    float focusDistance = 10.0f;                // meters from the camera
+    float focusRange = 4.0f;                    // meters around it that stay sharp
+    float focusBlur = 8.0f;                     // the widest blur, in pixels of a picture 1080 high
+    /// Motion blur of the camera's own moves: what streaks past as it turns or speeds along.
+    bool motionBlur = false;
+    float motionBlurAmount = 0.5f;              // how long the shutter is open, as part of a frame
 };
 
 /// Levels of lighting quality, from cheapest to dearest: what ray tracing does, and how many
@@ -175,6 +202,8 @@ public:
     Renderer(GraphicsDevice& device, const std::string& shaderDirectory);
     ~Renderer();
 
+    /// Reads a picture of the project by its name: for decals and the color grading table. Set by the Engine.
+    std::function<std::shared_ptr<Texture>(const std::string&, TextureFormat)> loadPicture;
     RenderSettings settings;
     RenderStats stats;                          // of the last frame
     Profiler* profiler = nullptr;               // sections of the frame on the CPU, if someone keeps them
@@ -298,6 +327,13 @@ private:
     void renderShadows(MTL::CommandBuffer* commandBuffer, const std::vector<DrawItem>& items, const Cascades& cascades);
     void renderOcclusion(MTL::CommandBuffer* commandBuffer, const std::vector<Batch>& opaque, const View& view,
                          const FrameAllocator::Allocation& passUniforms);
+    /// Depth and normals of everything opaque, without multisampling: for ambient occlusion,
+    /// decals, depth of field and motion blur.
+    void renderPrepass(MTL::CommandBuffer* commandBuffer, const std::vector<Batch>& opaque, const FrameAllocator::Allocation& passUniforms);
+    void drawDecals(MTL::RenderCommandEncoder* encoder, Scene& scene, const View& view);
+    /// Depth of field, motion blur and the scene's brightness, between the scene and the bloom.
+    void renderEffects(MTL::CommandBuffer* commandBuffer, const View& view, float deltaTime);
+    bool wantsDepth() const { return settings.ambientOcclusionEnabled || settings.depthOfField || settings.motionBlur || hasDecals_; }
     void renderScene(MTL::CommandBuffer* commandBuffer, Scene& scene, const std::vector<Batch>& opaque,
                      const std::vector<Batch>& transparent, const View& view, const FrameAllocator::Allocation& passUniforms,
                      const FrameAllocator::Allocation& frameUniforms, const FrameAllocator::Allocation& lights);
@@ -315,7 +351,7 @@ private:
     Rect sceneRect(MTL::Texture* target) const;
     void drawFullscreen(MTL::CommandBuffer* commandBuffer, MTL::Texture* target, const char* fragmentFunction, BlendMode blend,
                         bool keepContents, const void* uniforms, size_t uniformsSize, MTL::Texture* source0, MTL::Texture* source1,
-                        MTL::SamplerState* sampler0);
+                        MTL::SamplerState* sampler0, MTL::Texture* source2 = nullptr);
 
     FrameAllocator& allocator() { return allocators_[frameIndex_]; }
 
@@ -344,6 +380,18 @@ private:
     int targetWidth_ = 0, targetHeight_ = 0, targetSamples_ = 0;
     bool targetHasOcclusion_ = false;
     NS::SharedPtr<MTL::Texture> sceneColorMultisample_, sceneDepth_, sceneColor_;
+    // The effects: a second picture to work into, the scene's brightness (and its mips down to
+    // one pixel), the exposure it adapted to (two, written in turn), and the camera a frame ago.
+    NS::SharedPtr<MTL::Texture> postColor_, luminance_, adapted_[2];
+    int adaptIndex_ = 0;
+    Mat4 previousViewProjection_ = identity();
+    bool hasPreviousView_ = false;
+    double lastViewTime_ = -1;
+    bool hasDecals_ = false;
+    std::shared_ptr<Texture> lut_;
+    std::string lutName_;
+    MTL::Texture* upscaleLUT_ = nullptr;            // what renderFinal hands to the tone mapping before MetalFX
+    MTL::Texture* upscaleAdapted_ = nullptr;
     NS::SharedPtr<MTL::Texture> prepassDepth_, prepassNormal_, occlusionRaw_, occlusion_;
     std::vector<NS::SharedPtr<MTL::Texture>> bloom_;
     NS::SharedPtr<MTL::Texture> shadowMap_;
@@ -364,6 +412,11 @@ private:
         int width = 0, height = 0, samples = 0;
         bool hasOcclusion = false;
         NS::SharedPtr<MTL::Texture> colorMultisample, depth, color, prepassDepth, prepassNormal, occlusionRaw, occlusion;
+        NS::SharedPtr<MTL::Texture> postColor, luminance, adapted[2];
+        int adaptIndex = 0;
+        Mat4 previousViewProjection = identity();
+        bool hasPreviousView = false;
+        double lastViewTime = -1;
         std::vector<NS::SharedPtr<MTL::Texture>> bloom;
         Upscaler upscaler;
     };

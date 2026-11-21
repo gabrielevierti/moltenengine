@@ -13,14 +13,29 @@
 
 #include <imgui.h>
 
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
 
 namespace molten::editor {
 
+/// What the board shows of a script that is running, and its breakpoints.
+struct GraphDebugView {
+    const std::map<std::pair<int, std::string>, std::string>* values = nullptr;     // (node, output) -> what went along it last
+    const std::map<int, double>* ran = nullptr;      // node -> when it last ran
+    double now = 0;
+    int stoppedAt = 0;                               // the node the game is held before; 0 none
+    std::function<bool(int)> hasBreakpoint;
+    std::function<void(int)> toggleBreakpoint;
+};
+
 class GraphEditor {
 public:
+    /// Set by whoever shows the board, for a script that runs: values on the wires, the nodes that
+    /// ran lit up, breakpoints (right-click a node, or F9).
+    const GraphDebugView* debug = nullptr;
+
     /// Draws the script in a region of the current window and lets the user edit it.
     /// Returns true if the script changed (as opposed to the view of it).
     bool draw(script::Graph& graph, ImVec2 size);

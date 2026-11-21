@@ -134,9 +134,10 @@ struct ComponentType {
     void (*lateUpdate)(void* component, World&, Entity, float dt) = nullptr;     // after every update(), with everything where it will be drawn
     void (*onCollision)(void* component, World&, Entity self, Entity other) = nullptr;
     void (*onTriggerEnter)(void* component, World&, Entity self, Entity other) = nullptr;
+    void (*onMessage)(void* component, World&, Entity self, const Message& message) = nullptr;
     void (*draw)(void* component, World&, Entity, Canvas&) = nullptr;
 
-    bool hasCode() const { return start || update || fixedUpdate || lateUpdate || onCollision || onTriggerEnter || draw; }
+    bool hasCode() const { return start || update || fixedUpdate || lateUpdate || onCollision || onTriggerEnter || onMessage || draw; }
     const Field* findField(const std::string& fieldName) const;
 };
 
@@ -233,6 +234,11 @@ template <class T> struct ComponentRegistration {
 #define MOLTEN_HOOK_ARGS self_, other_
         MOLTEN_HOOK(onCollision, onCollision, self, other)
         MOLTEN_HOOK(onTriggerEnter, onTriggerEnter, self, other)
+#undef MOLTEN_HOOK_PARAMS
+#undef MOLTEN_HOOK_ARGS
+#define MOLTEN_HOOK_PARAMS Entity self_, const Message& message_
+#define MOLTEN_HOOK_ARGS self_, message_
+        MOLTEN_HOOK(onMessage, onMessage, self, std::declval<const Message&>())
 #undef MOLTEN_HOOK_PARAMS
 #undef MOLTEN_HOOK_ARGS
 #define MOLTEN_HOOK_PARAMS Entity self_, Canvas& canvas_

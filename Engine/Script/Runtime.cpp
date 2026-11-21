@@ -1,5 +1,7 @@
 #include "Script/Runtime.hpp"
 
+#include "Kit/Saveable.hpp"
+
 #include "Core/World.hpp"
 #include "Core/Log.hpp"
 #include "Core/TextFile.hpp"
@@ -25,7 +27,27 @@ Value evaluateOutput(ExecContext context, const Node& node, const std::string& p
     context.node = &node;
     context.definition = definition;
     context.depth++;
-    return definition->evaluate(context, index);
+    Value value = definition->evaluate(context, index);
+    Debugger& debugger = Debugger::instance();
+    if (debugger.isOn && debugger.watches(context.graphName, context.self)) debugger.values[{node.id, pin}] = value.toText();
+    return value;
+}
+
+/// Before a node of a flow runs: noted for the debugger, and stopped at if it is a breakpoint
+/// (or the next step). True if the flow must stop there.
+bool stopsBefore(ExecContext& context, const Node& node) {
+    Debugger& debugger = Debugger::instance();
+    if (!debugger.isOn) return false;
+    if (debugger.watches(context.graphName, context.self)) debugger.ran[node.id] = debugger.now;
+    if (debugger.stopped.node != 0) return false;           // already stopped this frame: the rest goes on
+    if (!debugger.stepsOnce && !debugger.hasBreakpoint(context.graphName, node.id)) return false;
+    debugger.stepsOnce = false;
+    debugger.stopped = Debugger::Stop{context.graphName, node.id, context.self};
+    debugger.graph = context.graphName;
+    debugger.entity = context.self;                         // its values are the ones to show
+    debugger.wantsHold = true;
+    if (context.state) context.state->waiting.push_back(ScriptState::Waiting{node.id, 0, false, true});
+    return true;
 }
 
 /// Follows the white wire that leaves `node` at `pin`, node after node, until one stops.
@@ -39,6 +61,7 @@ void runFlow(ExecContext context, const Node* node, const char* pin) {
         context.node = next;
         context.definition = definition;
         context.depth = 0;
+        if (stopsBefore(context, *next)) return;
         pin = definition->execute(context);
         node = next;
         // A node may have destroyed the entity the script is on: nothing more to do then.
@@ -110,6 +133,33 @@ Transform* transformOf(ExecContext& context) {
 
 }  // namespace
 
+// ---------------------------------------------------------------- the debugger
+
+Debugger& Debugger::instance() {
+    static Debugger debugger;
+    return debugger;
+}
+
+bool Debugger::watches(const std::string& name, Entity self) {
+    if (name.empty() || name != graph) return false;
+    if (!entity.isValid()) entity = self;                   // the first to run it
+    return entity == self;
+}
+
+void Debugger::toggleBreakpoint(const std::string& name, int node) {
+    auto key = std::make_pair(name, node);
+    if (!breakpoints.erase(key)) breakpoints.insert(key);
+}
+
+void Debugger::clearSeen() {
+    values.clear();
+    ran.clear();
+    entity = Entity{};
+    stopped = Stop{};
+    wantsHold = false;
+    stepsOnce = false;
+}
+
 // ---------------------------------------------------------------- what nodes see
 
 Value ExecContext::input_(const char* pin) {
@@ -136,6 +186,35 @@ void runFrame(const Graph& graph, ExecContext context) {
     context.graph = &graph;
     bool isFirstFrame = !context.state->hasStarted;
     context.state->hasStarted = true;
+    // Flows waiting at a Wait or a Wait Until whose moment has come go on from there.
+    std::vector<ScriptState::Waiting> waiting = std::move(context.state->waiting);
+    context.state->waiting.clear();
+    for (const ScriptState::Waiting& wait : waiting) {
+        const Node* node = graph.find(wait.node);
+        const NodeDef* definition = node ? NodeLibrary::instance().find(node->type) : nullptr;
+        if (!definition) continue;
+        context.node = node;
+        context.definition = definition;
+        context.depth = 0;
+        if (wait.resumesHere) {
+            // Stopped before this node at a breakpoint: it runs now, and its flow goes on.
+            if (!definition->execute) continue;
+            const char* pin = definition->execute(context);
+            if (!context.scene->isAlive(context.self)) return;
+            runFlow(context, node, pin);
+            if (!context.scene->isAlive(context.self)) return;
+            continue;
+        }
+        bool isTime = wait.isCondition ? context.flag("condition") : context.time >= wait.until;
+        if (!isTime) {
+            context.state->waiting.push_back(wait);
+            continue;
+        }
+        runFlow(context, node, "then");
+        if (!context.scene->isAlive(context.self)) return;
+    }
+    std::vector<Message> heard = std::move(context.state->heard);
+    context.state->heard.clear();
     // By index: the nodes of a script do not change while it runs, but this keeps it so
     // even if a node one day edits its own script.
     for (size_t i = 0; i < graph.nodes.size(); i++) {
@@ -176,6 +255,18 @@ void runFrame(const Graph& graph, ExecContext context) {
                 if (!context.scene->isAlive(context.self)) return;
             }
             context.other = Entity{};
+        } else if (node.type == "OnMessage") {
+            // Once for each message of its name heard since the last frame.
+            std::string wanted = context.string("message");
+            for (const Message& message : heard) {
+                if (!wanted.empty() && message.name != wanted) continue;
+                context.message = &message;
+                context.node = &node;
+                context.definition = definition;
+                runFlow(context, &node, "then");
+                if (!context.scene->isAlive(context.self)) return;
+            }
+            context.message = nullptr;
         }
         if (happened) runFlow(context, &node, "then");
         if (!context.scene->isAlive(context.self)) return;
@@ -207,6 +298,69 @@ void registerStandardNodes() {
           "When something enters this entity's trigger collider, or this entity enters another's. \"other\" is its name.", {}, {string("other")},
           otherName);
 
+    event("OnMessage", "On Message",
+          "When a message is sent to this entity, or to everyone: \"doorOpened\". Empty: any message. "
+          "It carries a number and a text; \"from\" is the name of who sent it.",
+          {string("message", "doorOpened")}, {number("number"), string("text"), string("from"), string("name")},
+          [](ExecContext& context, int output) {
+              if (!context.message) return Value{};
+              if (output == 1) return Value::number(context.message->number);
+              if (output == 2) return Value::string(context.message->text);
+              if (output == 3) {
+                  const Name* name = context.scene->get<Name>(context.message->from);
+                  return Value::string(name ? name->value : std::string());
+              }
+              return Value::string(context.message->name);
+          });
+
+    // ---- messages and waiting
+    action("SendMessage", "Flow", "Send Message",
+           "Tells something happened: to the entity named in \"to\", or to everyone when it is empty. "
+           "Scripts hear it in On Message, code in onMessage.",
+           {string("message", "doorOpened"), string("to", ""), number("number", 0), string("text", "")}, [](ExecContext& context) {
+               if (!context.world) return;
+               std::string to = context.string("to");
+               Entity target = to.empty() ? Entity{} : context.scene->find(to);
+               if (!to.empty() && !target.isValid()) return;      // to someone who is not there: nobody hears it
+               context.world->send(context.string("message"), target, context.number("number"), context.string("text"), context.self);
+           });
+    {
+        NodeDef wait;
+        wait.type = "Wait";
+        wait.category = "Flow";
+        wait.title = "Wait";
+        wait.help = "Goes on after so many seconds of game time; the rest of the script runs meanwhile.";
+        wait.inputs = {flow("in"), number("seconds", 1)};
+        wait.outputs = {flow("then")};
+        wait.execute = [](ExecContext& context) -> const char* {
+            if (!context.state) return "then";
+            context.state->waiting.push_back(ScriptState::Waiting{context.node->id, context.time + std::max(context.number("seconds"), 0.0f), false});
+            return nullptr;
+        };
+        NodeLibrary::instance().add(std::move(wait));
+        NodeDef until;
+        until.type = "WaitUntil";
+        until.category = "Flow";
+        until.title = "Wait Until";
+        until.help = "Goes on the first frame its condition holds: until the door is open, until the score is 10.";
+        until.inputs = {flow("in"), flag("condition")};
+        until.outputs = {flow("then")};
+        until.execute = [](ExecContext& context) -> const char* {
+            if (context.flag("condition") || !context.state) return "then";
+            context.state->waiting.push_back(ScriptState::Waiting{context.node->id, 0, true});
+            return nullptr;
+        };
+        NodeLibrary::instance().add(std::move(until));
+    }
+
+    action("SaveGame", "Game", "Save Game", "Keeps the game as it is now (everything with a Saveable, the shared values) in a slot.",
+           {string("slot", "Save")}, [](ExecContext& context) {
+               if (context.world) kit::saveState(*context.world, context.string("slot"));
+           });
+    action("LoadGame", "Game", "Load Game", "Goes back to a saved game: its scene, as it was.", {string("slot", "Save")}, [](ExecContext& context) {
+        if (context.world) kit::loadState(*context.world, context.string("slot"));
+    });
+
     // ---- the game as a whole
     action("AddValue", "Game", "Add to Value", "Adds to a number the whole game shares: the score, coins, lives.",
            {string("name", "score"), number("amount", 1)}, [](ExecContext& context) {
@@ -222,12 +376,29 @@ void registerStandardNodes() {
            [](ExecContext& context) {
                if (context.world) context.world->loadScene(context.string("scene"));
            });
+    action("LoadSceneInBackground", "Game", "Load Scene in Background",
+           "Goes to another scene once its models are read, the game going on meanwhile: show a Loading Screen.",
+           {string("scene", "Scenes/Main.scene")}, [](ExecContext& context) {
+               if (context.world) context.world->loadSceneInBackground(context.string("scene"));
+           });
+    action("AddScene", "Game", "Add Scene", "Adds another scene's entities to this one: the next room, a menu over the game.",
+           {string("scene", "Scenes/Room.scene")}, [](ExecContext& context) {
+               if (context.world) context.world->addScene(context.string("scene"));
+           });
+    action("RemoveScene", "Game", "Remove Scene", "Takes away a scene that was added.", {string("scene", "Scenes/Room.scene")},
+           [](ExecContext& context) {
+               if (context.world) context.world->removeScene(context.string("scene"));
+           });
     action("ReloadScene", "Game", "Restart Scene", "Starts the scene over.", {}, [](ExecContext& context) {
         if (context.world) context.world->reloadScene();
     });
     action("PlaySound", "Game", "Play Sound", "Plays a sound file from the project's Assets.", {string("sound", "Audio/sound.wav"), number("volume", 1)},
            [](ExecContext& context) {
                if (context.world) context.world->playSound(context.string("sound"), context.number("volume"));
+           });
+    action("SetVolume", "Game", "Set Volume", "The volume of a group of sounds, 0 to 1: Music, Effects, Voices, Interface.",
+           {string("group", "Music"), number("volume", 1)}, [](ExecContext& context) {
+               if (context.world) context.world->setVolume(context.string("group"), context.number("volume"));
            });
     action("Spawn", "Game", "Spawn", "Adds a prefab to the scene at a point.", {string("prefab", "Prefabs/Thing.prefab"), vector("position")},
            [](ExecContext& context) {
@@ -454,13 +625,23 @@ void VisualScript::update(World& world, Entity self, float dt) {
     context.self = self;
     context.dt = dt;
     context.time = world.time.elapsed;
+    context.graphName = graph;
+    script::Debugger::instance().now = world.time.elapsed;
     // The state is copied out and back: running the script may add components and move this one.
     script::ScriptState working = std::move(state);
     context.state = &working;
     script::runFrame(*loaded, context);
     working.collidedWith.clear();
     working.triggeredBy.clear();
-    if (VisualScript* still = world.scene.get<VisualScript>(self)) still->state = std::move(working);
+    if (VisualScript* still = world.scene.get<VisualScript>(self)) {
+        // Messages that came while it ran (its own, to itself): heard next frame.
+        for (Message& message : still->state.heard) working.heard.push_back(std::move(message));
+        still->state = std::move(working);
+    }
+}
+
+void VisualScript::onMessage(World&, Entity, const Message& message) {
+    state.heard.push_back(message);
 }
 
 // What touched the entity is remembered until the script's next run, which fires the events.

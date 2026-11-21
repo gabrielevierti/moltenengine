@@ -1,10 +1,13 @@
 // The 3D view: the editor's camera, clicking to select, the gizmo that moves, turns and
 // scales the selection (with snapping), and the lines and icons drawn over the scene.
+#include "Snapping.hpp"
 #include "Editor.hpp"
 #include "Rendering/Particles.hpp"
 #include "Kit/Kit.hpp"
 #include "Kit/Vehicles.hpp"
 #include "Kit/Spline.hpp"
+#include "Kit/Terrain.hpp"
+#include "Kit/Foliage.hpp"
 #include "Audio/Audio.hpp"
 #include "Panels/Widgets.hpp"
 
@@ -305,6 +308,11 @@ void drawShapes(EditorContext& editor) {
         }
         emitter.isSimulated = isShown;
     });
+    // Terrains: read and made while the scene is edited, as they are in the game.
+    if (!isPlaying) {
+        scene.each<kit::Terrain, Transform>([&](Entity entity, kit::Terrain& terrain, Transform&) { terrain.update(editor.engine, entity, 0); });
+        scene.each<kit::Foliage, Transform>([&](Entity entity, kit::Foliage& foliage, Transform&) { foliage.update(editor.engine, entity, 0); });
+    }
     // Curves: the line they make, a dot at each of their points; the road along one, made
     // again as soon as a point is moved, so that it is seen while it is laid out.
     scene.each<kit::Spline, Transform>([&](Entity entity, kit::Spline& spline, Transform&) {
@@ -404,6 +412,8 @@ bool toolButton(const char* label, bool isCurrent, const char* tooltip) {
     return pressed;
 }
 
+void arrangeSelection(EditorContext& editor, int axis, int how);
+
 void drawToolbar(EditorContext& editor) {
     GizmoSettings& gizmo = editor.gizmo;
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4, 4));
@@ -449,6 +459,38 @@ void drawToolbar(EditorContext& editor) {
         ImGui::NewLine();
         ImGui::SetNextItemWidth(120);
         ImGui::DragFloat("Scale", &gizmo.scaleSnap, 0.005f, 0.001f, 10.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+        ImGui::Separator();
+        ImGui::TextDisabled("Moving snaps to");
+        int snapTo = int(gizmo.snapTo);
+        ImGui::RadioButton("Steps", &snapTo, 0);
+        ImGui::SameLine();
+        ImGui::RadioButton("Surfaces", &snapTo, 1);
+        ImGui::SameLine();
+        ImGui::RadioButton("Corners", &snapTo, 2);
+        gizmo.snapTo = GizmoSettings::SnapTo(snapTo);
+        ui::tooltip("Corners: the nearest corner of another model. Holding V while moving does it too.");
+        if (gizmo.snapTo == GizmoSettings::SnapTo::Surfaces) ImGui::Checkbox("Stands on the surface", &gizmo.standsOnSurface);
+        if (editor.scene.selection().size() > 1 || !editor.scene.selection().empty()) {
+            ImGui::Separator();
+            ImGui::TextDisabled("Arrange the selection");
+            const char* axes[] = {"X", "Y", "Z"};
+            for (int axis = 0; axis < 3; axis++) {
+                ImGui::PushID(axis);
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted(axes[axis]);
+                ImGui::SameLine(30);
+                if (ImGui::SmallButton("Least")) arrangeSelection(editor, axis, 0);
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Middle")) arrangeSelection(editor, axis, 1);
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Most")) arrangeSelection(editor, axis, 2);
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Spread")) arrangeSelection(editor, axis, 3);
+                ImGui::PopID();
+            }
+            if (ImGui::SmallButton("Drop to the Ground")) arrangeSelection(editor, 1, 4);
+            ui::tooltip("Each one down onto the first thing under it");
+        }
         ImGui::Separator();
         ImGui::TextDisabled("Shown in the view");
         ImGui::Checkbox("Grid", &gizmo.showGrid);
@@ -529,6 +571,121 @@ void updateCamera(EditorContext& editor, bool isHovered, float dt) {
     }
 }
 
+/// The selected entities that no other selected one carries: those that are moved themselves.
+std::vector<Entity> topSelected(EditorContext& editor) {
+    std::vector<Entity> out;
+    SceneDocument& document = editor.scene;
+    Scene& scene = editor.engine.scene;
+    for (Entity entity : document.selection()) {
+        const Transform* transform = scene.get<Transform>(entity);
+        if (!transform) continue;
+        bool carried = false;
+        for (Entity other : document.selection()) {
+            if (other != entity && document.isDescendant(transform->parent, other)) carried = true;
+        }
+        if (!carried) out.push_back(entity);
+    }
+    return out;
+}
+
+/// The models of the scene that are not selected (nor under what is): what the selection snaps onto.
+std::vector<SnapMesh> snapMeshes(EditorContext& editor, const Ray* along) {
+    std::vector<SnapMesh> meshes;
+    SceneDocument& document = editor.scene;
+    Scene& scene = editor.engine.scene;
+    for (Entity entity : document.entities()) {
+        const Transform* transform = scene.get<Transform>(entity);
+        const MeshRenderer* renderer = scene.get<MeshRenderer>(entity);
+        if (!transform || !transform->isActiveInHierarchy || !renderer || !renderer->mesh || !renderer->isVisible) continue;
+        bool isMoving = false;
+        for (Entity selected : document.selection()) isMoving = isMoving || entity == selected || document.isDescendant(entity, selected);
+        if (isMoving) continue;
+        if (along) {
+            // Only those the ray meets at all, found the quick way first.
+            Mat4 toLocal = simd::inverse(transform->world);
+            Ray local{transformPoint(toLocal, along->origin), transformDirection(toLocal, along->direction)};
+            if (!renderer->mesh->raycast(local)) continue;
+        }
+        meshes.push_back(SnapMesh{entity, transform->world, &renderer->mesh->positions(), &renderer->mesh->indices()});
+    }
+    return meshes;
+}
+
+/// After the handles moved the selection: the handles' point put onto the surface under the
+/// mouse, or onto the nearest corner, and the selection with it.
+void snapSelection(EditorContext& editor, ViewportInfo& viewport, GizmoSettings::SnapTo snapTo, const Mat4& handles) {
+    SceneDocument& document = editor.scene;
+    Scene& scene = editor.engine.scene;
+    ImVec2 mouse = ImGui::GetIO().MousePos;
+    Vec3 at = xyz(handles.columns[3]);
+    std::optional<Vec3> target;
+    std::optional<Vec3> normal;
+    if (snapTo == GizmoSettings::SnapTo::Surfaces) {
+        Ray ray = viewport.screenRay(mouse);
+        if (std::optional<SurfaceHit> hit = hitSurface(snapMeshes(editor, &ray), ray)) {
+            target = hit->point;
+            normal = hit->normal;
+        }
+    } else {
+        Vec2 inView{mouse.x - viewport.position.x, mouse.y - viewport.position.y};
+        target = nearestVertex(snapMeshes(editor, nullptr), viewport.projection * viewport.view, Vec2{viewport.size.x, viewport.size.y}, inView);
+        if (target && viewport.drawList) {
+            Vec4 clip = viewport.projection * viewport.view * Vec4{target->x, target->y, target->z, 1};
+            if (clip.w > 0) {
+                ImVec2 dot(viewport.position.x + (clip.x / clip.w * 0.5f + 0.5f) * viewport.size.x,
+                           viewport.position.y + (0.5f - clip.y / clip.w * 0.5f) * viewport.size.y);
+                viewport.drawList->AddCircle(dot, 7, IM_COL32(255, 200, 60, 255), 0, 2);
+            }
+        }
+    }
+    if (!target) return;
+    Vec3 step = *target - at;
+    std::vector<Entity> moved = topSelected(editor);
+    for (Entity entity : moved) {
+        const Transform* transform = scene.get<Transform>(entity);
+        Mat4 world = transform->world;
+        world.columns[3] += Vec4{step.x, step.y, step.z, 0};
+        // One thing on a surface stands on it.
+        if (normal && editor.gizmo.standsOnSurface && moved.size() == 1) {
+            Vec3 position, size;
+            Quat turned;
+            decompose(world, position, turned, size);
+            world = compose(position, standOn(*normal, turned), size);
+        }
+        document.setWorldMatrix(entity, world);
+        document.keepPartPlace(entity);
+    }
+    scene.updateTransforms();
+}
+
+/// Lines the selection up, spaces it out, or drops it onto what is under it.
+void arrangeSelection(EditorContext& editor, int axis, int how) {
+    SceneDocument& document = editor.scene;
+    Scene& scene = editor.engine.scene;
+    std::vector<Entity> moved = topSelected(editor);
+    if (moved.empty()) return;
+    std::vector<Vec3> points;
+    for (Entity entity : moved) points.push_back(scene.get<Transform>(entity)->worldPosition());
+    if (how == 3) distributePoints(points, axis);
+    else if (how == 4) {
+        // Down onto the first surface below each.
+        std::vector<SnapMesh> meshes = snapMeshes(editor, nullptr);
+        for (Vec3& point : points) {
+            if (std::optional<SurfaceHit> hit = hitSurface(meshes, Ray{point + Vec3{0, 0.01f, 0}, Vec3{0, -1, 0}})) point = hit->point;
+        }
+    } else {
+        alignPoints(points, axis, how == 0 ? AlignTo::Least : how == 1 ? AlignTo::Middle : AlignTo::Most);
+    }
+    for (size_t i = 0; i < moved.size(); i++) {
+        Mat4 world = scene.get<Transform>(moved[i])->world;
+        world.columns[3] = Vec4{points[i].x, points[i].y, points[i].z, 1};
+        document.setWorldMatrix(moved[i], world);
+        document.keepPartPlace(moved[i]);
+    }
+    scene.updateTransforms();
+    document.markChanged();
+}
+
 /// The handles on the selection. Returns true while the mouse is on them or dragging them.
 bool updateGizmo(EditorContext& editor, ViewportInfo& viewport) {
     SceneDocument& document = editor.scene;
@@ -571,6 +728,10 @@ bool updateGizmo(EditorContext& editor, ViewportInfo& viewport) {
     ImGuizmo::SetOrthographic(false);
     ImGuizmo::SetDrawlist();
     ImGuizmo::SetRect(viewport.position.x, viewport.position.y, viewport.size.x, viewport.size.y);
+    // Onto surfaces or corners while moving: from the Snap menu, or corners while V is held.
+    GizmoSettings::SnapTo snapTo = ImGui::IsKeyDown(ImGuiKey_V) ? GizmoSettings::SnapTo::Corners : settings.snapTo;
+    bool snapsToThings = snapTo != GizmoSettings::SnapTo::Steps && settings.operation == GizmoOperation::Move;
+    if (snapsToThings) snap = false;
     // "All" shows three tools at once; snapping there would need three kinds of step, so it is left free.
     const float* snapping = snap && settings.operation != GizmoOperation::Universal ? snapValues : nullptr;
     bool moved = ImGuizmo::Manipulate(floats(viewport.view), floats(viewport.projection), operation, mode, floats(world), nullptr, snapping);
@@ -587,8 +748,10 @@ bool updateGizmo(EditorContext& editor, ViewportInfo& viewport) {
             }
             if (movesWithParent) continue;
             document.setWorldMatrix(entity, change * other->world);
+            document.keepPartPlace(entity);         // a part of a prefab's copy keeps where it was put
         }
         scene.updateTransforms();
+        if (snapsToThings) snapSelection(editor, viewport, snapTo, world);
         document.markChanged();
     }
     return ImGuizmo::IsOver() || ImGuizmo::IsUsing();
@@ -1127,6 +1290,263 @@ void drawGameView(EditorContext& editor, bool takesCanvas) {
 
 /// The Scene window: the scene through the editor's own camera, where things are selected,
 /// moved and looked at from anywhere, whether the game is running or not.
+// ---------------------------------------------------------------- shaping a terrain
+
+namespace {
+
+struct TerrainTool {
+    int brush = -1;                     // a kit::TerrainBrush, or -1: the brushes are put away
+    float radius = 8.0f;
+    float strength = 4.0f;              // meters a second (raise, lower); for smooth and flatten, how fast
+    bool isStroking = false;
+    float level = 0;                    // where Flatten brings the ground: the height where the stroke began
+    Entity terrain{};
+    std::vector<std::vector<float>> undo;       // the heights before each stroke
+};
+
+TerrainTool gTerrainTool;
+
+/// The one Terrain chosen, if exactly one is.
+Entity chosenTerrain(EditorContext& editor) {
+    const auto& chosen = editor.scene.selection();
+    if (chosen.size() != 1 || !editor.engine.scene.has<kit::Terrain>(chosen[0])) return Entity{};
+    return chosen[0];
+}
+
+/// The brushes, in the lower left of the view, while a Terrain is chosen. True if the pointer is on them.
+bool drawTerrainBrushes(EditorContext& editor, ViewportInfo& viewport) {
+    Entity entity = chosenTerrain(editor);
+    if (entity != gTerrainTool.terrain) {
+        gTerrainTool.terrain = entity;
+        gTerrainTool.undo.clear();
+        gTerrainTool.isStroking = false;
+    }
+    if (!entity.isValid() || editor.scene.isPlaying()) return false;
+    ImGui::SetCursorScreenPos(ImVec2(viewport.position.x + 8, viewport.position.y + viewport.size.y - 112));
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.08f, 0.09f, 0.11f, 0.92f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6);
+    ImGui::BeginChild("##terrain brushes", ImVec2(420, 104), ImGuiChildFlags_Borders);
+    const char* names[] = {"Raise", "Lower", "Smooth", "Flatten"};
+    if (ImGui::RadioButton("Move it", gTerrainTool.brush < 0)) gTerrainTool.brush = -1;
+    for (int k = 0; k < 4; k++) {
+        ImGui::SameLine();
+        if (ImGui::RadioButton(names[k], gTerrainTool.brush == k)) gTerrainTool.brush = k;
+    }
+    ImGui::SetNextItemWidth(150);
+    ImGui::SliderFloat("Size", &gTerrainTool.radius, 0.5f, 100.0f, "%.1f m", ImGuiSliderFlags_Logarithmic);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(150);
+    ImGui::SliderFloat("Strength", &gTerrainTool.strength, 0.1f, 40.0f, "%.1f", ImGuiSliderFlags_Logarithmic);
+    if (gTerrainTool.undo.empty()) ImGui::BeginDisabled();
+    if (ImGui::SmallButton("Undo Stroke") && !gTerrainTool.undo.empty()) {
+        if (kit::Terrain* terrain = editor.engine.scene.get<kit::Terrain>(entity)) {
+            terrain->samples = gTerrainTool.undo.back();
+            terrain->needsRebuild = true;
+            terrain->save(editor.engine);
+        }
+        gTerrainTool.undo.pop_back();
+    }
+    if (gTerrainTool.undo.empty()) ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::TextDisabled(gTerrainTool.brush < 0 ? "Choose a brush, then paint on the ground" : "Shift: the other way round. Alt: turn the view");
+    bool isOn = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) || ImGui::IsAnyItemActive();
+    ImGui::EndChild();
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor();
+    return isOn;
+}
+
+/// Paints with the brush chosen where the pointer is on the ground. True while it takes the mouse.
+bool shapeTerrain(EditorContext& editor, ViewportInfo& viewport, bool isOnBrushes) {
+    Entity entity = gTerrainTool.terrain;
+    kit::Terrain* terrain = editor.engine.scene.get<kit::Terrain>(entity);
+    if (!terrain || gTerrainTool.brush < 0 || editor.scene.isPlaying()) return false;
+    ImGuiIO& io = ImGui::GetIO();
+    if (gTerrainTool.isStroking && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+        // The stroke is over: the heights go to their file (made the first time), so that the
+        // scene and the game read them.
+        gTerrainTool.isStroking = false;
+        if (terrain->heights.empty()) {
+            const Name* name = editor.engine.scene.get<Name>(entity);
+            terrain->heights = editor.assets.uniquePath("Terrains", name && !name->value.empty() ? name->value : std::string("Terrain"), ".terrain");
+            terrain->loadedFrom = terrain->heights;
+            editor.scene.markChanged();
+        }
+        if (terrain->save(editor.engine)) editor.assets.refresh();
+        return true;
+    }
+    if (!viewport.isHovered || isOnBrushes || io.KeyAlt || ImGui::IsMouseDown(ImGuiMouseButton_Right)) return gTerrainTool.isStroking;
+    Ray ray = viewport.screenRay(io.MousePos);
+    std::optional<Vec3> hit = terrain->raycast(editor.engine, entity, ray.origin, ray.direction);
+    if (!hit) return gTerrainTool.isStroking;
+    const Transform* transform = editor.engine.scene.get<Transform>(entity);
+    Mat4 toLocal = simd::inverse(transform->world);
+    Vec3 local = xyz(toLocal * Vec4{hit->x, hit->y, hit->z, 1});
+    // The brush, as a ring lying on the ground.
+    DebugDraw& lines = editor.engine.debug();
+    Vec4 color{1.0f, 0.55f, 0.2f, 1};
+    Vec3 previous{};
+    for (int k = 0; k <= 48; k++) {
+        float angle = float(k) / 48.0f * 6.2831853f;
+        Vec2 around{local.x + std::cos(angle) * gTerrainTool.radius, local.z + std::sin(angle) * gTerrainTool.radius};
+        Vec3 point{around.x, terrain->heightAt(around) + 0.08f, around.y};
+        point = xyz(transform->world * Vec4{point.x, point.y, point.z, 1});
+        if (k > 0) lines.line(previous, point, color);
+        previous = point;
+    }
+    lines.line(*hit, *hit + Vec3{0, gTerrainTool.radius * 0.3f, 0}, color);
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        gTerrainTool.isStroking = true;
+        gTerrainTool.level = local.y;
+        gTerrainTool.undo.push_back(terrain->samples);
+        if (gTerrainTool.undo.size() > 30) gTerrainTool.undo.erase(gTerrainTool.undo.begin());
+    }
+    if (gTerrainTool.isStroking) {
+        auto brush = kit::TerrainBrush(gTerrainTool.brush);
+        if (io.KeyShift && brush == kit::TerrainBrush::Raise) brush = kit::TerrainBrush::Lower;
+        else if (io.KeyShift && brush == kit::TerrainBrush::Lower) brush = kit::TerrainBrush::Raise;
+        float dt = std::min(io.DeltaTime, 0.05f);
+        bool isShare = brush == kit::TerrainBrush::Smooth || brush == kit::TerrainBrush::Flatten;
+        float amount = isShare ? std::min(gTerrainTool.strength * 0.25f * dt * 4, 1.0f) : gTerrainTool.strength * dt;
+        terrain->sculpt(Vec2{local.x, local.z}, gTerrainTool.radius, amount, brush, gTerrainTool.level);
+        terrain->rebuild(editor.engine, entity);
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------- painting foliage
+
+struct FoliageTool {
+    int brush = -1;                     // 0 paint, 1 erase; -1: put away
+    float radius = 4.0f;
+    bool isStroking = false;
+    Entity foliage{};
+    std::vector<std::vector<kit::FoliageCopy>> undo;
+};
+
+FoliageTool gFoliageTool;
+
+/// The first ground a ray meets: a Terrain's, or anything solid.
+std::optional<Vec3> groundAlong(EditorContext& editor, const Ray& ray, Entity ignored) {
+    std::optional<Vec3> best;
+    float nearest = 1e30f;
+    editor.engine.scene.each<kit::Terrain>([&](Entity entity, kit::Terrain& terrain) {
+        if (std::optional<Vec3> hit = terrain.raycast(editor.engine, entity, ray.origin, ray.direction, 5000)) {
+            float distance = simd::length(*hit - ray.origin);
+            if (distance < nearest) {
+                nearest = distance;
+                best = hit;
+            }
+        }
+    });
+    if (auto hit = editor.engine.physics.raycast(editor.engine.scene, ray, std::min(nearest, 5000.0f), 0xFFFFFFFFu, ignored)) {
+        if (hit->distance < nearest) best = hit->point;
+    }
+    return best;
+}
+
+bool drawFoliageBrushes(EditorContext& editor, ViewportInfo& viewport) {
+    const auto& chosen = editor.scene.selection();
+    Entity entity = chosen.size() == 1 && editor.engine.scene.has<kit::Foliage>(chosen[0]) ? chosen[0] : Entity{};
+    if (entity != gFoliageTool.foliage) {
+        gFoliageTool.foliage = entity;
+        gFoliageTool.undo.clear();
+        gFoliageTool.isStroking = false;
+    }
+    if (!entity.isValid() || editor.scene.isPlaying()) return false;
+    kit::Foliage* foliage = editor.engine.scene.get<kit::Foliage>(entity);
+    ImGui::SetCursorScreenPos(ImVec2(viewport.position.x + 8, viewport.position.y + viewport.size.y - 112));
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.08f, 0.09f, 0.11f, 0.92f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6);
+    ImGui::BeginChild("##foliage brushes", ImVec2(420, 104), ImGuiChildFlags_Borders);
+    if (ImGui::RadioButton("Move it", gFoliageTool.brush < 0)) gFoliageTool.brush = -1;
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Paint", gFoliageTool.brush == 0)) gFoliageTool.brush = 0;
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Erase", gFoliageTool.brush == 1)) gFoliageTool.brush = 1;
+    ImGui::SameLine();
+    ImGui::TextDisabled("%zu copies", foliage->copies.size());
+    ImGui::SetNextItemWidth(150);
+    ImGui::SliderFloat("Size", &gFoliageTool.radius, 0.5f, 60.0f, "%.1f m", ImGuiSliderFlags_Logarithmic);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(150);
+    ImGui::SliderFloat("Density", &foliage->density, 0.01f, 20.0f, "%.2f / m2", ImGuiSliderFlags_Logarithmic);
+    if (gFoliageTool.undo.empty()) ImGui::BeginDisabled();
+    if (ImGui::SmallButton("Undo Stroke") && !gFoliageTool.undo.empty()) {
+        foliage->copies = gFoliageTool.undo.back();
+        foliage->needsShowing = true;
+        foliage->save(editor.engine);
+        gFoliageTool.undo.pop_back();
+    }
+    if (gFoliageTool.undo.empty()) ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::TextDisabled(gFoliageTool.brush < 0 ? "Choose Paint, then paint on the ground" : "Shift: erase. Alt: turn the view");
+    bool isOn = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) || ImGui::IsAnyItemActive();
+    ImGui::EndChild();
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor();
+    return isOn;
+}
+
+bool paintFoliage(EditorContext& editor, ViewportInfo& viewport, bool isOnBrushes) {
+    Entity entity = gFoliageTool.foliage;
+    kit::Foliage* foliage = editor.engine.scene.get<kit::Foliage>(entity);
+    const Transform* transform = editor.engine.scene.get<Transform>(entity);
+    if (!foliage || !transform || gFoliageTool.brush < 0 || editor.scene.isPlaying()) return false;
+    ImGuiIO& io = ImGui::GetIO();
+    if (gFoliageTool.isStroking && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+        gFoliageTool.isStroking = false;
+        if (foliage->places.empty()) {
+            const Name* name = editor.engine.scene.get<Name>(entity);
+            foliage->places = editor.assets.uniquePath("Foliage", name && !name->value.empty() ? name->value : std::string("Foliage"), ".foliage");
+            foliage->loadedFrom = foliage->places;
+            editor.scene.markChanged();
+        }
+        if (foliage->save(editor.engine)) editor.assets.refresh();
+        return true;
+    }
+    if (!viewport.isHovered || isOnBrushes || io.KeyAlt || ImGui::IsMouseDown(ImGuiMouseButton_Right)) return gFoliageTool.isStroking;
+    std::optional<Vec3> hit = groundAlong(editor, viewport.screenRay(io.MousePos), entity);
+    if (!hit) return gFoliageTool.isStroking;
+    Mat4 toLocal = simd::inverse(transform->world);
+    Vec3 local = xyz(toLocal * Vec4{hit->x, hit->y, hit->z, 1});
+    // The brush: a ring on the ground.
+    DebugDraw& lines = editor.engine.debug();
+    bool erases = gFoliageTool.brush == 1 || io.KeyShift;
+    Vec4 color = erases ? Vec4{1.0f, 0.35f, 0.3f, 1} : Vec4{0.45f, 0.9f, 0.45f, 1};
+    Vec3 previous{};
+    for (int k = 0; k <= 40; k++) {
+        float angle = float(k) / 40.0f * 6.2831853f;
+        Vec3 point = *hit + Vec3{std::cos(angle) * gFoliageTool.radius, 0.1f, std::sin(angle) * gFoliageTool.radius};
+        if (k > 0) lines.line(previous, point, color);
+        previous = point;
+    }
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        gFoliageTool.isStroking = true;
+        gFoliageTool.undo.push_back(foliage->copies);
+        if (gFoliageTool.undo.size() > 30) gFoliageTool.undo.erase(gFoliageTool.undo.begin());
+    }
+    if (!gFoliageTool.isStroking) return true;
+    if (erases) {
+        foliage->erase(Vec2{local.x, local.z}, gFoliageTool.radius);
+    } else {
+        // The ground under each place, straight down from above it.
+        Mat4 world = transform->world;
+        auto ground = [&](Vec2 at) -> std::optional<Vec3> {
+            Vec3 above = xyz(world * Vec4{at.x, local.y + 50, at.y, 1});
+            std::optional<Vec3> under = groundAlong(editor, Ray{above, Vec3{0, -1, 0}}, entity);
+            if (!under) return std::nullopt;
+            return xyz(toLocal * Vec4{under->x, under->y, under->z, 1});
+        };
+        // A share of the density each frame: a second's painting fills it.
+        foliage->paint(Vec2{local.x, local.z}, gFoliageTool.radius, ground, std::min(io.DeltaTime * 2.0f, 1.0f));
+    }
+    if (foliage->needsShowing) foliage->show(editor.engine, entity);
+    return true;
+}
+
+}  // namespace
+
 void drawSceneView(EditorContext& editor) {
     SceneDocument& document = editor.scene;
     Scene& scene = editor.engine.scene;
@@ -1182,7 +1602,11 @@ void drawSceneView(EditorContext& editor) {
         for (auto& overlay : editor.registry.viewportOverlays) overlay.value(editor, viewport);
     }
 
-    bool isOnGizmo = updateGizmo(editor, viewport);
+    // A Terrain chosen with a brush out: the mouse shapes the ground instead of moving things.
+    bool isOnBrushes = drawTerrainBrushes(editor, viewport) || drawFoliageBrushes(editor, viewport);
+    bool isShaping = shapeTerrain(editor, viewport, isOnBrushes) || paintFoliage(editor, viewport, isOnBrushes);
+    bool brushIsOut = (gTerrainTool.brush >= 0 && gTerrainTool.terrain.isValid()) || (gFoliageTool.brush >= 0 && gFoliageTool.foliage.isValid());
+    bool isOnGizmo = isShaping || isOnBrushes || brushIsOut ? false : updateGizmo(editor, viewport);
 
     // The cube in the corner: shows which way the camera faces; drag it to turn, click a face to look along an axis.
     ImGuizmo::SetDrawlist();
@@ -1217,7 +1641,7 @@ void drawSceneView(EditorContext& editor) {
     }
 
     // A click that is not on a handle selects what is under it.
-    if (viewport.isHovered && !isOnGizmo && !isOnCube && !io.KeyAlt && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    if (viewport.isHovered && !isOnGizmo && !isOnCube && !isShaping && !isOnBrushes && !io.KeyAlt && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         Entity hit = pick(editor, viewport.screenRay(io.MousePos));
         // The first click on a thing made of parts takes the whole thing; a click on a part
         // of what is already selected takes the part.

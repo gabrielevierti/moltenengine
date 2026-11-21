@@ -42,6 +42,14 @@ public:
     /// Forgets one file (or, with an empty name, every file) so that the next request
     /// reads it from disk again: what an editor calls when a file changes.
     void reload(const std::string& name = {});
+    /// The file `name` changed: read it again into the objects already handed out, so that
+    /// what uses them (meshes on screen, materials, pictures of the interface) changes at once.
+    /// Sounds are read again the next time they are asked for. Returns how many objects
+    /// changed. The GPU must be idle (the editor waits for it).
+    size_t refreshInPlace(const std::string& name);
+    /// A model already read (on another thread, while a scene loads in the background): the
+    /// next mesh(name) makes it from this instead of reading the file.
+    void preload(const std::string& name, MeshData data) { preloaded_[name] = std::move(data); }
 
     // ---- from files, by name relative to the Assets folder
 
@@ -86,6 +94,7 @@ private:
     std::string projectDirectory_;
     std::unordered_map<std::string, std::shared_ptr<Texture>> textures_;
     std::unordered_map<std::string, std::shared_ptr<Mesh>> meshes_;
+    std::unordered_map<std::string, MeshData> preloaded_;
     std::unordered_map<std::string, std::shared_ptr<struct GltfModel>> models_;     // glTF files read, for their parts
     std::unordered_map<std::string, std::shared_ptr<Material>> materials_;
     std::unordered_map<std::string, std::shared_ptr<Font>> fonts_;

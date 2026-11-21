@@ -36,6 +36,9 @@ struct Material {
     bool isWater = false;               // a surface of water: moving waves, a mirror at a glancing angle, clear from above
     float waveScale = 1.0f;             // water: larger numbers make smaller waves
     float waveHeight = 1.0f;            // water: how steep they are
+    /// Moved by the scene's wind (Rendering > Wind), the more the higher above the model's base:
+    /// grass, reeds, leaves, a flag. 0 still; 1 grass; 0.1 a tree.
+    float sway = 0.0f;
 
     /// A shader written by hand: the name of a `.shader` file in Assets (see
     /// Rendering/SurfaceShader.hpp), or empty for the engine's own. It is given the surface
@@ -83,6 +86,28 @@ struct MeshRenderer {
     bool castsShadows = true;
     bool isVisible = true;
     bool isBeyondItsDetail = false;     // set each view by a LOD Group above it: not drawn in this one
+};
+
+/// Many copies of an entity's mesh, drawn together in few draw calls: grass, trees, rocks,
+/// fence posts. Beside a MeshRenderer: its mesh and material are drawn at each of `places`
+/// (in the entity's space) instead of once at the entity. Copies farther than `drawDistance`
+/// meters from the camera are not drawn (0: all of them, however far).
+/// A decal: a picture projected down onto whatever is under it, inside the entity's box (its
+/// scale is its size: x by z across, y how deep it reaches). Dirt, cracks, tire marks, paint, a
+/// puddle's darkness, a sign on a wall (turn the entity so that its y points into the wall).
+struct Decal {
+    std::string picture;                // a picture in Assets, with transparency where nothing is drawn
+    Vec3 color{1, 1, 1};
+    float opacity = 1.0f;
+    bool darkens = true;                // multiplies what is under it, as dirt does; off: painted over it, as paint is
+
+    std::shared_ptr<Texture> loaded;    // the picture, once read
+    std::string loadedName;
+};
+
+struct MeshInstances {
+    std::vector<Mat4> places;
+    float drawDistance = 0.0f;
 };
 
 /// LOD Group, as in Unity: a model drawn in full near the camera and simpler far from it.

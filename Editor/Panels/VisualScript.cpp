@@ -49,6 +49,7 @@ public:
             return;
         }
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows)) editor.panelOwnsEditKeys = true;
+        drawDebugging(editor);
         if (board_.draw(graph_, ImGui::GetContentRegionAvail())) isUnsaved_ = true;
         // Saved once the drag or the typing is over, not sixty times a second during it.
         if (isUnsaved_ && !ImGui::IsAnyItemActive() && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) save(editor);
@@ -149,6 +150,86 @@ private:
         ImGui::TextDisabled("%zu nodes, used by %d %s.  Space: add a node   drag: select   Cmd+scroll: zoom", graph_.nodes.size(), users, users == 1 ? "entity" : "entities");
     }
 
+    /// While the game runs: the values on the wires and what ran; always: breakpoints; when the
+    /// game is held at one, what to do next.
+    void drawDebugging(EditorContext& editor) {
+        script::Debugger& debugger = script::Debugger::instance();
+        SceneDocument& scene = editor.scene;
+        bool isPlaying = scene.isPlaying();
+        if (isPlaying && !wasPlaying_) debugger.clearSeen();     // a new play: nothing seen yet
+        wasPlaying_ = isPlaying;
+        if (debugger.graph != path_) {
+            debugger.graph = path_;
+            debugger.values.clear();
+            debugger.ran.clear();
+            debugger.entity = Entity{};
+        }
+        debugger.isOn = isPlaying;
+        // Stopped at a breakpoint: the game is held, and the script shown is the one stopped in.
+        if (debugger.wantsHold) {
+            debugger.wantsHold = false;
+            scene.setPaused(true);
+            if (debugger.stopped.graph != path_) editor.graphToEdit = debugger.stopped.graph;
+        }
+        debugView_.values = &debugger.values;
+        debugView_.ran = &debugger.ran;
+        debugView_.now = debugger.now;
+        debugView_.stoppedAt = debugger.stopped.graph == path_ ? debugger.stopped.node : 0;
+        std::string path = path_;
+        debugView_.hasBreakpoint = [path](int node) { return script::Debugger::instance().hasBreakpoint(path, node); };
+        debugView_.toggleBreakpoint = [path](int node) { script::Debugger::instance().toggleBreakpoint(path, node); };
+        board_.debug = &debugView_;
+        if (!isPlaying) {
+            debugger.stopped = script::Debugger::Stop{};
+            return;
+        }
+        // Which entity's values are shown, of those running this script.
+        std::vector<Entity> users;
+        editor.engine.scene.each<VisualScript>([&](Entity entity, VisualScript& component) {
+            if (component.graph == path_) users.push_back(entity);
+        });
+        if (users.size() > 1) {
+            ImGui::SetNextItemWidth(200);
+            std::string shown = editor.engine.scene.isAlive(debugger.entity) ? scene.nameOf(debugger.entity) : "the first";
+            if (ImGui::BeginCombo("##watched", ("Watching " + shown).c_str())) {
+                for (Entity user : users) {
+                    if (ImGui::Selectable((scene.nameOf(user) + "##" + std::to_string(user.index)).c_str(), user == debugger.entity)) {
+                        debugger.entity = user;
+                        debugger.values.clear();
+                        debugger.ran.clear();
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::SameLine();
+        }
+        if (debugger.stopped.node != 0) {
+            const script::Node* node = graph_.find(debugger.stopped.node);
+            const script::NodeDef* definition = node ? script::NodeLibrary::instance().find(node->type) : nullptr;
+            ImGui::TextColored(ImVec4(1, 0.86f, 0.25f, 1), "Held before %s, on %s", definition ? definition->title.c_str() : "a node",
+                               scene.nameOf(debugger.stopped.entity).c_str());
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Continue")) {
+                debugger.stopped = script::Debugger::Stop{};
+                scene.setPaused(false);
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("The node runs, and the game goes on until the next breakpoint");
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Step")) {
+                debugger.stopped = script::Debugger::Stop{};
+                debugger.stepsOnce = true;
+                scene.setPaused(false);
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("The node runs, and the game is held again before the next node that runs");
+        } else if (!debugger.breakpoints.empty()) {
+            ImGui::TextDisabled("Running. Breakpoints hold the game when the flow comes to them.");
+        } else {
+            ImGui::TextDisabled("Running: the last value on each wire; the nodes that ran light up. Right-click a node for a breakpoint.");
+        }
+    }
+
+    GraphDebugView debugView_;
+    bool wasPlaying_ = false;
     std::string path_;                  // relative to Assets; empty for none
     script::Graph graph_;
     GraphEditor board_;

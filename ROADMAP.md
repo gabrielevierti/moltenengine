@@ -97,11 +97,11 @@ The next game after Driving: someone who walks, runs and jumps.
       it goes up), stands on slopes it can walk and slides off steeper ones, shoves bodies that move
 - [x] **Character mover and orbit camera**: walk and run where the input says, seen from the camera; jump, with a moment's
       grace after an edge; a camera turned with the mouse or the right stick that comes closer rather than go through a wall.
-      [ ] Blending from one camera to another
+      [x] Blending from one camera to another: Camera Shots and a Camera Director (Create > Camera Shot)
 - [x] **Animator with states**: a `.animator` file of parameters, states (one clip, or a blend tree of clips by a number,
       kept in step), and transitions on conditions, after an exit time, eased over a time of their own; the character mover
       sets `speed`, `grounded`, `verticalSpeed` and `jump` by itself
-- [~] **Animation events**: named moments of a state, sounds played, the rest for the game. [ ] Root motion
+- [x] **Animation events**: named moments of a state, sounds played, the rest for the game. [x] Root motion
 - [ ] **GPU skinning**, and **blend shapes** (faces)
 - [x] **Two-bone IK**: a foot or a hand on a target, the knee or elbow toward a pole
 - [x] **Navigation**: a Navigation Area finds the walkable ground (slope, steps, room for the agents' size); paths by A*,
@@ -110,6 +110,7 @@ The next game after Driving: someone who walks, runs and jumps.
       between) or hears, searching where it was last seen, going back
 - [x] **Prefabs by reference and variants**: a prefab placed in a scene, or in another prefab, is a copy that follows it
       (Unpack Prefab makes it the scene's own); a variant is its base with some values changed (Create Variant).
+      [x] A copy's own changes: a part changed in the Inspector or moved in the Scene view keeps it, saved with the copy
       [ ] Overrides on a placed copy, edited in the Inspector
 
 ## Phase 3 — How it looks
@@ -119,7 +120,8 @@ The next game after Driving: someone who walks, runs and jumps.
 - [ ] **Clustered lights**: many point and spot lights at once
 - [ ] **Decals**: skid marks, puddles, dirt, without extra meshes
 - [ ] **Depth of field, motion blur, colour grading (LUT), auto exposure**
-- [ ] **Physical sky and a day and night cycle**
+- [x] **A day and night cycle**: the sun crosses the sky, warms at dawn and dusk, a moon at night; sky and fog follow (Day and Night)
+- [ ] **Physical sky** (scattering in the shader), stars at night
 - [ ] **Particles on the GPU**: many more, with textures, trails and collisions
 - [ ] **Ray tracing denoiser**; shadows of point and spot lights traced
 - [ ] **Material graph**: materials made from nodes, beside the hand-written shaders
@@ -128,17 +130,52 @@ The next game after Driving: someone who walks, runs and jumps.
 ## Phase 4 — Working in the editor
 
 - [x] **Search everywhere and a command palette** (Cmd+K): actions, windows, Create, entities (with where they are), assets, plugins' menu items
-- [ ] **Asset dependencies**: what uses what, shown in the Viewer; unused assets found
-- [ ] **Hot reload of every asset**: textures, models, sounds, materials, shaders, as they change on disk
-- [ ] **Timeline**: cameras, animations, sounds and events on tracks, for cutscenes and replays
-- [ ] **Terrain**: heightmap, painted layers, sculpting brushes, collision
-- [ ] **Foliage**: painted grass and trees, instanced, moved by the wind
+- [x] **Asset dependencies**: what uses what, shown in the Viewer; unused assets found
+- [x] **Hot reload of every asset**: textures, models, sounds, materials as they change on disk, in the editor (shaders already were)
+- [x] **Timeline**: things moved along keys, camera cuts, sounds, values, shown and hidden, animation triggers; Window > Timeline to make them
+- [x] **Terrain**: heights kept in a file, brushes (raise, lower, smooth, flatten) in the Scene view, collision
+- [ ] **Terrain layers**: grass, rock, sand painted on it (needs a shader that blends them: with Phase 3)
+- [x] **Foliage**: grass, trees, rocks painted with a brush, drawn as copies of one mesh, faded out with distance
+- [ ] Foliage moved by the wind (a shader: with Phase 3)
 - [x] **Splines**: Spline (points = children), Spline Follower, Spline Road with its collider; drawn and laid in the Scene view
-- [ ] **Interface layout groups**: rows, columns, lists that scroll; sliders and text fields; fonts per text
+- [x] **Interface layout groups**: rows, columns, grids, lists that scroll; sliders
+- [x] **Text fields and fonts per text**: typed names kept between plays, the iPhone keyboard, a font of Assets per text and button
 - [x] **Localization**: texts in a table per language (`Assets/Localization/it.txt`), chosen in the game or by the system's language
-- [ ] **Git in the editor**: changed files, commit, history; scenes written to merge well
+- [x] **Git in the editor**: changed files and how, commit, history, pull and push (Window > Source Control)
+- [ ] Scenes written to merge well (parents by name, not by number)
 - [ ] **Frame debugger**: the passes of one frame, each one's result, step by step
-- [ ] **Keyboard shortcut editor**, editor themes
+- [x] **Keyboard shortcut editor**, editor themes (Edit > Editor Settings)
+
+## Phase 6 — Making games faster
+
+What every game would otherwise write for itself, in the order they are done.
+
+- [x] **Messages between scripts**: `world.send("doorOpened")`, heard by components (onMessage), by code that listens, by visual scripts (On Message, Send Message)
+- [x] **Waiting**: `world.after`, `every`, `when`, and coroutines (`co_await world.seconds(2)`); Wait and Wait Until nodes
+- [x] **Triggers and actions without code**: When / Then (Add Component > Logic): when something enters, a message, a value, a click, every few seconds; then up to four things
+- [x] **Saving the state by itself**: a Saveable component; places, values, what is on and off, what was destroyed (kit::saveState, Save Game node, When / Then)
+- [x] **Pools and spawners**: world.take / release; Spawner in waves, at most so many about; Lifetime puts back
+- [x] **Scenes loaded in the background**, with a Loading Screen and "{loading:percent}"; scenes added on top of others (addScene)
+- [x] **2D blend trees**: walking and running in every direction, mixed
+- [x] **Animation layers with masks**: the body does one thing, the legs another
+- [x] **An audio mixer with groups**: music, effects, voices, interface; volumes; the music lowered under voices
+- [x] **Reverb zones**, and sounds muffled behind walls
+- [x] **Editing many at once** in the Inspector
+- [x] **Searching the Hierarchy** by name, component and tag
+- [x] **Snapping**: to vertices, onto surfaces; aligning and spacing many
+- [x] **Debugging visual scripts**: values on the wires as it runs, stopping at a node
+- [x] **What a scene weighs**: triangles, textures, memory, draw calls by object
+- [x] **Ragdolls** from a character's bones
+- [x] **Floating**: things and boats on water
+- [x] **Ropes and chains** ready made from joints
+- [x] **Assets made smaller when built**: pictures for iPhone and Mac, sounds in 16 bits, the art programs' files left out (models as they are)
+- [x] **Color grading** with a lookup table (Assets/Grading/Neutral 32.png to start from), and **exposure that adapts**
+- [x] **Decals**: a picture projected onto what is under it, darkening (dirt, marks) or painted
+- [x] **Depth of field** and **motion blur** of the camera
+- [x] **Grass and trees moved by the wind**: a material's Sway, with the scene's wind
+- [x] **A sky from the air itself**, with **stars** at night
+
+The five above are drawn by the GPU: written and built, to be seen on the Mac.
 
 ## Phase 5 — Apple, further
 

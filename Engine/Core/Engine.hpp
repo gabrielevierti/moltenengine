@@ -97,7 +97,7 @@ public:
     Window* window() { return window_.get(); }
 
     // ---- what a World leaves to an engine
-    void playSound(const std::string& name, float volume = 1.0f) override;
+    void playSound(const std::string& name, float volume = 1.0f, const std::string& group = "") override;
     std::string assetPath(const std::string& name) const override;
     std::shared_ptr<Mesh> loadMesh(const std::string& name) override;
     std::shared_ptr<Material> loadMaterial(const std::string& name) override;
@@ -109,7 +109,14 @@ public:
     int deviceHeat() const override;
     bool isSavingBattery() const override;
     void endSound(uint32_t sound) override;
+    void groupSound(uint32_t sound, const std::string& group) override;
+    void mixGroup(const std::string& group, float volume, bool isMuted) override;
+    void duckGroup(const std::string& group, const std::string& under, float to) override;
+    void muffleSound(uint32_t sound, float muffle) override;
+    void setRoom(float size, float damping, float wet) override;
     std::shared_ptr<Texture> loadTexture(const std::string& name, TextureFormat format) override;
+    std::shared_ptr<Font> loadFont(const std::string& name) override;
+    void preloadMesh(const std::string& name, MeshData data) override;
     Engine* asEngine() override { return this; }
 
     // ---- conveniences

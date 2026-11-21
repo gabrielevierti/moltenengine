@@ -1,3 +1,4 @@
+#include "Assets/BuildAssets.hpp"
 #include "GameBuild.hpp"
 
 #include "Core/TextFile.hpp"
@@ -213,7 +214,13 @@ std::string exportMacApplication(const Project& project, const std::string& dest
     // The engine's own shaders and assets, then the project on top: a project may replace an engine asset.
     copyTree(fs::path(engineRoot) / "Shaders", resources / "Shaders");
     copyTree(fs::path(engineRoot) / "Assets", resources / "Assets");
-    copyTree(project.assetsDirectory(), resources / "Project" / "Assets");
+    // The project's assets, smaller where they can be: pictures no larger than a Mac shows, sounds
+    // in 16 bits, the art programs' own files left behind.
+    {
+        ShrinkOptions shrink;
+        shrink.largestPicture = 4096;
+        copyAssetsSmaller(project.assetsDirectory(), (resources / "Project" / "Assets").string(), shrink);
+    }
     fs::copy_file(project.filePath(), resources / "Project" / fs::path(project.filePath()).filename(), fs::copy_options::overwrite_existing, code);
     // A development build: the player sees this mark and turns on the developer keys (F1: statistics and profiler).
     if (isDevelopment) text::writeFile((resources / "Project" / "Development").string(), "F1 statistics and profiler, F2 colliders, F3 full screen, F4 screenshot\n");

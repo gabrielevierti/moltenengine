@@ -110,6 +110,18 @@ static const bool registered = [] {
 
 A node that does something has a `Flow` input called `in`, a `Flow` output, and an `execute` function that returns the name of the output to continue from.
 
+## Watching it run, and stopping it
+
+While the game runs, the board shows the script at work: on each colored wire, the last value
+that went along it ("3.14", "0 1 0", "true"), and each node that runs lights up for a moment.
+When several entities run the same script, the list at the top says which one is watched.
+
+**Breakpoints.** Right-click a node and choose **Add Breakpoint** (or select it and press F9):
+a red dot. When the flow comes to it, the game is held before the node runs, its ring turns
+yellow, and the board shows the values of that moment. **Continue** runs the node and lets the
+game go on until the next breakpoint; **Step** runs it and holds again before the next node
+that runs. Breakpoints stay while the editor is open, playing or not.
+
 ## What is not there yet
 
 - Undo on the drawing board (Cmd+Z there does nothing yet; the scene's undo is separate).

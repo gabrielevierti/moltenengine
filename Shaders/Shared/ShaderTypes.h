@@ -83,6 +83,8 @@ typedef struct {
     simd_float2 viewportSize;        // in pixels
     float nearPlane;
     float farPlane;
+    simd_float3 wind;                // meters per second: what sways grass and trees (materials with sway)
+    float windGust;                  // 0 steady, 1 wild
 } PassUniforms;
 
 // ---------------------------------------------------------------- per frame
@@ -137,6 +139,11 @@ typedef struct {
     uint32_t volumetricClouds;       // 1: clouds have depth, and are walked through too
     float reflectionMaxRoughness;    // rougher surfaces send no reflection ray: the sky's blurred light is enough for them
     float reflectionStrength;        // how much of what a ray sees is mirrored: 1 as physics says
+    // A sky worked out from how sunlight scatters in the air, and the stars at night.
+    uint32_t physicalSky;            // 1: the sky's colors come from the sun's height, not the three colors above
+    float skyHaze;                   // 0 clear mountain air to 1 a hazy summer day
+    float starBrightness;            // 0 none; 1 a clear night far from town
+    float starTime;                  // seconds: the stars turn slowly, and twinkle
 } FrameUniforms;
 
 // What a ray sees of the thing it hits: its color and its glow. One for each instance of
@@ -177,6 +184,7 @@ typedef struct {
     float waveHeight;                // how steep they are
     float customShader;              // above zero: which hand-written surface shader runs, counted from 1
     simd_float4 custom[8];           // its properties, in the order the shader declares them
+    float sway;                      // above zero: the wind moves it, the more the higher above its base (grass, leaves)
 } MaterialUniforms;
 
 // ---------------------------------------------------------------- post-processing and capture
@@ -196,7 +204,39 @@ typedef struct {
     float grain;                     // fine noise, as from a small sensor
     float interference;              // 0 a clean picture; 1 an analog video link about to drop
     float time;                      // seconds, so that noise moves
+    // Color grading with a lookup table, and exposure that adapts.
+    float lutSize;                   // the table's edge: 32 for a picture 1024 by 32; 0 none
+    float lutAmount;                 // 0 the colors as they were, 1 as the table makes them
+    uint32_t autoExposure;           // 1: the exposure follows how bright the scene is (texture 3)
+    float exposureCompensation;      // in stops, on top of what the adapting exposure says
 } PostUniforms;
+
+// The effects between the scene and the bloom: depth of field, motion blur, how bright the
+// scene is.
+typedef struct {
+    simd_float4x4 inverseViewProjection;
+    simd_float4x4 previousViewProjection;    // the camera a frame ago: where each point was then
+    simd_float2 texelSize;
+    float focusDistance;             // meters: what is sharp
+    float focusRange;                // meters around it that stay sharp
+    float blurSize;                  // the widest blur, in pixels of a picture 1080 high
+    float motionBlur;                // how long the shutter is open, as part of a frame: 0 none, 0.5 a film's
+    float deltaTime;                 // seconds since the last frame, for the exposure to adapt
+    float adaptSpeed;                // how quickly it does: 1 is about a second
+    float darkestExposure;           // the least and most it may be
+    float brightestExposure;
+    float pictureHeight;             // in pixels
+    float padding;
+} EffectUniforms;
+
+// A decal: a picture projected down its box onto whatever is there.
+typedef struct {
+    simd_float4x4 model;             // its box, a unit cube, in the world
+    simd_float4x4 inverseModel;
+    simd_float4 color;               // tint, and opacity in w
+    float darkens;                   // 1: multiplies what is under it (dirt, cracks, marks); 0: painted over it
+    float padding0, padding1, padding2;
+} DecalUniforms;
 
 typedef struct {
     simd_float4x4 projection;

@@ -8,6 +8,8 @@
 #include "Assets/Gltf.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <sstream>
 #include <cctype>
 #include <cmath>
 #include <filesystem>
@@ -93,6 +95,128 @@ void World::setPreference(const std::string& name, float value) {
     std::error_code code;
     std::filesystem::create_directories(std::filesystem::path(preferencesFile).parent_path(), code);
     if (!text::writeFile(preferencesFile, text)) logError("cannot save the preferences in %s", preferencesFile.c_str());
+}
+
+// ---------------------------------------------------------------- messages
+
+void World::send(const std::string& name, Entity to, float number, const std::string& text, Entity from) {
+    send(Message{name, number, text, from, to});
+}
+
+void World::send(const Message& message) {
+    // A message that makes another that makes the first...: stopped, and said.
+    if (sendDepth_ >= 32) {
+        logWarning("the message %s was sent from inside itself 32 times: not sent again", message.name.c_str());
+        return;
+    }
+    sendDepth_++;
+    // Code that listens (a copy: a listener may listen or stop listening as it hears).
+    std::vector<Listener> listening = listeners_;
+    for (const Listener& listener : listening) {
+        if (listener.name != "*" && listener.name != message.name) continue;
+        if (listener.hasOwner && !scene.isAlive(listener.owner)) continue;
+        listener.heard(message);
+    }
+    // Components with onMessage: the one it is for, or every one.
+    if (runsComponents) {
+        for (size_t i = 0; i < ComponentRegistry::instance().types().size(); i++) {
+            const ComponentType& declared = ComponentRegistry::instance().types()[i];
+            if (!declared.onMessage) continue;
+            std::string typeName = declared.name;
+            auto heard = declared.onMessage;
+            auto get = declared.get;
+            std::vector<Entity> hearing;
+            if (message.to.isValid()) hearing.push_back(message.to);
+            else declared.collect(scene, hearing);
+            for (Entity entity : hearing) {
+                if (!scene.isAlive(entity) || !runs(typeName, entity)) continue;
+                if (void* component = get(scene, entity)) heard(component, *this, entity, message);
+            }
+        }
+    }
+    sendDepth_--;
+}
+
+int World::listen(const std::string& name, std::function<void(const Message&)> heard, Entity owner) {
+    listeners_.push_back(Listener{nextListener_, name, std::move(heard), owner, owner.isValid()});
+    return nextListener_++;
+}
+
+void World::stopListening(int id) {
+    listeners_.erase(std::remove_if(listeners_.begin(), listeners_.end(), [id](const Listener& listener) { return listener.id == id; }),
+                     listeners_.end());
+}
+
+// ---------------------------------------------------------------- shared words
+
+const std::string& World::text(const std::string& name) const {
+    static const std::string none;
+    auto found = texts_.find(name);
+    return found == texts_.end() ? none : found->second;
+}
+
+void World::readTextPreferences() const {
+    if (textPreferencesReadFrom_ == preferencesFile) return;
+    textPreferencesReadFrom_ = preferencesFile;
+    textPreferences_.clear();
+    if (preferencesFile.empty()) return;
+    std::optional<std::string> file = text::readFile(preferencesFile + ".texts");
+    if (!file) return;
+    // One a line: a name, a tab, the words (with \n, \t and \\ for what cannot be on a line).
+    size_t at = 0;
+    while (at < file->size()) {
+        size_t end = file->find('\n', at);
+        std::string line = file->substr(at, end == std::string::npos ? std::string::npos : end - at);
+        at = end == std::string::npos ? file->size() : end + 1;
+        size_t tab = line.find('\t');
+        if (tab == std::string::npos || tab == 0) continue;
+        std::string value;
+        for (size_t i = tab + 1; i < line.size(); i++) {
+            if (line[i] == '\\' && i + 1 < line.size()) {
+                char next = line[++i];
+                value += next == 'n' ? '\n' : next == 't' ? '\t' : next;
+            } else {
+                value += line[i];
+            }
+        }
+        textPreferences_[line.substr(0, tab)] = value;
+    }
+}
+
+std::string World::textPreference(const std::string& name, const std::string& fallback) const {
+    readTextPreferences();
+    auto found = textPreferences_.find(name);
+    return found == textPreferences_.end() ? fallback : found->second;
+}
+
+bool World::hasTextPreference(const std::string& name) const {
+    readTextPreferences();
+    return textPreferences_.count(name) > 0;
+}
+
+void World::setTextPreference(const std::string& name, const std::string& value) {
+    readTextPreferences();
+    auto found = textPreferences_.find(name);
+    if (found != textPreferences_.end() && found->second == value) return;
+    textPreferences_[name] = value;
+    if (preferencesFile.empty()) return;
+    std::vector<std::string> names;
+    for (const auto& entry : textPreferences_) names.push_back(entry.first);
+    std::sort(names.begin(), names.end());
+    std::string out;
+    for (const std::string& key : names) {
+        out += key + "\t";
+        for (char c : textPreferences_[key]) {
+            if (c == '\n') out += "\\n";
+            else if (c == '\t') out += "\\t";
+            else if (c == '\\') out += "\\\\";
+            else out += c;
+        }
+        out += "\n";
+    }
+    std::error_code code;
+    std::filesystem::create_directories(std::filesystem::path(preferencesFile).parent_path(), code);
+    if (!text::writeFile(preferencesFile + ".texts", out)) logError("cannot save the preferences in %s.texts", preferencesFile.c_str());
 }
 
 // ---------------------------------------------------------------- languages
@@ -324,6 +448,62 @@ Entity World::spawnFromText(const std::string& prefabText, Vec3 position) {
     return root;
 }
 
+Entity World::take(const std::string& prefab, Vec3 position) {
+    std::vector<Entity>& waiting = pools_[prefab];
+    while (!waiting.empty()) {
+        Entity entity = waiting.back();
+        waiting.pop_back();
+        Pooled* pooled = scene.get<Pooled>(entity);
+        Transform* transform = scene.get<Transform>(entity);
+        if (!pooled || !transform || !pooled->isWaiting) continue;         // destroyed meanwhile
+        pooled->isWaiting = false;
+        transform->isActive = true;
+        transform->position = position;
+        transform->rotation = pooled->rotation;
+        transform->scale = pooled->scale;
+        scene.updateTransforms();
+        if (RigidBody* body = scene.get<RigidBody>(entity)) {
+            body->velocity = Vec3{0, 0, 0};
+            body->angularVelocity = Vec3{0, 0, 0};
+            physics.teleport(scene, entity, position);
+        }
+        return entity;
+    }
+    Entity made = spawn(prefab, position);
+    if (const Transform* transform = scene.get<Transform>(made)) scene.add(made, Pooled{prefab, transform->rotation, transform->scale, false});
+    return made;
+}
+
+void World::release(Entity entity) {
+    Pooled* pooled = scene.get<Pooled>(entity);
+    Transform* transform = scene.get<Transform>(entity);
+    if (!pooled || !transform) {
+        if (scene.isAlive(entity)) scene.destroy(entity);
+        return;
+    }
+    if (pooled->isWaiting) return;
+    pooled->isWaiting = true;
+    transform->isActive = false;
+    // When it comes back, its components start again; what it waited for is forgotten.
+    std::vector<Entity> family = {entity};
+    for (size_t i = 0; i < family.size(); i++) {
+        scene.each<Transform>([&](Entity child, Transform& place) {
+            if (place.parent == family[i]) family.push_back(child);
+        });
+    }
+    for (Entity member : family) {
+        uint64_t key = (uint64_t(member.index) << 32) | member.generation;
+        for (auto& [type, started] : startedComponents_) started.erase(key);
+        tasks.cancelOwnedBy(member);
+    }
+    pools_[pooled->prefab].push_back(entity);
+}
+
+size_t World::waitingInPool(const std::string& prefab) const {
+    auto found = pools_.find(prefab);
+    return found == pools_.end() ? 0 : found->second.size();
+}
+
 Entity World::spawn(const std::string& prefab, Vec3 position) {
     // Prefabs are spawned again and again (bullets, enemies): the file is read once.
     static std::unordered_map<std::string, std::string> cache;
@@ -340,10 +520,64 @@ Entity World::spawn(const std::string& prefab, Vec3 position) {
     return found->second.empty() ? Entity{} : spawnFromText(found->second, position);
 }
 
-uint32_t World::startSound(const std::string& name, float volume, float pitch, bool loops) {
+uint32_t World::startSound(const std::string& name, float volume, float pitch, bool loops, const std::string& group) {
     uint32_t sound = beginSound(name, volume * soundVolume, pitch, loops);
-    if (sound != 0) startedSounds_.push_back(sound);
+    if (sound != 0) {
+        startedSounds_.push_back(sound);
+        if (!group.empty()) groupSound(sound, group);
+    }
     return sound;
+}
+
+void World::setVolume(const std::string& group, float volume) {
+    GroupMix& mix = groupMix_[group.empty() ? "Effects" : group];
+    mix.volume = std::clamp(volume, 0.0f, 1.0f);
+    mixGroup(group.empty() ? "Effects" : group, mix.volume, mix.isMuted);
+}
+
+float World::volumeOf(const std::string& group) const {
+    auto found = groupMix_.find(group.empty() ? "Effects" : group);
+    return found == groupMix_.end() ? 1.0f : found->second.volume;
+}
+
+void World::setMuted(const std::string& group, bool isMuted) {
+    GroupMix& mix = groupMix_[group.empty() ? "Effects" : group];
+    mix.isMuted = isMuted;
+    mixGroup(group.empty() ? "Effects" : group, mix.volume, mix.isMuted);
+}
+
+void World::duck(const std::string& group, const std::string& under, float to) {
+    duckGroup(group, under, to);
+}
+
+void World::askForRoom(float weight, float size, float damping, float wet) {
+    if (weight <= roomWish_[0]) return;
+    roomWish_[0] = weight;
+    roomWish_[1] = size;
+    roomWish_[2] = damping;
+    roomWish_[3] = wet * std::clamp(weight, 0.0f, 1.0f);
+}
+
+void World::hearRoom() {
+    // The room most asked for this frame; none: dry. Said to the mixer only when it changes.
+    float size = roomWish_[0] > 0 ? roomWish_[1] : roomNow_[0];
+    float damping = roomWish_[0] > 0 ? roomWish_[2] : roomNow_[1];
+    float wet = roomWish_[0] > 0 ? roomWish_[3] : 0.0f;
+    if (std::abs(size - roomNow_[0]) > 1e-4f || std::abs(damping - roomNow_[1]) > 1e-4f || std::abs(wet - roomNow_[2]) > 1e-4f) {
+        roomNow_[0] = size, roomNow_[1] = damping, roomNow_[2] = wet;
+        setRoom(size, damping, wet);
+    }
+    roomWish_[0] = roomWish_[1] = roomWish_[2] = roomWish_[3] = 0;
+}
+
+float World::muffleFor(Vec3 from, Vec3 position) {
+    Vec3 toSound = position - from;
+    float distance = simd::length(toSound);
+    if (distance < 1.0f) return 0;
+    std::optional<RaycastHit> hit = physics.raycast(scene, Ray{from, toSound / distance}, distance);
+    // A wall: something that does not move, at least a meter before the sound (not what makes it).
+    if (!hit || hit->distance > distance - 1.0f || scene.get<RigidBody>(hit->entity)) return 0;
+    return 0.8f;
 }
 
 void World::changeSound(uint32_t sound, float volume, float pitch) {
@@ -377,6 +611,11 @@ void World::voiceSound(uint32_t sound, float volume, float pitch) {
     SpatialGain gain = spatialize(ears, place.position, place.fullWithin, place.silentBeyond);
     adjustSound(sound, volume * soundVolume * gain.volume, pitch);
     panSound(sound, gain.pan);
+    float muffle = muffledByWalls && gain.volume > 0 ? muffleFor(xyz(ears.columns[3]), place.position) : 0.0f;
+    if (muffle != soundPlaces_[sound].muffle) {
+        soundPlaces_[sound].muffle = muffle;
+        muffleSound(sound, muffle);
+    }
 }
 
 void World::stopSound(uint32_t sound) {
@@ -425,6 +664,10 @@ bool World::loadSceneText(const std::string& name, const std::string& sceneText)
     assets.prefabText = [this](const std::string& prefabName) { return text::readFile(assetPath(prefabName)); };
     std::string contents = sceneText;       // a copy: the text may be the one this world holds
     stopSounds();                           // what was sounding belonged to the scene that is leaving
+    tasks.clear();                          // and so did what was waiting to happen in it
+    pools_.clear();
+    listeners_.erase(std::remove_if(listeners_.begin(), listeners_.end(), [](const Listener& listener) { return listener.hasOwner; }),
+                     listeners_.end());
     scene.clear();
     physics.reset();
     materials_->settings = RenderSettings{};
@@ -438,7 +681,138 @@ bool World::loadSceneText(const std::string& name, const std::string& sceneText)
     return isRead;
 }
 
+// ---------------------------------------------------------------- scenes in the background, scenes added
+
+void World::loadSceneInBackground(const std::string& name, bool isAdded) {
+    if (loading_.valid()) {
+        logWarning("%s is still loading: %s is not started", loadingName_.c_str(), name.c_str());
+        return;
+    }
+    loadingName_ = name;
+    loadingIsAdded_ = isAdded;
+    loadingDone_ = std::make_shared<std::atomic<int>>(0);
+    loadingTotal_ = std::make_shared<std::atomic<int>>(1);
+    setValue("isLoading", 1);
+    setValue("loading", 0);
+    std::string path = assetPath(name), root = assetRoot;
+    auto done = loadingDone_, total = loadingTotal_;
+    // Only files are read there, and models made into triangles: nothing of the scene open.
+    loading_ = std::async(std::launch::async, [name, path, root, done, total]() {
+        LoadedInBackground loaded;
+        loaded.name = name;
+        std::optional<std::string> text = text::readFile(path);
+        if (!text) return loaded;
+        loaded.text = *text;
+        loaded.isRead = true;
+        // The models it names: "mesh \"Models/car.glb#3\" ...".
+        std::vector<std::string> wanted;
+        std::istringstream lines(*text);
+        std::string line;
+        while (std::getline(lines, line)) {
+            size_t start = line.find_first_not_of(" \t");
+            if (start == std::string::npos || line.compare(start, 6, "mesh \"") != 0) continue;
+            size_t open = start + 5, close = line.find('"', open + 1);
+            if (close == std::string::npos) continue;
+            std::string mesh = line.substr(open + 1, close - open - 1);
+            bool isBuiltIn = mesh.empty() || mesh == "cube" || mesh == "sphere" || mesh == "plane" || mesh == "cylinder";
+            if (!isBuiltIn && std::find(wanted.begin(), wanted.end(), mesh) == wanted.end()) wanted.push_back(mesh);
+        }
+        total->store(int(wanted.size()) + 1);
+        done->store(1);
+        auto fullPath = [&root](const std::string& file) { return root.empty() ? file : root + "/" + file; };
+        std::unordered_map<std::string, std::shared_ptr<GltfModel>> models;      // each file read once, however many parts
+        for (const std::string& mesh : wanted) {
+            MeshData data;
+            if (isGltfFile(mesh)) {
+                int part = -1;
+                std::string file = gltfFileOf(mesh, &part);
+                std::shared_ptr<GltfModel>& model = models[file];
+                if (!model) {
+                    if (std::optional<GltfModel> read = GltfModel::load(fullPath(file))) model = std::make_shared<GltfModel>(std::move(*read));
+                }
+                if (model) {
+                    if (part < 0) {
+                        data = model->assembled(model->restPose());
+                    } else {
+                        std::vector<GltfModel::Part> parts = model->parts();
+                        if (size_t(part) < parts.size()) data = model->part(parts[size_t(part)]);
+                    }
+                    ImportSettings::load(fullPath(file)).apply(data);
+                }
+            } else if (std::optional<std::string> obj = text::readFile(fullPath(mesh))) {
+                if (std::optional<MeshData> parsed = MeshData::parseOBJ(*obj)) {
+                    data = std::move(*parsed);
+                    ImportSettings::load(fullPath(mesh)).apply(data);
+                }
+            }
+            if (!data.positions.empty()) loaded.meshes.push_back({mesh, std::move(data)});
+            done->fetch_add(1);
+        }
+        return loaded;
+    });
+}
+
+float World::sceneLoadProgress() const {
+    if (!loading_.valid() || !loadingTotal_) return 1.0f;
+    return std::clamp(float(loadingDone_->load()) / float(std::max(loadingTotal_->load(), 1)), 0.0f, 0.99f);
+}
+
+void World::finishBackgroundLoad() {
+    LoadedInBackground loaded = loading_.get();
+    for (auto& [mesh, data] : loaded.meshes) preloadMesh(mesh, std::move(data));
+    if (!loaded.isRead) {
+        logError("there is no scene %s", loaded.name.c_str());
+    } else if (loadingIsAdded_) {
+        addSceneText(loaded.name, loaded.text);
+    } else {
+        loadSceneText(loaded.name, loaded.text);
+    }
+    setValue("loading", 1);
+    setValue("isLoading", 0);
+    std::vector<std::function<void()>> then = std::move(afterScene_);
+    afterScene_.clear();
+    for (const std::function<void()>& action : then) action();
+}
+
+Entity World::addScene(const std::string& name) {
+    std::optional<std::string> contents = text::readFile(assetPath(name));
+    if (!contents) {
+        logError("there is no scene %s", name.c_str());
+        return Entity{};
+    }
+    return addSceneText(name, *contents);
+}
+
+Entity World::addSceneText(const std::string& name, const std::string& sceneText) {
+    SceneAssets assets;
+    assets.mesh = [this](const std::string& meshName) { return loadMesh(meshName); };
+    assets.texture = [this](const std::string& textureName, TextureFormat format) { return loadTexture(textureName, format); };
+    assets.material = [this](const std::string& materialName) { return loadMaterial(materialName); };
+    assets.prefabText = [this](const std::string& prefabName) { return text::readFile(assetPath(prefabName)); };
+    std::vector<NamedMaterial> materials;      // alive through the meshes that use them
+    RenderSettings ignored;                    // the light and sky stay the open scene's
+    std::vector<Entity> created;
+    if (!readScene(sceneText, scene, materials, ignored, assets, &created)) return Entity{};
+    Entity holder = scene.create("Scene: " + name);
+    scene.add(holder, Transform{});
+    scene.add(holder, AddedScene{name});
+    for (Entity entity : created) {
+        Transform* transform = scene.get<Transform>(entity);
+        if (transform && !scene.isAlive(transform->parent)) transform->parent = holder;
+    }
+    scene.updateTransforms();
+    return holder;
+}
+
+void World::removeScene(const std::string& name) {
+    scene.each<AddedScene>([&](Entity entity, AddedScene& added) {
+        if (added.name == name) scene.destroy(entity);
+    });
+}
+
 void World::applyPendingScene() {
+    if (loading_.valid() && loading_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) finishBackgroundLoad();
+    else if (loading_.valid()) setValue("loading", sceneLoadProgress());
     if (pendingScene_.empty() && !pendingReload_) return;
     std::string name = std::move(pendingScene_);
     pendingScene_.clear();
@@ -453,6 +827,9 @@ void World::applyPendingScene() {
     } else {
         logError("reloadScene: no scene was loaded, so there is none to go back to");
     }
+    std::vector<std::function<void()>> then = std::move(afterScene_);
+    afterScene_.clear();
+    for (const std::function<void()>& action : then) action();
 }
 
 // ---------------------------------------------------------------- components
@@ -598,6 +975,8 @@ void World::advance(double realDelta) {
     // What was created or moved since the last frame (by an editor, by code between frames)
     // has its place in the world before any component asks for it.
     profiler.beginFrame();
+    input.isTakingText = wantsTextInput;        // as the last frame left it
+    wantsTextInput = false;                     // until a text field that is typed in says so again
     scene.updateTransforms();
     int steps = time.beginFrame(realDelta);
     for (int i = 0; i < steps; i++) {
@@ -618,6 +997,10 @@ void World::advance(double realDelta) {
         Profiler::Scope timed(profiler, "Update");
         runComponents(false, time.delta);
     }
+    if (runsComponents) {
+        Profiler::Scope timed(profiler, "Waiting tasks");
+        tasks.run(time.delta, [this](Entity entity) { return scene.isAlive(entity); });
+    }
     scene.flushDestroyed();
     scene.updateTransforms();
     {
@@ -629,6 +1012,7 @@ void World::advance(double realDelta) {
         Profiler::Scope timed(profiler, "Particles");
         updateParticles(scene, time.delta, materials_->settings.wind, materials_->settings.windGustiness, time.elapsed);
     }
+    hearRoom();
     applyPendingScene();
     input.endFrame();
     profiler.endFrame();

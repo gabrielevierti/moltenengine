@@ -256,6 +256,8 @@ bool drawMaterialProperties(EditorContext& editor, Material& material) {
         }
         changed |= ui::color("Emissive", material.emissive, true);
         changed |= ui::dragVec2("Texture Repeat", material.uvScale, 0.01f);
+        changed |= ui::dragFloat("Sway", material.sway, 0.005f, 0.0f, 3.0f);
+        ui::tooltip("Moved by the scene's wind (Rendering > Wind), the more the higher above the model's base: 1 for grass, 0.1 for a tree. 0: still");
     }
     if (ui::section("Textures")) {
         changed |= textureSlot(editor, "Base Color", material.baseColorTexture, TextureFormat::RGBA8_sRGB);

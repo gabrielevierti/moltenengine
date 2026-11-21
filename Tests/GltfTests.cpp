@@ -293,3 +293,110 @@ TEST(two_bone_ik_puts_the_end_of_a_limb_on_its_target) {
     CHECK(simd::length(footAt(half) - Vec3{0, 2, 0}) < 1e-4f);
     CHECK(!solveTwoBoneIK(model, half, 1, Vec3{1, 1, 0}, nullptr, 1.0f));              // the knee has no grandparent
 }
+
+TEST(root_motion_moves_the_entity_and_keeps_the_body_over_it) {
+    // The strip, its first bone walking forward 2 meters in the second its clip lasts.
+    Strip strip;
+    strip.put<float>({0, 0, 0, 0, 0, -2});                                          // translations
+    auto swap = [&](const std::string& from, const std::string& to) {
+        size_t at = strip.json.find(from);
+        if (at != std::string::npos) strip.json.replace(at, from.size(), to);
+    };
+    swap("\"byteLength\":308BUFFER", "\"byteLength\":332BUFFER");
+    swap("{\"buffer\":0,\"byteOffset\":276,\"byteLength\":32}]", "{\"buffer\":0,\"byteOffset\":276,\"byteLength\":32},{\"buffer\":0,\"byteOffset\":308,\"byteLength\":24}]");
+    swap("{\"bufferView\":6,\"componentType\":5126,\"count\":2,\"type\":\"VEC4\"}]",
+         "{\"bufferView\":6,\"componentType\":5126,\"count\":2,\"type\":\"VEC4\"},{\"bufferView\":7,\"componentType\":5126,\"count\":2,\"type\":\"VEC3\"}]");
+    swap("\"channels\":[{\"sampler\":0,\"target\":{\"node\":2,\"path\":\"rotation\"}}]",
+         "\"channels\":[{\"sampler\":0,\"target\":{\"node\":2,\"path\":\"rotation\"}},{\"sampler\":1,\"target\":{\"node\":1,\"path\":\"translation\"}}]");
+    swap("\"samplers\":[{\"input\":5,\"output\":6,\"interpolation\":\"LINEAR\"}]",
+         "\"samplers\":[{\"input\":5,\"output\":6,\"interpolation\":\"LINEAR\"},{\"input\":5,\"output\":7,\"interpolation\":\"LINEAR\"}]");
+    strip.writeGlb("/tmp/molten_walker.glb");
+    kit::registerKit();
+    Stage stage;
+    stage.assetRoot = "/tmp";
+    Entity walker = stage.scene.create("Walker");
+    Transform placed;
+    placed.rotation = Quat(radians(90.0f), Vec3{0, 1, 0});                   // turned: forward (-z) is -x
+    stage.scene.add(walker, placed);
+    Animator animator;
+    animator.model = "molten_walker.glb";
+    animator.clip = "Bend";
+    animator.blendTime = 0;
+    animator.rootMotion = true;
+    stage.scene.add(walker, animator);
+    for (int i = 0; i < 30; i++) stage.advance(1.0 / 60.0);                  // half a second: a meter
+    Vec3 at = stage.scene.get<Transform>(walker)->position;
+    CHECK(std::abs(at.x + 1) < 0.05f && std::abs(at.z) < 1e-3f);
+    // The body stays over its entity: the sheet's corner where it is when standing.
+    CHECK(simd::length(stage.shown.positions[0] - Vec3{0, 0, 0}) < 1e-3f);
+    // Round again: it goes on forward, it does not jump back.
+    for (int i = 0; i < 60; i++) stage.advance(1.0 / 60.0);                  // a second and a half: three meters
+    at = stage.scene.get<Transform>(walker)->position;
+    CHECK(std::abs(at.x + 3) < 0.1f);
+}
+
+TEST(animation_layers_play_over_part_of_the_body) {
+    Strip strip;
+    strip.writeGlb("/tmp/molten_strip.glb");
+    // The base stands still; a layer bends the second bone (its clip, played to its end, turns it
+    // a quarter round), by as much as "aim" says.
+    text::writeFile("/tmp/molten_layers.animator", R"(molten-animator 1
+parameter float aim 1
+state Stand
+  motion Bend
+  speed 0
+layer Arms mask Bone1 weight aim
+  state Bent loops 0
+    motion Bend
+layer Breath additive weight 0
+  state Breathe loops 0
+    motion Bend
+)");
+    std::string error;
+    std::optional<AnimatorController> parsed = AnimatorController::parse(*text::readFile("/tmp/molten_layers.animator"), &error);
+    CHECK(parsed && parsed->layers.size() == 2 && parsed->layers[0].mask[0] == "Bone1" && parsed->layers[0].weightBy == "aim" &&
+          parsed->layers[1].additive && parsed->layers[1].weight == 0 && parsed->layers[0].start == "Bent");
+    if (!parsed) {
+        printf("    %s\n", error.c_str());
+        return;
+    }
+    std::optional<AnimatorController> again = AnimatorController::parse(parsed->toText(), &error);
+    CHECK(again && again->toText() == parsed->toText() && again->states.size() == 1);
+    CHECK(!AnimatorController::parse("molten-animator 1\nstate A\n  motion X\nlayer L weight nothing\n  state B\n", &error) &&
+          error.find("nothing") != std::string::npos);
+
+    kit::registerKit();
+    Stage stage;
+    stage.assetRoot = "/tmp";
+    Entity entity = stage.scene.create("Sheet");
+    stage.scene.add(entity, Transform{});
+    Animator animator;
+    animator.model = "molten_strip.glb";
+    animator.controller = "molten_layers.animator";
+    stage.scene.add(entity, animator);
+    for (int i = 0; i < 80; i++) stage.advance(1.0 / 60.0);
+    Animator* playing = stage.scene.get<Animator>(entity);
+    auto angle = [&](int node) { return 2 * std::acos(std::clamp(std::abs(playing->pose.rotations[size_t(node)].vector.w), 0.0f, 1.0f)); };
+    CHECK(std::abs(angle(2) - 1.5707963f) < 0.02f);          // the bone of the mask: bent
+    CHECK(angle(1) < 1e-4f);                                 // the one above it: as the base has it
+    playing->setFloat("aim", 0.5f);
+    stage.advance(1.0 / 60.0);
+    CHECK(std::abs(angle(2) - 0.785398f) < 0.02f);           // half way
+    // Added: a quarter round on top of a quarter round.
+    playing->setFloat("aim", 1);
+    std::string added = R"(molten-animator 1
+state Stand
+  motion Bend
+  speed 0
+layer Bend
+  state Bent loops 0
+    motion Bend
+layer Breath additive
+  state Breathe loops 0
+    motion Bend
+)";
+    text::writeFile("/tmp/molten_layers2.animator", added);
+    playing->controller = "molten_layers2.animator";
+    for (int i = 0; i < 80; i++) stage.advance(1.0 / 60.0);
+    CHECK(std::abs(angle(2) - 3.14159f) < 0.03f);
+}

@@ -2,6 +2,17 @@
 #include "Kit/Character.hpp"
 #include "Kit/Navigation.hpp"
 #include "Kit/Spline.hpp"
+#include "Kit/Layout.hpp"
+#include "Kit/Terrain.hpp"
+#include "Kit/CameraShots.hpp"
+#include "Kit/DayNight.hpp"
+#include "Kit/Foliage.hpp"
+#include "Kit/WhenThen.hpp"
+#include "Kit/Saveable.hpp"
+#include "Kit/Sound.hpp"
+#include "Kit/Ragdoll.hpp"
+#include "Kit/Rope.hpp"
+#include "Animation/Timeline.hpp"
 
 #include "Kit/Vehicles.hpp"
 #include "Animation/Animator.hpp"
@@ -143,15 +154,91 @@ void Follow::lateUpdate(World& world, Entity self, float dt) {
 void Buoyancy::fixedUpdate(World& world, Entity self, float dt) {
     RigidBody* body = world.scene.get<RigidBody>(self);
     if (!body) return;
-    // Over a Water, the surface is where its waves are now: what floats rides them.
-    float level = waterLevel;
-    waterHeightAt(world, body->position, level);
-    float under = saturate((level - body->position.y) / std::max(depth, 0.01f) * 0.5f + 0.5f);     // 0 out, 1 fully under
-    isInWater = under > 0;
+    float lifting = 9.81f * body->gravityScale * lift * dt;
+    // Slowed by moving through the water, and carried along by its flow.
+    auto slow = [&](float under) {
+        Vec3 relative = body->velocity - current;
+        Vec3 length = rotate(body->rotation, Vec3{0, 0, -1});
+        float along = simd::dot(relative, length);
+        Vec3 across = relative - length * along;
+        body->velocity = current + across * std::max(0.0f, 1.0f - drag * under * dt) +
+                         length * (along * std::max(0.0f, 1.0f - drag * lengthDrag * under * dt));
+    };
+    if (hull.x <= 0 || hull.y <= 0 || hull.z <= 0) {
+        // Over a Water, the surface is where its waves are now: what floats rides them.
+        float level = waterLevel;
+        waterHeightAt(world, body->position, level);
+        float under = saturate((level - body->position.y) / std::max(depth, 0.01f) * 0.5f + 0.5f);     // 0 out, 1 fully under
+        underNow = under;
+        isInWater = under > 0;
+        if (!isInWater) return;
+        // Up by the weight of the water it pushes aside, and slowed by moving through it.
+        body->velocity.y += lifting * under;
+        slow(under);
+        return;
+    }
+    // A hull: held up at its four lower corners, each by how deep it is there.
+    const Quat turn = body->rotation;
+    const Vec3 corners[4] = {{-hull.x, -hull.y, -hull.z}, {hull.x, -hull.y, -hull.z}, {-hull.x, -hull.y, hull.z}, {hull.x, -hull.y, hull.z}};
+    float total = 0;
+    Vec3 torque{0, 0, 0};
+    for (const Vec3& corner : corners) {
+        Vec3 arm = rotate(turn, corner);
+        Vec3 point = body->position + arm;
+        float level = waterLevel;
+        waterHeightAt(world, point, level);
+        // Fully under when the water is the hull's height above its bottom there.
+        float under = saturate((level - point.y) / (2 * hull.y));
+        total += under * 0.25f;
+        Vec3 up{0, lifting * under * 0.25f, 0};             // a change of speed, for the whole body's mass
+        torque += simd::cross(arm, up);
+    }
+    underNow = total;
+    isInWater = total > 0;
     if (!isInWater) return;
-    // Up by the weight of the water it pushes aside, and slowed by moving through it.
-    body->velocity.y += 9.81f * body->gravityScale * lift * under * dt;
-    body->velocity *= std::max(0.0f, 1.0f - drag * under * dt);
+    // Each corner's push lifts the whole body, and turns it about its middle as a box of its size turns.
+    body->velocity.y += lifting * total;
+    if (body->rotates) {
+        Vec3 local = rotate(simd::conjugate(turn), torque);
+        Vec3 inertia{(hull.y * hull.y + hull.z * hull.z) / 3, (hull.x * hull.x + hull.z * hull.z) / 3, (hull.x * hull.x + hull.y * hull.y) / 3};
+        body->angularVelocity += rotate(turn, local / simd::max(inertia, Vec3{1e-4f, 1e-4f, 1e-4f}));
+        body->angularVelocity *= std::max(0.0f, 1.0f - turnDrag * total * dt);
+    }
+    slow(total);
+}
+
+void Boat::start(World& world, Entity self) {
+    if (Buoyancy* floats = world.scene.get<Buoyancy>(self); floats && floats->lengthDrag == 1) floats->lengthDrag = 0.12f;
+}
+
+void Boat::fixedUpdate(World& world, Entity self, float dt) {
+    RigidBody* body = world.scene.get<RigidBody>(self);
+    const Buoyancy* floats = world.scene.get<Buoyancy>(self);
+    if (!body) return;
+    if (usesInput) {
+        throttle = std::clamp(-world.input.axis("moveZ"), -1.0f, 1.0f);       // W is -1 along moveZ
+        steer = std::clamp(world.input.axis("moveX"), -1.0f, 1.0f);
+    }
+    Vec3 forward = rotate(body->rotation, Vec3{0, 0, -1});
+    forward.y = 0;
+    forward = safeNormalize(forward, Vec3{0, 0, -1});
+    speed = simd::dot(body->velocity, forward);
+    if (!floats || !floats->isInWater) return;
+    // Pushed by its propeller where it sits in the water, up to its top speed.
+    float push = throttle >= 0 ? throttle : throttle * reverse;
+    if ((push > 0 && speed < topSpeed) || (push < 0 && speed > -topSpeed * reverse)) body->velocity += forward * (push * acceleration * dt);
+    // The rudder turns it the more the faster it goes (and the other way going astern), and the
+    // water keeps it going the way it points instead of sliding sideways.
+    float bite = std::clamp(speed / std::max(topSpeed * 0.4f, 0.1f), -1.0f, 1.0f);
+    body->angularVelocity.y += (-steer * radians(turnSpeed) * bite - body->angularVelocity.y) * std::min(1.0f, 3.0f * dt);
+    Vec3 side = simd::cross(forward, Vec3{0, 1, 0});
+    float sliding = simd::dot(body->velocity, side);
+    body->velocity -= side * sliding * std::min(1.0f, 2.0f * floats->underNow * dt);
+    if (!body->rotates) {
+        // A body that does not rotate is turned here.
+        Transform* transform = world.scene.get<Transform>(self);
+        if (transform) transform->rotation = simd::normalize(Quat(body->angularVelocity.y * dt, Vec3{0, 1, 0}) * transform->rotation);
+    }
 }
 
 void Spin::update(World& world, Entity self, float dt) {
@@ -185,7 +272,7 @@ void Mover::update(World& world, Entity self, float dt) {
 
 void Lifetime::update(World& world, Entity self, float dt) {
     age += dt;
-    if (age >= seconds) world.scene.destroy(self);
+    if (age >= seconds) world.release(self);        // back to its pool, if it came from one
 }
 
 // ---------------------------------------------------------------- Collectible, Health, Damage
@@ -247,12 +334,54 @@ void Shooter::update(World& world, Entity self, float dt) {
     if (!shotSound.empty()) world.playSound(shotSound, 0.6f);
 }
 
+void LoadingScreen::update(World& world, Entity self, float) {
+    bool isLoading = world.isLoadingScene();
+    world.scene.each<Transform>([&](Entity, Transform& transform) {
+        if (transform.parent == self) transform.isActive = isLoading;
+    });
+}
+
+int Spawner::countAlive(World& world) {
+    alive.erase(std::remove_if(alive.begin(), alive.end(),
+                               [&](Entity entity) {
+                                   if (!world.scene.isAlive(entity)) return true;
+                                   const Pooled* pooled = world.scene.get<Pooled>(entity);
+                                   const Transform* transform = world.scene.get<Transform>(entity);
+                                   return (pooled && pooled->isWaiting) || !transform || !transform->isActive;
+                               }),
+                alive.end());
+    return int(alive.size());
+}
+
+void Spawner::start(World&, Entity) {
+    waited = 0;
+    spawned = 0;
+    hasBegun = false;
+    wave = inWave = 0;
+    isPausing = isDone = toldDone = false;
+    alive.clear();
+}
+
 void Spawner::update(World& world, Entity self, float dt) {
-    if (limit > 0 && spawned >= limit) return;
+    int about = countAlive(world);
+    if (!aliveValue.empty()) world.setValue(aliveValue, float(about));
+    if (isDone || (limit > 0 && spawned >= limit)) {
+        // All made and all gone: said once, for whoever waits for it.
+        if (about == 0 && !toldDone && (isDone || limit > 0)) {
+            toldDone = true;
+            world.send("wavesDone", Entity{}, float(wave), prefab, self);
+        }
+        return;
+    }
     waited += dt;
+    if (isPausing) {
+        if (waited < waveSeconds) return;
+        isPausing = false;
+        waited = interval;              // the wave's first at once
+    }
     float due = hasBegun ? interval : firstDelay;
-    if (waited < due) return;
-    waited -= due;
+    if (waited < due || (maxAlive > 0 && about >= maxAlive)) return;
+    waited = std::min(waited - due, due);
     hasBegun = true;
     const Transform* transform = world.scene.get<Transform>(self);
     if (!transform) return;
@@ -262,7 +391,16 @@ void Spawner::update(World& world, Entity self, float dt) {
         position += Vec3{std::cos(angle) * distance, 0, std::sin(angle) * distance};
     }
     spawned++;
-    world.spawn(prefab, position);
+    Entity made = usesPool ? world.take(prefab, position) : world.spawn(prefab, position);
+    if (made.isValid()) alive.push_back(made);
+    if (count > 0 && ++inWave >= count) {
+        inWave = 0;
+        wave++;
+        world.send("waveDone", Entity{}, float(wave), prefab, self);
+        if (waves > 0 && wave >= waves) isDone = true;
+        else isPausing = true;
+        waited = 0;
+    }
 }
 
 // ---------------------------------------------------------------- HudText, Goal, RestartWhenBelow
@@ -283,6 +421,14 @@ std::string HudText::filled(const World& world, const std::string& written) {
         std::string name = text.substr(open + 1, close - open - 1);
         // "{abs:off|on}": words for a value, the first for 0, the second for 1, and so on.
         if (size_t colon = name.find(':'); colon != std::string::npos) {
+            // "{loading:percent}": 0 to 1 as 0% to 100%.
+            if (name.compare(colon + 1, std::string::npos, "percent") == 0) {
+                char percent[16];
+                std::snprintf(percent, sizeof(percent), "%d%%", int(std::lround(world.value(name.substr(0, colon)) * 100)));
+                out += percent;
+                i = close + 1;
+                continue;
+            }
             // "{lap:time}": seconds as minutes, seconds and tenths; nothing yet as dashes.
             if (name.compare(colon + 1, std::string::npos, "time") == 0) {
                 float seconds = world.value(name.substr(0, colon));
@@ -306,6 +452,11 @@ std::string HudText::filled(const World& world, const std::string& written) {
             i = close + 1;
             continue;
         }
+        if (world.hasText(name)) {                  // shared words: a name typed in a text field
+            out += world.text(name);
+            i = close + 1;
+            continue;
+        }
         float value = world.value(name);
         char number[32];
         // Whole numbers without a decimal point: "Coins: 3", not "Coins: 3.0".
@@ -317,7 +468,9 @@ std::string HudText::filled(const World& world, const std::string& written) {
     return out;
 }
 
-void HudText::draw(World& world, Entity, Canvas& canvas) {
+void HudText::draw(World& world, Entity self, Canvas& canvas) {
+    InterfaceClip clip(world, self, canvas);
+    InterfaceFont typeface(world, canvas, font, loadedFont, loadedFontName);
     Vec2 size_ = canvas.size();
     Vec2 position{size_.x * anchor.x + offset.x, size_.y * anchor.y + offset.y};
     TextAlign align = anchor.x < 0.34f ? TextAlign::Left : anchor.x > 0.66f ? TextAlign::Right : TextAlign::Center;
@@ -445,7 +598,7 @@ void AudioSource::start(World& world, Entity) {
 void AudioSource::play(World& world) {
     stop(world);
     if (clip.empty()) return;
-    sound = world.startSound(clip, volume, pitch, loops);
+    sound = world.startSound(clip, volume, pitch, loops, group);
     shownVolume = volume;
     shownPitch = pitch;
 }
@@ -455,7 +608,17 @@ void AudioSource::stop(World& world) {
     sound = 0;
 }
 
-void AudioSource::update(World& world, Entity, float) {
+void AudioSource::update(World& world, Entity self, float) {
+    // From where it is, as it moves and as the listener does.
+    if (sound != 0 && comesFromHere) {
+        if (const Transform* transform = world.scene.get<Transform>(self)) {
+            world.placeSound(sound, transform->worldPosition(), fullWithin, silentBeyond);
+            if (volume != shownVolume || pitch != shownPitch) world.changeSound(sound, volume, pitch);
+            shownVolume = volume;
+            shownPitch = pitch;
+            return;
+        }
+    }
     // Volume and pitch can be changed while it plays, by the inspector or by code.
     if (sound != 0 && (volume != shownVolume || pitch != shownPitch)) {
         world.changeSound(sound, volume, pitch);
@@ -469,6 +632,16 @@ void registerKit() {
     linkCharacters();
     linkNavigation();
     linkSplines();
+    linkTerrain();
+    linkCameraShots();
+    linkDayNight();
+    linkFoliage();
+    linkWhenThen();
+    linkSaveable();
+    linkSound();
+    linkRagdoll();
+    linkRope();
+    linkTimeline();
     (void)script::typeNameFor("kit");
     (void)&sharedGltfModel;                 // and the Animator       // and what scripts made from visual scripts are written with         // names something in Vehicles.cpp, so that a program that links the kit gets the vehicles too
     // Where each is found under Add Component.
@@ -478,7 +651,11 @@ void registerKit() {
         registry.setCategory(name, "Gameplay");
     }
     registry.setCategory("Buoyancy", "Physics");
+    registry.setCategory("Boat", "Vehicles");
     for (const char* name : {"CharacterController", "CharacterMover", "OrbitCamera"}) registry.setCategory(name, "Characters");
+    for (const char* name : {"CameraShot", "CameraDirector"}) registry.setCategory(name, "Cameras");
+    ComponentRegistry::setDisplayName("CameraShot", "Camera Shot");
+    ComponentRegistry::setDisplayName("CameraDirector", "Camera Director");
     ComponentRegistry::setDisplayName("CharacterController", "Character Controller");
     ComponentRegistry::setDisplayName("CharacterMover", "Character Mover");
     ComponentRegistry::setDisplayName("OrbitCamera", "Orbit Camera");
@@ -491,19 +668,31 @@ void registerKit() {
     registry.setCategory("Joint", "Physics");
     registry.setCategory("Animator", "Animation");
     registry.setCategory("TwoBoneIK", "Animation");
+    registry.setCategory("TimelinePlayer", "Animation");
+    ComponentRegistry::setDisplayName("TimelinePlayer", "Timeline Player");
     ComponentRegistry::setDisplayName("TwoBoneIK", "Two Bone IK");
     registry.setCategory("Water", "Environment");
+    registry.setCategory("Terrain", "Environment");
+    registry.setCategory("DayNight", "Environment");
+    registry.setCategory("WhenThen", "Logic");
+    registry.setCategory("Saveable", "Logic");
+    registry.setCategory("LoadingScreen", "UI");
+    ComponentRegistry::setDisplayName("LoadingScreen", "Loading Screen");
+    ComponentRegistry::setDisplayName("WhenThen", "When / Then");
+    registry.setCategory("Foliage", "Environment");
+    ComponentRegistry::setDisplayName("DayNight", "Day and Night");
     registry.setCategory("Liquid", "Effects");
+    registry.setCategory("Decal", "Effects");
     (void)sizeof(Liquid);
     registry.setCategory("Explosion", "Effects");
     registry.setCategory("Flicker", "Effects");
     registry.setCategory("HudText", "UI");
     registry.setCategory("TouchStick", "UI");
-    for (const char* name : {"UIPanel", "UIImage", "UIButton", "UIBar", "UIGauge"}) registry.setCategory(name, "UI");
+    for (const char* name : {"UILayout", "UIPanel", "UIImage", "UIButton", "UIBar", "UIGauge", "UISlider", "UITextField"}) registry.setCategory(name, "UI");
     // A touch button is a round Button: kept for scenes that have one, but not offered any more.
     registry.setCategory("TouchButton", "Hidden");
     for (auto [type, shown] : {std::pair<const char*, const char*>{"HudText", "Text"}, {"UIPanel", "Panel"}, {"UIImage", "Image"}, {"UIButton", "Button"},
-                               {"UIBar", "Bar"}, {"UIGauge", "Gauge"}, {"TouchStick", "Stick"}}) {
+                               {"UIBar", "Bar"}, {"UIGauge", "Gauge"}, {"TouchStick", "Stick"}, {"UILayout", "Layout"}, {"UISlider", "Slider"}, {"UITextField", "Text Field"}}) {
         ComponentRegistry::setDisplayName(type, shown);
     }
     registry.setCategory("AudioSource", "Audio");
@@ -524,7 +713,10 @@ MOLTEN_COMPONENT(PlayerMover, MOLTEN_FIELD(speed).range(0, 30), MOLTEN_FIELD(jum
                  MOLTEN_FIELD(acceleration).range(0, 80), MOLTEN_FIELD(movesAlongX), MOLTEN_FIELD(movesAlongZ), MOLTEN_FIELD(limitX),
                  MOLTEN_FIELD(facesMovement))
 MOLTEN_COMPONENT(Buoyancy, MOLTEN_FIELD(waterLevel), MOLTEN_FIELD(lift).range(0, 6).help("Times its weight when fully under: above 1 it floats"), MOLTEN_FIELD(depth).range(0.05f, 10),
-                 MOLTEN_FIELD(drag).range(0, 10))
+                 MOLTEN_FIELD(drag).range(0, 10),
+                 MOLTEN_FIELD(hull).help("Half its size each way: then it rocks on the waves and rights itself. Zero: held up at its middle"),
+                 MOLTEN_FIELD(turnDrag).range(0, 10), MOLTEN_FIELD(current).help("The water's flow, meters per second"),
+                 MOLTEN_FIELD(lengthDrag).range(0, 1).help("Of the drag, along its length: a hull cuts through the water ahead"))
 MOLTEN_COMPONENT(Follow, MOLTEN_FIELD(target).help("The name of the entity to follow"), MOLTEN_FIELD(offset), MOLTEN_FIELD(smoothness).range(0, 20),
                  MOLTEN_FIELD(looksAtTarget), MOLTEN_FIELD(turnsWithTarget))
 MOLTEN_COMPONENT(Spin, MOLTEN_FIELD(axis), MOLTEN_FIELD(degreesPerSecond))
@@ -533,6 +725,7 @@ MOLTEN_COMPONENT(LodGroup, MOLTEN_FIELD(distance).range(1, 2000).help("Meters fr
 MOLTEN_COMPONENT(Mover, MOLTEN_FIELD(velocity), MOLTEN_FIELD(isLocal), MOLTEN_FIELD(chases).help("If set: move toward the entity with this name"),
                  MOLTEN_FIELD(chaseSpeed))
 MOLTEN_COMPONENT(Lifetime, MOLTEN_FIELD(seconds))
+MOLTEN_COMPONENT(LoadingScreen)
 MOLTEN_COMPONENT(Collectible, MOLTEN_FIELD(collector).help("Who can pick it up, by name; empty for anyone"),
                  MOLTEN_FIELD(counter).help("The shared value that goes up"), MOLTEN_FIELD(amount), MOLTEN_FIELD(sound), MOLTEN_FIELD(effect))
 MOLTEN_COMPONENT(Health, MOLTEN_FIELD(amount), MOLTEN_FIELD(counter).help("A shared value that shows it, for the screen"), MOLTEN_FIELD(scoreCounter),
@@ -540,7 +733,12 @@ MOLTEN_COMPONENT(Health, MOLTEN_FIELD(amount), MOLTEN_FIELD(counter).help("A sha
 MOLTEN_COMPONENT(Damage, MOLTEN_FIELD(amount), MOLTEN_FIELD(onlyTo).help("If set: only entities whose name starts with this"), MOLTEN_FIELD(destroysSelf))
 MOLTEN_COMPONENT(Shooter, MOLTEN_FIELD(prefab), MOLTEN_FIELD(key).choices({"Space", "Enter", "F", "E", "Q", "X", "Z", "LeftShift", "LeftControl"}), MOLTEN_FIELD(pointerToo), MOLTEN_FIELD(interval).range(0.02f, 3), MOLTEN_FIELD(muzzle),
                  MOLTEN_FIELD(sound))
-MOLTEN_COMPONENT(Spawner, MOLTEN_FIELD(prefab), MOLTEN_FIELD(interval), MOLTEN_FIELD(radius), MOLTEN_FIELD(limit), MOLTEN_FIELD(firstDelay))
+MOLTEN_COMPONENT(Spawner, MOLTEN_FIELD(prefab), MOLTEN_FIELD(interval).help("Seconds between two"), MOLTEN_FIELD(radius), MOLTEN_FIELD(limit).help("Stop after this many; 0 for no limit"),
+                 MOLTEN_FIELD(firstDelay), MOLTEN_FIELD(count).range(0, 1000).help("In a wave; 0: no waves"),
+                 MOLTEN_FIELD(waves).range(0, 1000).help("With waves: how many; 0 forever"), MOLTEN_FIELD(waveSeconds).range(0, 600).help("The pause between two waves"),
+                 MOLTEN_FIELD(maxAlive).range(0, 10000).help("No more than this about at once; 0: no limit"),
+                 MOLTEN_FIELD(usesPool).help("Reuses those put back instead of making new ones"),
+                 MOLTEN_FIELD(aliveValue).help("A shared value kept at how many are about"))
 // ---------------------------------------------------------------- touch controls
 
 namespace {
@@ -644,14 +842,16 @@ void TouchButton::draw(World& world, Entity, Canvas& canvas) {
 
 // ---------------------------------------------------------------- panels, pictures, buttons, bars
 
-void UIPanel::draw(World&, Entity, Canvas& canvas) {
+void UIPanel::draw(World& world, Entity self, Canvas& canvas) {
+    InterfaceClip clip(world, self, canvas);
     gScreen = canvas.size();
     Vec2 corner = placeOnScreen(gScreen, anchor, offset) - size * 0.5f;
     canvas.rect(corner, size, color);
     if (border > 0) canvas.rectOutline(corner, size, border, borderColor);
 }
 
-void UIImage::draw(World& world, Entity, Canvas& canvas) {
+void UIImage::draw(World& world, Entity self, Canvas& canvas) {
+    InterfaceClip clip(world, self, canvas);
     gScreen = canvas.size();
     Vec2 corner = placeOnScreen(gScreen, anchor, offset) - size * 0.5f;
     if (loadedName != picture) {
@@ -667,9 +867,10 @@ void UIImage::draw(World& world, Entity, Canvas& canvas) {
     }
 }
 
-void UIButton::update(World& world, Entity, float) {
+void UIButton::update(World& world, Entity self, float) {
     Vec2 middle = placeOnScreen(gScreen, anchor, offset);
     auto isOn = [&](Vec2 point) {
+        if (!isTouchableAt(world, self, point)) return false;       // scrolled out of its list
         // A round one is a little generous: thumbs are not pointers.
         if (isRound) return simd::length(point - middle) <= radius * 1.25f;
         return std::abs(point.x - middle.x) <= size.x * 0.5f && std::abs(point.y - middle.y) <= size.y * 0.5f;
@@ -690,7 +891,9 @@ void UIButton::update(World& world, Entity, float) {
     }
 }
 
-void UIButton::draw(World& world, Entity, Canvas& canvas) {
+void UIButton::draw(World& world, Entity self, Canvas& canvas) {
+    InterfaceClip clip(world, self, canvas);
+    InterfaceFont typeface(world, canvas, font, loadedFont, loadedFontName);
     gScreen = canvas.size();
     // Hidden until a finger is seen, but shown while the scene is edited: it has to be seen to be laid out.
     if (onlyOnTouchScreens && world.runsComponents && !world.input.hasTouched()) return;
@@ -714,7 +917,8 @@ void UIButton::draw(World& world, Entity, Canvas& canvas) {
     }
 }
 
-void UIGauge::draw(World& world, Entity, Canvas& canvas) {
+void UIGauge::draw(World& world, Entity self, Canvas& canvas) {
+    InterfaceClip clip(world, self, canvas);
     gScreen = canvas.size();
     Vec2 middle = placeOnScreen(gScreen, anchor, offset);
     // While nothing has set the value (the editor, before the game runs) the needle rests at
@@ -765,7 +969,8 @@ void UIGauge::draw(World& world, Entity, Canvas& canvas) {
     if (!label.empty()) canvas.text(label, Vec2{middle.x, middle.y + radius * (showsValue ? 0.62f : 0.32f)}, std::max(radius * 0.14f, 8.0f), Vec4{1, 1, 1, 0.55f}, TextAlign::Center);
 }
 
-void UIBar::draw(World& world, Entity, Canvas& canvas) {
+void UIBar::draw(World& world, Entity self, Canvas& canvas) {
+    InterfaceClip clip(world, self, canvas);
     gScreen = canvas.size();
     Vec2 corner = placeOnScreen(gScreen, anchor, offset) - size * 0.5f;
     float share = most > 0 ? saturate(world.value(value) / most) : 0.0f;
@@ -775,6 +980,13 @@ void UIBar::draw(World& world, Entity, Canvas& canvas) {
     canvas.rect(corner + Vec2{2, 2}, Vec2{std::max(size.x - 4, 0.0f) * share, std::max(size.y - 4, 0.0f)}, color);
 }
 
+// Layouts first: each places what it holds before any of it is drawn, and draws behind it.
+MOLTEN_COMPONENT(UILayout, MOLTEN_FIELD(arrangement).range(0, 2).help("0 a row, 1 a column, 2 a grid"), MOLTEN_FIELD(columns).range(1, 12).help("Of a grid"),
+                 MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(size), MOLTEN_FIELD(padding).range(0, 100), MOLTEN_FIELD(spacing).range(0, 100),
+                 MOLTEN_FIELD(alignment).range(0, 2).help("Across: 0 the start, 1 the middle, 2 the end"),
+                 MOLTEN_FIELD(stretches).help("What it holds is as wide as a column, as tall as a row"),
+                 MOLTEN_FIELD(fitsContent).help("As long as what it holds"), MOLTEN_FIELD(scrolls).help("What does not fit is dragged into view"),
+                 MOLTEN_FIELD(color).color())
 MOLTEN_COMPONENT(UIPanel, MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(size), MOLTEN_FIELD(color).color(), MOLTEN_FIELD(border).range(0, 20),
                  MOLTEN_FIELD(borderColor).color())
 MOLTEN_COMPONENT(UIImage, MOLTEN_FIELD(picture).help("A picture of Assets: Textures/logo.png"), MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(size),
@@ -783,7 +995,8 @@ MOLTEN_COMPONENT(UIButton, MOLTEN_FIELD(label), MOLTEN_FIELD(anchor), MOLTEN_FIE
                  MOLTEN_FIELD(action).help("A button action it holds while pressed: jump, fire"),
                  MOLTEN_FIELD(isRound).help("A circle for a thumb, of Radius, instead of a box of Size"), MOLTEN_FIELD(radius).range(12, 150),
                  MOLTEN_FIELD(onlyOnTouchScreens).help("Hidden until the screen is touched: for a game that also has keys"), MOLTEN_FIELD(scene).help("A scene it loads when clicked: Scenes/Level1.scene"),
-                 MOLTEN_FIELD(value).help("A shared value it adds Amount to when clicked"), MOLTEN_FIELD(amount))
+                 MOLTEN_FIELD(value).help("A shared value it adds Amount to when clicked"), MOLTEN_FIELD(amount),
+                 MOLTEN_FIELD(font).help("Of its label: a font of Assets, Fonts/Title. Empty: the game's own"))
 MOLTEN_COMPONENT(UIGauge, MOLTEN_FIELD(value).help("The shared value it shows: speed, rpm, boost"), MOLTEN_FIELD(most),
                  MOLTEN_FIELD(numbersEvery).help("A numbered mark at each multiple of this; 0 for none"),
                  MOLTEN_FIELD(numbersScale).help("The numbers as written: 0.001 writes rpm in thousands"),
@@ -792,6 +1005,14 @@ MOLTEN_COMPONENT(UIGauge, MOLTEN_FIELD(value).help("The shared value it shows: s
                  MOLTEN_FIELD(color).color(), MOLTEN_FIELD(backColor).color())
 MOLTEN_COMPONENT(UIBar, MOLTEN_FIELD(value).help("The shared value it shows: health"), MOLTEN_FIELD(most), MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(size),
                  MOLTEN_FIELD(color).color(), MOLTEN_FIELD(backColor).color())
+MOLTEN_COMPONENT(UISlider, MOLTEN_FIELD(label), MOLTEN_FIELD(value).help("The shared value it shows and sets: volume"),
+                 MOLTEN_FIELD(isSaved).help("Kept between plays, as a preference of that name"), MOLTEN_FIELD(least), MOLTEN_FIELD(most),
+                 MOLTEN_FIELD(step).help("It moves by this much; 0 smoothly"), MOLTEN_FIELD(showsNumber), MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset),
+                 MOLTEN_FIELD(size), MOLTEN_FIELD(color).color(), MOLTEN_FIELD(backColor).color(), MOLTEN_FIELD(textColor).color())
+MOLTEN_COMPONENT(UITextField, MOLTEN_FIELD(value).help("The shared text it shows and sets: playerName. Shown by a text as {playerName}"),
+                 MOLTEN_FIELD(placeholder).help("Shown faintly while it is empty"), MOLTEN_FIELD(maxLength).range(0, 200),
+                 MOLTEN_FIELD(isSaved).help("Kept between plays"), MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(size), MOLTEN_FIELD(color).color(),
+                 MOLTEN_FIELD(textColor).color(), MOLTEN_FIELD(focusColor).color(), MOLTEN_FIELD(font).help("A font of Assets; empty for the game's own"))
 MOLTEN_COMPONENT(TouchStick, MOLTEN_FIELD(horizontal).help("The axis action it pushes left and right"), MOLTEN_FIELD(vertical).help("The axis action it pushes up and down"),
                  MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(radius).range(20, 200), MOLTEN_FIELD(verticalIsReversed),
                  MOLTEN_FIELD(onlyOnTouchScreens).help("Hidden until the screen is touched: for a game that also has keys"), MOLTEN_FIELD(color).color())
@@ -799,14 +1020,27 @@ MOLTEN_COMPONENT(TouchButton, MOLTEN_FIELD(action).help("The button action it ho
                  MOLTEN_FIELD(radius).range(12, 150), MOLTEN_FIELD(onlyOnTouchScreens).help("Hidden until the screen is touched: for a game that also has keys"),
                  MOLTEN_FIELD(color).color())
 MOLTEN_COMPONENT(HudText, MOLTEN_FIELD(text).help("{name} shows a shared value: Coins: {score}"), MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset),
+                 MOLTEN_FIELD(font).help("A font of Assets made by Tools/bake_font.py: Fonts/Title. Empty: the game's own"),
                  MOLTEN_FIELD(size).range(8, 120), MOLTEN_FIELD(color).color())
 MOLTEN_COMPONENT(Goal, MOLTEN_FIELD(counter), MOLTEN_FIELD(target), MOLTEN_FIELD(message), MOLTEN_FIELD(nextScene), MOLTEN_FIELD(delay))
 MOLTEN_COMPONENT(RestartWhenBelow, MOLTEN_FIELD(height))
 MOLTEN_COMPONENT(ConstantSpeed, MOLTEN_FIELD(speed), MOLTEN_FIELD(startDirection), MOLTEN_FIELD(minimumAlongZ).range(0, 0.9f))
 MOLTEN_COMPONENT(Breakable, MOLTEN_FIELD(by), MOLTEN_FIELD(counter), MOLTEN_FIELD(points), MOLTEN_FIELD(effect), MOLTEN_FIELD(sound))
 MOLTEN_COMPONENT(Explosion, MOLTEN_FIELD(radius), MOLTEN_FIELD(force), MOLTEN_FIELD(damage), MOLTEN_FIELD(flashSeconds))
+MOLTEN_COMPONENT(Decal, MOLTEN_FIELD(picture).help("A picture in Assets, see-through where nothing is drawn. The entity's scale is the decal's size; its y how deep it reaches"),
+                 MOLTEN_FIELD(color).color(), MOLTEN_FIELD(opacity).range(0, 1),
+                 MOLTEN_FIELD(darkens).help("Multiplies what is under it, as dirt, cracks and tire marks do. Off: painted over it"))
+MOLTEN_COMPONENT(Boat, MOLTEN_FIELD(acceleration).range(0, 40).help("Meters per second, per second, at full throttle"),
+                 MOLTEN_FIELD(topSpeed).range(0, 80), MOLTEN_FIELD(turnSpeed).range(0, 180).help("Degrees per second at full rudder"),
+                 MOLTEN_FIELD(reverse).range(0, 1).help("Of the acceleration, going backwards"),
+                 MOLTEN_FIELD(usesInput).help("Driven by the move actions. Off: by throttle and steer, from code"),
+                 MOLTEN_FIELD(throttle).range(-1, 1), MOLTEN_FIELD(steer).range(-1, 1))
 MOLTEN_COMPONENT(AudioSource, MOLTEN_FIELD(clip).help("A sound in Assets, like Audio/music.wav"), MOLTEN_FIELD(volume).range(0, 2), MOLTEN_FIELD(pitch).range(0.1f, 4),
-                 MOLTEN_FIELD(loops), MOLTEN_FIELD(playsOnStart))
+                 MOLTEN_FIELD(loops), MOLTEN_FIELD(playsOnStart),
+                 MOLTEN_FIELD(group).choices({"Effects", "Music", "Voices", "Interface"}).help("Which volume it follows"),
+                 MOLTEN_FIELD(comesFromHere).help("Heard from where it is: louder near it, from its side, muffled behind walls"),
+                 MOLTEN_FIELD(fullWithin).range(0, 100).help("Meters within which it is at full volume"),
+                 MOLTEN_FIELD(silentBeyond).range(1, 500).help("Meters beyond which it is not heard"))
 MOLTEN_COMPONENT(Flicker, MOLTEN_FIELD(amount).range(0, 1), MOLTEN_FIELD(speed))
 
 }  // namespace molten::kit

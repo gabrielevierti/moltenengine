@@ -69,9 +69,11 @@ struct Mover {
 };
 
 /// Removes its entity after some seconds: bullets, effects, anything that should not pile up.
+/// One that came from a pool (World::take, a Spawner) goes back to it instead.
 struct Lifetime {
     float seconds = 3.0f;
 
+    void start(World&, Entity) { age = 0; }         // again when reused
     void update(World& world, Entity self, float dt);
     float age = 0;
 };
@@ -126,18 +128,39 @@ struct Shooter {
     float cooldown = 0;
 };
 
-/// Spawns a prefab again and again around its entity: enemies, pickups, rain.
+/// What is under it in the Hierarchy (a picture, "{loading:percent}", a bar of "loading") is
+/// shown while a scene loads in the background, and hidden otherwise. Put it in the scene that
+/// starts the loading: the menu, the level being left.
+struct LoadingScreen {
+    void update(World& world, Entity self, float dt);
+};
+
+/// Spawns a prefab again and again around its entity: enemies, pickups, rain. In waves, if
+/// `count` says how many a wave has; reusing what was put back (World::take, Lifetime) so that
+/// hundreds come and go without being made and destroyed each time.
 struct Spawner {
     std::string prefab = "Prefabs/Enemy.prefab";
     float interval = 2.0f;              // seconds between spawns
     float radius = 0.0f;                // spawn within this distance, on the entity's level
     int limit = 0;                      // stop after this many; 0 for no limit
     float firstDelay = 1.0f;
+    int count = 0;                      // in a wave; 0: no waves, one after the other
+    int waves = 0;                      // with waves: how many (0: forever)
+    float waveSeconds = 5.0f;           // the pause between two waves
+    int maxAlive = 0;                   // no more than this about at once (0: no limit)
+    bool usesPool = true;
+    std::string aliveValue;             // a shared value kept at how many are about; empty: none
 
+    void start(World& world, Entity self);
     void update(World& world, Entity self, float dt);
+    /// Those it made still about: alive, switched on, not put back.
+    int countAlive(World& world);
     float waited = 0;
     int spawned = 0;
     bool hasBegun = false;
+    int wave = 0, inWave = 0;
+    bool isPausing = false, isDone = false, toldDone = false;
+    std::vector<Entity> alive;
     Random random{4242};
 };
 
@@ -150,6 +173,10 @@ struct HudText {
     Vec2 offset{0, 28};                 // from the anchor, in points
     float size = 26.0f;
     Vec4 color{1, 1, 1, 1};
+    std::string font;                   // a font of Assets ("Fonts/Title", made by Tools/bake_font.py); empty for the game's own
+
+    std::shared_ptr<struct Font> loadedFont;
+    std::string loadedFontName = "\n";
 
     void draw(World& world, Entity self, Canvas& canvas);
     /// The text with the values filled in.
@@ -210,6 +237,10 @@ struct UIButton {
     std::string scene;                  // a scene it loads when clicked: "Scenes/Level1.scene"; empty for none
     std::string value;                  // a shared value it adds `amount` to when clicked; empty for none
     float amount = 1.0f;
+    std::string font;                   // of its label: a font of Assets; empty for the game's own
+
+    std::shared_ptr<struct Font> loadedFont;
+    std::string loadedFontName = "\n";
 
     // State.
     bool isHeld = false, isHovered = false;
@@ -369,6 +400,10 @@ struct AudioSource {
     float pitch = 1.0f;                 // 2 is an octave up and twice as fast
     bool loops = false;
     bool playsOnStart = true;
+    std::string group = "Effects";      // which volume it follows: Effects, Music, Voices, Interface, or the game's own
+    bool comesFromHere = false;         // heard from where its entity is: louder near, from its side, muffled behind walls
+    float fullWithin = 6;               // with comesFromHere: meters within which it is at full volume
+    float silentBeyond = 60;            // and beyond which it is not heard
 
     void start(World& world, Entity self);
     void update(World& world, Entity self, float dt);
@@ -387,9 +422,36 @@ struct Buoyancy {
     float lift = 2.0f;                  // times its weight when fully under: above 1 it floats, below it sinks slowly
     float depth = 0.5f;                 // how far under it is fully under: about half its height
     float drag = 2.5f;                  // how quickly the water stops it
+    /// A hull: half its size each way (a boat's, a raft's, a crate's). Then it is held up at its
+    /// four lower corners, each as deep as the water is there: it rocks on the waves, lists
+    /// when one side is lower and rights itself. Zero: held up at its middle only. It needs its
+    /// RigidBody to rotate.
+    Vec3 hull{0, 0, 0};
+    float turnDrag = 1.5f;              // how quickly the water stops it turning
+    Vec3 current{0, 0, 0};              // the water's flow, meters per second: a river carries what floats on it
+    float lengthDrag = 1;               // of `drag`, along its length (its -z): a hull cuts through the water ahead
 
     void fixedUpdate(World& world, Entity self, float dt);
     bool isInWater = false;
+    float underNow = 0;                 // how much of it is under, 0 to 1
+};
+
+/// A boat: pushed ahead and turned by its rudder, only while it floats. With a Buoyancy and a
+/// RigidBody. Driven by the move actions (W/S and A/D, the left stick), or by `throttle` and
+/// `steer` from code with `usesInput` off. It makes its Buoyancy's lengthwise drag small, as a
+/// hull's is.
+struct Boat {
+    float acceleration = 5;             // meters per second, per second, at full throttle
+    float topSpeed = 12;                // meters per second
+    float turnSpeed = 45;               // degrees per second at full rudder and full speed
+    float reverse = 0.4f;               // of the acceleration, going backwards
+    bool usesInput = true;
+    float throttle = 0;                 // -1 astern to 1 full ahead
+    float steer = 0;                    // -1 left to 1 right
+
+    void start(World& world, Entity self);
+    void fixedUpdate(World& world, Entity self, float dt);
+    float speed = 0;                    // along the way it points, now
 };
 
 /// Makes sure the kit's components are known even to a program that never mentions them.

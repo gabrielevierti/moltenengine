@@ -105,3 +105,48 @@ set "Left Wheel/Wheel/Rim" Transform position "0 0.5 0"
     CHECK(scaled && moved);
     CHECK(isPrefabVariant("molten-variant 1\nbase \"x\"\n") && !isPrefabVariant(kWheel));
 }
+
+TEST(a_prefab_copy_keeps_its_own_changes) {
+    kit::registerKit();
+    World world;
+    world.assetRoot = folder();
+    std::string text = R"(molten-scene 1
+entity "Cart"
+  transform 0 0 0 0 0 0 1 1 1 1
+  prefab "Prefabs/Cart.prefab"
+  override "Cart" NavAgent speed "9"
+  override "Cart/Left Wheel/Wheel/Rim" Transform position "0 0.7 0"
+  override "Cart/Nothing Here" Transform scale "2 2 2"
+)";
+    world.loadSceneText("Test", text);
+    Entity copy = world.find("Cart");
+    CHECK(world.scene.has<PrefabInstance>(copy));
+    const PrefabInstance* instance = world.scene.get<PrefabInstance>(copy);
+    CHECK(instance && instance->overrides.size() == 3);
+    // Its prefab's root is under it, with the change.
+    Entity root = entityAtPath(world.scene, copy, "Cart");
+    CHECK(root.isValid() && root != copy);
+    const kit::NavAgent* agent = world.scene.get<kit::NavAgent>(root);
+    CHECK(agent && agent->speed == 9.0f);
+    Entity rim = entityAtPath(world.scene, copy, "Cart/Left Wheel/Wheel/Rim");
+    CHECK(rim.isValid() && std::abs(world.scene.get<Transform>(rim)->position.y - 0.7f) < 1e-5f);
+    Entity otherRim = entityAtPath(world.scene, copy, "Cart/Right Wheel/Wheel/Rim");
+    CHECK(otherRim.isValid() && std::abs(world.scene.get<Transform>(otherRim)->position.y - 0.1f) < 1e-5f);     // only that one
+    std::string path;
+    CHECK(pathBelow(world.scene, copy, rim, path) && path == "Cart/Left Wheel/Wheel/Rim");
+    CHECK(!pathBelow(world.scene, rim, copy, path));
+    // Written out with the copy, and read back the same.
+    std::string written = writeScene(world.scene, {}, RenderSettings{});
+    CHECK(written.find("override \"Cart/Left Wheel/Wheel/Rim\" \"Transform\" \"position\" \"0 0.7 0\"") != std::string::npos ||
+          written.find("override \"Cart/Left Wheel/Wheel/Rim\" Transform position \"0 0.7 0\"") != std::string::npos);
+    World again;
+    again.assetRoot = world.assetRoot;
+    again.loadSceneText("Test", written);
+    Entity rimAgain = entityAtPath(again.scene, again.find("Cart"), "Cart/Left Wheel/Wheel/Rim");
+    CHECK(rimAgain.isValid() && std::abs(again.scene.get<Transform>(rimAgain)->position.y - 0.7f) < 1e-5f);
+    // Changed again, or taken back.
+    PrefabInstance changed = *instance;
+    CHECK(changed.setOverride(PrefabOverride{"Cart", "NavAgent", "speed", "3"}) && changed.overrides.size() == 3);
+    CHECK(!changed.setOverride(PrefabOverride{"Cart", "NavAgent", "speed", "3"}));
+    CHECK(changed.removeOverride("Cart", "NavAgent", "speed") && !changed.findOverride("Cart", "NavAgent", "speed"));
+}

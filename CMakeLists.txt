@@ -124,7 +124,13 @@ if(MOLTEN_IOS)
         file(REMOVE_RECURSE ${MOLTEN_IOS_STAGING})
         file(GLOB MOLTEN_IOS_PROJECT_FILE ${MOLTEN_IOS_PROJECT}/*.molten)
         file(COPY ${MOLTEN_IOS_PROJECT_FILE} DESTINATION ${MOLTEN_IOS_STAGING})
-        file(COPY ${MOLTEN_IOS_PROJECT}/Assets DESTINATION ${MOLTEN_IOS_STAGING})
+        # The assets the editor made smaller for the phone (Build/iOS/Assets), or the project's own.
+        set(MOLTEN_IOS_ASSETS "" CACHE PATH "A copy of the project's Assets made for the phone; empty: the project's own")
+        if(MOLTEN_IOS_ASSETS AND EXISTS "${MOLTEN_IOS_ASSETS}")
+            file(COPY ${MOLTEN_IOS_ASSETS}/ DESTINATION ${MOLTEN_IOS_STAGING}/Assets)
+        else()
+            file(COPY ${MOLTEN_IOS_PROJECT}/Assets DESTINATION ${MOLTEN_IOS_STAGING})
+        endif()
         list(APPEND MOLTEN_IOS_RESOURCES ${MOLTEN_IOS_STAGING})
     endif()
 
@@ -268,7 +274,7 @@ endif()
 if(MOLTEN_BUILD_TESTS)
     enable_testing()
     file(GLOB MOLTEN_TEST_SOURCES CONFIGURE_DEPENDS Tests/*.cpp Tests/*.hpp)
-    add_executable(moltentests ${MOLTEN_TEST_SOURCES} Editor/PaletteSearch.cpp)     # the palette's search, without the editor
+    add_executable(moltentests ${MOLTEN_TEST_SOURCES} Editor/PaletteSearch.cpp Editor/Shortcuts.cpp Editor/Git.cpp Editor/MultiEdit.cpp Editor/HierarchySearch.cpp Editor/Snapping.cpp Editor/SceneWeight.cpp)     # the palette's search, without the editor
     target_link_libraries(moltentests PRIVATE moltenengine)
     add_test(NAME unit COMMAND moltentests)
     set_tests_properties(unit PROPERTIES LABELS unit)

@@ -126,9 +126,17 @@ public:
     /// being used, so that typing a name into a field does not also drive the car.
     bool isListening = true;
 
-    bool isDown(Key key) const { return isListening && keys_[size_t(key)].down; }
-    bool wasPressed(Key key) const { return isListening && keys_[size_t(key)].pressed; }
-    bool wasReleased(Key key) const { return isListening && keys_[size_t(key)].released; }
+    /// A text field of the game is being typed in: the letters are its, not the game's (W does
+    /// not drive the car while a name is typed). Only the keys that edit text are still seen.
+    bool isTakingText = false;
+
+    bool isDown(Key key) const { return isHeard(key) && keys_[size_t(key)].down; }
+    bool wasPressed(Key key) const { return isHeard(key) && keys_[size_t(key)].pressed; }
+    bool wasReleased(Key key) const { return isHeard(key) && keys_[size_t(key)].released; }
+    bool isHeard(Key key) const {
+        if (!isListening) return false;
+        return !isTakingText || key == Key::Backspace || key == Key::Enter || key == Key::Escape || key == Key::Tab;
+    }
 
     bool isDown(MouseButton button) const { return isListening && mouseButtons_[size_t(button)].down; }
     bool wasPressed(MouseButton button) const { return isListening && mouseButtons_[size_t(button)].pressed; }

@@ -179,6 +179,73 @@ In the Scene view, several selected objects move, turn and scale together. **Cen
 
 In the scene view a camera is drawn as the pyramid of what it sees, a directional light as its rays, a spot light as its cone. A camera's scale changes nothing about its picture.
 
+## Shots, and a camera that glides between them
+
+**Create > Camera Shot** makes a shot where the Scene view looks from now (and, the first time,
+gives the scene's Camera a **Camera Director**). The director films the shot of the highest
+`priority` among those switched on, and glides to a new one over its `blendSeconds` (0 cuts),
+slowing out and in, its field of view too. Switch a close shot on (from a trigger, a script, a
+timeline's Show track) and the camera goes to it; switch it off and it goes back. A shot can move:
+give it Follow or Orbit Camera and the camera follows it, blends included.
+
+## Cutscenes: Timeline
+
+A **Timeline Player** (Add Component > Animation) plays a `.timeline` file: what happens when,
+on tracks. **Window > Timeline** shows the tracks of the Timeline Player chosen (or the scene's
+first); **New Timeline** makes its file.
+
+- **Add Track > Move** (with an entity chosen): put the entity where it should be, drag the time,
+  press **Key**; again at another time. It goes smoothly through its keys.
+- **Camera cuts**: at each mark, that camera is the one seen (its Camera made active, the others
+  the track names made inactive). **Add** puts the camera chosen in the Hierarchy.
+- **Sounds**, **Set a shared value** (what a menu or a script waits for), **Show or hide**, and
+  **Animation** (a trigger of its Animator: "wave").
+
+Drag the time along the top to see the scene as it is then; **Preview** plays it here, without
+its sounds and values; **Stop** puts everything back where it was. Drag a diamond to move it in
+time; a right click changes or removes it. Every change is written to the file at once.
+
+The player: `playsOnStart`, `loops`, `speed`, and `doneValue`, a shared value set to 1 when it
+ends. From code: `player->play()`, `pause()`, `seek(world, seconds)`.
+
+## Morning, noon and night
+
+**Day and Night** (Add Component > Environment), on any entity, moves the scene's sun (the
+Directional Light named in `sun`) across the sky as `hour` goes from 0 to 24: up in the east at
+6, highest at noon (`highest` degrees), down in the west at 18; `facing` turns its path. Its light
+warms near the horizon and goes at night, when a dim blue moon lights the scene instead. The sky,
+the light it gives and the fog follow; by day they are the scene's own, as set in Rendering.
+`dayMinutes` makes the clock run (real minutes for a whole day; 0 stops it). It sets the shared
+values `hour` and `night` (0 by day, 1 in the deep night): turn on lamps and headlights with it.
+
+## Hills and valleys: Terrain
+
+**Create > 3D Object > Terrain** makes flat ground, 200 by 200 meters. With it chosen, brushes
+appear in the lower left of the Scene view: **Raise**, **Lower**, **Smooth**, **Flatten**. Paint on
+the ground with the left button; Shift does the other way round (Raise lowers); Alt and the left
+button still turn the view. **Size** is the brush's radius, **Strength** how fast it works.
+Flatten brings the ground to the height where the stroke began: a level place for a building.
+**Undo Stroke** takes back the last strokes. **Move it** puts the brushes away, for the gizmo.
+
+Its heights are a file of their own (`Terrains/Terrain.terrain`), written when a stroke ends
+and named in the Terrain's `heights`. `resolution` is how many squares along each side (128:
+squares of a meter and a half on 200 meters); changing it reads the same hills at the new one.
+It is solid: cars drive on it, characters walk on it. Give it a material in its Mesh Renderer;
+`uvTiling` is how many meters one repeat of the material's picture covers.
+
+From code: `terrain->heightAt(Vec2{x, z})`, `normalAt`, and `sculpt(...)` to dig a crater.
+
+## Grass, trees and rocks: Foliage
+
+**Create > 3D Object > Foliage** makes an entity whose Mesh Renderer's model (little cubes until
+you give it yours: a tuft of grass, a tree, a rock) is painted on the ground. With it chosen,
+brushes appear in the lower left of the Scene view: **Paint** puts copies on whatever is solid
+under the brush (a Terrain, the ground, a roof), **Erase** (or Shift) takes them away. **Density**
+is copies a square meter; `spacing` keeps them apart; each gets a turn and a size between
+`smallest` and `largest`. They are drawn together, in few draw calls, and not beyond
+`drawDistance` meters. Their places are a file (`Foliage/Grass.foliage`), written when a stroke
+ends. For grass and a tree on the same hill, make two Foliage entities.
+
 ## Curves: roads, rails, paths
 
 **Create > Paths > Spline** makes a curve; **Create > Paths > Road** makes one that is closed,
@@ -200,6 +267,42 @@ halfway to the next, or at the end when the Spline itself is chosen, and numbers
 
 In code, `findSpline(world, "Track")->path` gives `pointAt(meters)`, `directionAt(meters)`,
 `length()` and `closestDistance(point)`: how far along the curve something is.
+
+## Files changed in other programs
+
+The editor looks at the project's files once a second. A picture saved again in Photoshop or
+Pixelmator, a model exported again from Blender, a material or a sound written by another
+program is read again into what already uses it: the scene changes in front of you, without
+opening it again, and the Console says which file was read. A file is read once it has been
+left alone for a moment, so a program that writes it in several goes is not caught halfway.
+Shaders were already read again as they change; code is built again by itself.
+
+## What uses what
+
+The Viewer says, for the asset chosen in the Explorer, what uses it and what it uses
+("Used by 2, uses 1"): the scenes and prefabs that put a model in, the materials that paint a
+picture on, the scripts that play a sound. Click one to go to it. With nothing chosen, **Find
+Assets Nothing Uses** lists the pictures, models, sounds and materials no scene, prefab,
+material or script names. Code that builds a name from pieces (`"engine_" + rpm + ".wav"`)
+cannot be read, so look before deleting.
+
+## Keeping every version: Source Control
+
+**Window > Source Control** is the project in Git. A project not in it yet is put in it with one
+button (the Library folder, which the editor makes again, is left out). Then it shows what has
+changed since the last commit: click a file to see how, untick one to leave it for later, a right
+click undoes its changes. Write what changed, press **Commit**. **History** lists the commits
+before; **Pull** and **Push** bring and send them (to GitHub, for example). Git asks for a sign
+in only once: if a push says so, push once from Terminal or set up a key, and it works from here.
+Save the scene before committing it.
+
+## Your keys, your colors
+
+**Edit > Editor Settings** (Cmd+,). Under **Shortcuts**, click an action and press its new keys:
+Backspace leaves it without one, Esc keeps what it had. An action whose keys another one uses
+says so in orange. **Reset** puts one back; **All as They Were** puts them all back. The menus
+and Cmd+K show the keys as you set them. Under **Look**: Forge (the orange of hot iron), Ocean,
+Moss, Midnight. Both are kept for the next time the editor opens.
 
 ## Finding anything: Cmd+K
 
@@ -227,6 +330,105 @@ struct Coin {
 ```
 
 Take a `World&` when the component only needs the scene, physics, input, time and shared values: it then also runs in tests, without a window. Take an `Engine&` when it needs the renderer, assets or sound.
+
+## Game logic without code: When / Then
+
+**When / Then** (Add Component > Logic) does up to four things when something happens. All of
+it is chosen from lists in the Inspector.
+
+- **when**: *Something enters* its trigger (a Collider with Is Trigger on the same entity; `who`
+  says which: a name, a tag, or anything), *A message* (named in `message`), *It starts*, *A value
+  reaches* (`value` at least `atLeast`), *It is clicked* (a UI Button on it), *Every few seconds*.
+- **then** (`action1` to `action4`, each with a `target` and an `amount`): Show, Hide, Switch,
+  Destroy, Play sound, Start timeline, Load scene, Restart scene, Set value, Add to value, Send
+  message, Spawn prefab, Move here (a checkpoint, a teleporter). The target is an entity's name or
+  tag, `self`, `other` (who entered), a file, or a value's name.
+- `seconds` waits before doing them; `once` does them only the first time.
+
+A coin: a trigger, *Something enters* `Player`, then *Add to value* `coins` 1 and *Destroy* `self`.
+A door that opens with three keys: *A value reaches* `keys` 3, then *Hide* `Door` and *Play sound*.
+
+## Saving the game without writing what to save
+
+Give **Saveable** (Add Component > Logic) to what should be kept: a chest, a door, the player,
+each coin. `kit::saveState(world, "Slot 1")` keeps, for each of them, where it is (unless
+`keepsPlace` is off), whether it is on, the values of its components (a door's state, an agent's
+speed) and whether it was destroyed (a coin picked up stays picked up), with the shared values
+and texts and the scene it is in. `kit::loadState(world, "Slot 1")` opens that scene again, at
+the end of the frame, and puts all of it back. The same from When / Then (*Save game*, *Load
+game*) and from visual scripts (**Save Game**, **Load Game**). What is not Saveable is as the
+scene file has it. What was spawned while playing is not made again.
+
+## Hundreds that come and go: pools and spawners
+
+`world.take("Prefabs/Bullet.prefab", position)` is `spawn` that reuses: something put back with
+`world.release(entity)` is switched on again where asked, still, and its components' `start()`
+run again (set in start what must be fresh). Anything else given to `release` is destroyed.
+A **Lifetime** puts back what it is on; When / Then's *Destroy* and *Spawn prefab* use the pools
+too. Bullets, sparks and enemies by the hundred then cost nothing to make.
+
+The **Spawner** makes them, around it (`radius`), every `interval` seconds; with `count` set, in
+waves of that many, `waveSeconds` apart, `waves` of them (0 forever); never more than `maxAlive`
+about at once; `aliveValue` keeps a shared value at how many are about. It sends the messages
+`waveDone` (with the wave's number) and, once everything it made is gone, `wavesDone`.
+
+## Big scenes, and scenes on top of scenes
+
+`world.loadSceneInBackground("Scenes/Level 2.scene")` reads the scene and its models on another
+thread while the game goes on; when all is read, the new scene takes the old one's place at the
+end of a frame. Meanwhile the shared values `isLoading` (1) and `loading` (0 to 1) say how it
+goes: a **Loading Screen** (Add Component > UI) shows what is under it only while a scene loads,
+with a text of `{loading:percent}` or a bar of `loading`. `world.afterSceneLoads(...)` runs
+something once the new scene is in place.
+
+`world.addScene("Scenes/Room.scene")` adds another scene's entities to the one open, under an
+entity named "Scene: Scenes/Room.scene" (the open scene's light and sky stay); `removeScene`
+takes them away. `loadSceneInBackground(name, true)` adds one in the background. The same from
+When / Then and from visual scripts.
+
+## Telling each other: messages
+
+A script that needs another to react does not need to know it: it tells what happened.
+
+```cpp
+world.send("doorOpened");                       // to everyone listening
+world.send("damage", enemy, 25, "", self);      // to one entity: a number, a text, who sent it
+```
+
+A component hears with `void onMessage(World& world, Entity self, const Message& message)`
+(`message.name`, `number`, `text`, `from`). Other code listens:
+`int id = world.listen("lapDone", [&](const Message& m) { ... }, self);` until
+`world.stopListening(id)` or until `self` is destroyed (`"*"` hears every message). In a visual
+script: **Send Message** (to the entity named in `to`, or everyone) and the **On Message** event.
+Messages are delivered at once, in order; one that sends itself again and again is stopped
+after 32 times.
+
+## Later: waiting
+
+```cpp
+world.after(2, [&] { door.open(); });                          // in two seconds
+int ticking = world.every(0.5, [&] { blink(); });              // again and again (world.cancel(ticking))
+world.when([&] { return world.value("keys") >= 3; }, [&] { gate.open(); });
+```
+
+A sequence reads better as one function that waits, a C++ coroutine:
+
+```cpp
+molten::Task intro(molten::World& world) {
+    world.setValue("lights", 1);
+    co_await world.seconds(2);
+    world.playSound("Audio/horn.wav");
+    co_await world.until([&] { return world.value("ready") > 0; });
+    world.loadScene("Scenes/Race.scene");
+}
+...
+world.start(intro(world), self);
+```
+
+All in game time: paused when the game is, slowed with `timeScale`. Given an owner (the last
+argument), a task stops when its owner is destroyed; every task stops when the scene changes.
+In a visual script: **Wait** (seconds) and **Wait Until** (a condition); the rest of the script
+goes on meanwhile.
 
 ## Playing a game without a screen
 
@@ -284,6 +486,40 @@ place; if the code does not build, the engine's own is used, so the game still r
 
 A visual script can be written out as C++, and C++ made that way can go back to boxes: see [To C++ and back](VisualScripting.md#to-c-and-back).
 
+## The picture: grading, exposure, focus, motion, sky, decals, wind
+
+All in **Window > Rendering**, saved with the scene.
+
+**Exposure that adapts.** Under Exposure and Color, **Adapts** makes the exposure follow how
+bright the scene is, as eyes do: brighter in a tunnel, darker out in the sun, quickly when it
+gets brighter and more slowly when it gets darker. **Compensation** (in stops) leans it one way;
+**Darkest** and **Brightest** bound it.
+
+**Color grading.** A **Grading Table** is a picture in Assets: 32 squares of 32 pixels side by
+side (red across each, green down it, blue from square to square). `Grading/Neutral 32.png`
+(in the engine's Assets) changes nothing: take a screenshot of the game, put the table beside
+it in a photo editor, change the colors of both together (curves, warmth, a film look), and
+save the table alone in the project's Assets. **Grading Amount** blends it in.
+
+**Depth of field** blurs what is nearer or farther than the **Focus Distance**, keeping
+**In Focus** meters around it sharp, by up to **Blur** pixels; a sharp thing in front does not
+smear into the blur behind it. **Motion Blur** streaks what moves across the picture as the
+camera turns or speeds along (the camera's own movement; **Shutter** is how long).
+
+**The sky from the air.** Under Sky, **From the Air** works the sky's colors out from how
+sunlight scatters in the air, from the sun's height alone: blue at noon, gold and red as the
+sun sets, dark at night (with a Day / Night, it goes round by itself). **Haze** whitens it.
+**Stars** shows stars when the sun is down, turning slowly and twinkling.
+
+**Decals.** A **Decal** (Add Component > Effects) projects a picture down its entity's box onto
+whatever is under it: the entity's scale is its size, and its y how deep it reaches (turn it to
+put a sign on a wall). **Darkens** multiplies what is there, as dirt, cracks, tire marks and
+damp do; off, it is painted over it.
+
+**Wind.** A material's **Sway** lets the scene's **Wind** (Rendering > Wind) move it, the more
+the higher above the model's base: 1 for grass, 0.1 for a tree, in waves that cross the field
+and gusts as gusty as the wind's gustiness. Painted Foliage sways with its material.
+
 ## Water, mist and traced light
 
 - **Water** is a material: choose the shader *Water* (waves cross it, it mirrors the sky at a glancing angle). `Buoyancy` on a body makes it float at a water level.
@@ -309,6 +545,16 @@ bodies were before), it keeps the way it faces: what a character that walks want
 `Joint` ties a body to another by name, or to the world: `ball` (joined at a point), `hinge` (turns about one axis: a door), `fixed`
 (welded), `distance` (a rod, or with **Is Rope** a rope that only pulls). **Break Force** lets it give way.
 
+## Ropes and chains
+
+A **Rope** (Add Component > Physics) on an entity hangs from it, `length` meters long, or runs
+to the entity named in **To** (a crate it carries, a post it is tied to; with a length longer
+than the distance it sags). It is made of **Links** joined end to end: bodies that swing, wrap
+round what they meet and are pulled by what hangs from them, and it does not stretch however
+heavy the load. One mesh is drawn along it, of the entity's own material: a tube, or rings with
+**Is Chain**. If the entity it starts at has a RigidBody, the rope moves with it and pulls it.
+**Bend** makes it stiffer: the most each link turns from the next.
+
 ## glTF models and animation
 
 A `.gltf` or `.glb` file is a model like an `.obj`: choose it as an entity's mesh. If it has animations, add an **Animator**: `clip` names
@@ -324,6 +570,13 @@ a pond, 9 is a fresh breeze with waves of two meters, 20 a gale); `choppiness` s
 `resolution` is how fine the sheet is and `patchSize` how far before the pattern repeats. A body with **Buoyancy** over a Water rides
 its waves. From code: `waterHeightAt(world, position, height)`. For water you can see through, set the material's blending to Blend
 and lower its alpha; it does not bend what is behind it yet.
+
+**Floating things and boats.** Give a Buoyancy a **Hull** (half its size each way) and a
+RigidBody that rotates: it is held up at its four lower corners, each as deep as the water is
+there, so it rocks on the waves, lists and rights itself. **Current** carries it along, as a
+river does. A **Boat** (Add Component > Vehicles) beside them goes ahead with W and turns with
+A and D (or the left stick) while it floats, the rudder biting the more the faster it goes;
+from code, untick Uses Input and set `throttle` and `steer`.
 
 ## Liquid
 
@@ -473,6 +726,33 @@ click in the Game view, and press, drag and click them there. A game that also h
 can hide its touch controls until the screen is touched (**Only On Touch Screens**).
 From code: `input.setVirtualAxis(...)`, `input.setVirtualButton(...)`.
 
+### Rows, columns, grids, lists
+
+A **Layout** (Create > UI > Layout) places the pieces of interface under it in the Hierarchy,
+one after the other: in a column, a row (`arrangement` 0) or a grid of `columns` (2). Their order
+is the order they are in on the screen, so in the Game view a piece dragged above another takes
+its place. **Create > UI > Menu** makes a column with three buttons in it, as wide as it.
+
+- `padding` is the room inside its edge, `spacing` the room between two pieces; `alignment`
+  puts them at the start, the middle or the end across.
+- `stretches` makes them as wide as the column (as tall as the row, as big as a cell).
+- `fitsContent` makes the layout as long as what it holds; a piece that is switched off takes no room.
+- `scrolls`: what does not fit is dragged into view, with a finger or the mouse, or with the wheel;
+  only what is inside it is seen and can be pressed. A thin bar at its side says where one is.
+- Layouts go inside layouts: a row of icons in a column of a menu.
+
+A **Slider** (Create > UI > Slider) sets a shared value between `least` and `most` by dragging
+its bar, by `step` if it has one; `isSaved` keeps it between plays as a preference of that name.
+
+A **Text Field** (Create > UI > Text Field) is a box to type in: a name for the best laps, a
+code. Click or tap it and type; Return lets it go. What is typed is a shared text, shown by any
+text as a value is: `Hello {playerName}`. While it is typed in, the letters are the field's and
+not the game's (W does not drive the car), and a phone shows its keyboard. `isSaved` keeps it
+between plays. From code: `world.text("playerName")`, `world.setText(...)`.
+
+Texts and buttons can each have their own **font**: one made by `Tools/bake_font.py` and put in
+Assets (`Fonts/Title.png` and `Fonts/Title.txt`), named without its ending: `Fonts/Title`.
+
 ## The game in other languages
 
 Write the texts of the interface in one language, the one you work in. For every other
@@ -508,6 +788,16 @@ itself in five steps: the game (name, version, identifier, splash), where it sta
 is played (touch controls), its scripts (built by themselves when saved and before the
 export: there is nothing to press), and the export, for the Mac or as an Xcode project for
 iPhone and iPad.
+
+### Smaller when built
+
+The game takes the project's Assets along made smaller, the project's own files untouched:
+pictures larger than the device shows are brought down once at the build (4096 pixels on the
+longer side for the Mac, 2048 for iPhone and iPad, or less where their import settings say),
+instead of every time the game loads them; WAV sounds kept in floating point or 24 and 32 bits
+become 16-bit (and mono, or another rate, where their settings ask); and the art programs' own
+files kept beside the art (.psd, .blend, .kra, .xcf...) and .DS_Store are left behind. For the
+phone the smaller copy is made in Build/iOS/Assets. Models are taken as they are.
 
 ### The icon
 
@@ -548,9 +838,107 @@ transition Locomotion Jump when jump
 transition Jump Locomotion exit 0.9 blend 0.15
 ```
 
+**In every direction.** A blend tree with two parameters places each motion at a point:
+`state Move blend moveX moveY`, then `motion Forward 0 1`, `motion Left -1 0`, `motion Idle 0 0`
+and so on. At a motion's point it plays alone; between points the nearest are mixed, and the
+mix always adds up to the whole (strafing, walking backwards, the diagonals between).
+
+**Layers.** Under the states, `layer Arms mask Spine weight aim` begins a layer: its own states
+and transitions, played over the ones above on the bones of its mask (each with all those below
+it; no mask, the whole body), by its weight, a number or a float parameter. The legs walk while
+the arms aim, wave or carry. `additive` adds the layer's movement to what is under it instead
+(a breath, a flinch, a look to one side):
+
+```
+layer Arms mask Spine weight aim
+  state Relaxed
+    motion Idle
+  state Aiming
+    motion Aim
+  transition Relaxed Aiming when aiming
+layer Breath additive weight 0.5
+  state Breathe
+    motion Breathe
+```
+
+**Ragdolls.** A **Ragdoll** (Add Component > Characters) beside the Animator makes the
+character go limp when it is ticked, at `ragdoll->limp(world, self, push)` or at the message
+"limp": a capsule body for each main bone of the skeleton (or those named in Bones), joined to
+the one above by a joint that bends at most Bend degrees, and the bones follow the bodies as they
+fall, keeping the speed it had. "stand up" (or `standUp`) takes the bodies away and the animation
+goes on. Its parts do not collide with one another, nor with the character's own collider.
+Joints of your own can bend only so far too: a ball joint's **Swing Limit**.
+
 A **Two Bone IK** on the same entity puts the end of a limb (a foot, a hand, by its bone's name) on a target entity, bending the knee or elbow toward a pole.
 
 **Finding the way.** A **Navigation Area** looks at a rectangle of the world when the game starts: which ground can be walked (not too steep, with room above it for the agents' size) and which steps join it. A **Nav Agent** then walks to an entity (its `target`) or to a point (`agent->goTo(point)`) along the shortest path, round walls, with its Character Controller if it has one. A **Guard** on a Nav Agent walks a round of points ("Patrol Point 1", "Patrol Point 2"...), chases the player when it sees them, searches where it saw them last and goes back to its round.
+
+
+### Root motion
+
+An animation made walking forward (the way animators make walks, runs, dodges, climbs) can move
+its entity: tick **Root Motion** on the Animator. The movement of the skeleton's first bone
+across the ground (or of `rootBone`) moves the entity, turned as it is, through its Character
+Controller if it has one (so walls still stop it); the bone itself stays over the entity, with
+only its bounce. The feet then stay on the ground instead of sliding. `rootMoved` says how far
+it went this frame.
+
+## Finding things, and changing many at once
+
+The Hierarchy's search box finds by name, and by more with a word before a colon:
+`c:light` (with a component: Light, Point Light, Collider, Health...), `tag:enemy`,
+`layer:water` (or its number), `prefab:wheel` (the copies of a prefab), `is:off`. Every word
+must hold, so `tag:enemy c:collider` is enemies with colliders; a word with `-` before it must
+not: `c:light -c:camera`. **Select all** picks everything found.
+
+With several entities selected (Cmd-click, Shift-click, or Select all), the Inspector shows the
+last one, and what is changed there is changed on all of them, value by value: setting x of the
+position sets it on all, each keeping its own y and z; the intensity of a light set on one is
+set on every one that has a light, their colours left as they were. A component added or
+removed is added to or removed from each. Undo takes back the change on all of them.
+
+### Snapping and arranging
+
+The arrow beside **Snap** in the Scene view's bar says what moving snaps to: **Steps** (of the
+Move step, with Snap on), **Surfaces** (the selection goes onto whatever is under the mouse,
+and with "Stands on the surface" is turned to stand on it: a lamp on a slope, a picture on a
+wall), or **Corners** (onto the nearest corner of another model, for pieces of a building that
+meet exactly). Holding **V** while moving snaps to corners whatever is chosen.
+
+Under it, **Arrange the selection** lines several up along X, Y or Z (at the least of them,
+their middle or the most), **Spread**s them evenly between the two furthest apart, or **Drops**
+each to the ground under it.
+
+## What a scene weighs
+
+**Window > Scene Weight** lists the objects that draw a model, the heaviest first: the triangles
+each draws (all its copies, for foliage), its share of the scene's, and the memory of its model
+and its pictures. At the top, the totals: models and pictures shared by several objects are
+counted once, and the draws are one for each model and material, however many copies (the
+renderer draws them together). Order by memory to find the pictures that are too big; a click
+on a row selects the object.
+
+## The mixer: groups, ducking, rooms and walls
+
+Every sound plays in a group: **Effects** (the default), **Music**, **Voices**, **Interface**,
+or one the game names. `world.setVolume("Music", 0.5f)` sets a group's volume (a settings
+menu's sliders, or the Set Volume node); `setMuted` silences it; both last from scene to scene.
+An Audio Source says its group; `world.startSound(name, volume, pitch, loops, "Voices")` and
+`world.playSound(name, volume, "Interface")` too.
+
+The music **ducks** under the voices from the start: while anything plays in Voices, Music goes
+down to 30% and comes back up after. `world.duck("Music", "Voices", 0.2f)` changes it, and
+`world.duck("Ambience", "Effects")` makes another; an empty second name stops it.
+
+**Rooms.** A **Reverb Zone** (Add Component > Audio) makes the sounds heard inside it ring: a
+Small Room, a Hall, a Cave, a Bathroom, a Cathedral, a Forest, or Custom (size, damping, wet).
+It is a sphere of `radius` round its entity, or a box; at its edge it fades in over `edge`
+meters, and where zones meet the one the listener is most inside is heard. Effects and voices
+ring; music and the interface do not.
+
+**Walls.** A sound placed in the world (an Audio Source with **Comes From Here**, or
+`world.placeSound`) is muffled when something that stands still is between it and the listener:
+quieter, and without its highs, as through a wall. `world.muffledByWalls = false` turns it off.
 
 ## Prefabs in prefabs, and variants
 
@@ -567,3 +955,9 @@ set "Body" MeshRenderer material "Materials/Red.material"
 set "Body" Transform scale "1.2 1.2 1.2"
 ```
 
+
+A copy can also differ from its prefab on its own. Change a part of it in the Inspector, or move
+it in the Scene view, and the change is kept with that copy only: the Inspector says "Part of a
+copy of ..." and how many of its values are its own, and **Take Back** makes the part as the
+prefab has it again. Everything else still follows the prefab. In the scene file these are the
+`override` lines under the copy's `prefab` line.

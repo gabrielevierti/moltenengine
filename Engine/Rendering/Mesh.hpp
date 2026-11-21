@@ -29,6 +29,17 @@ public:
     /// same triangles: what an animated model does every frame. False if it does not fit.
     bool update(const MeshData& data);
     bool isDynamic = false;             // made for one entity and changed as it moves
+    /// Takes the shape of `fresher` (the same file, read again): everything that holds this
+    /// mesh draws the new one. Its name stays. The GPU must not be using the old one.
+    void adopt(Mesh&& fresher) {
+        vertexBuffer_ = std::move(fresher.vertexBuffer_);
+        indexBuffer_ = std::move(fresher.indexBuffer_);
+        accelerationStructure_ = std::move(fresher.accelerationStructure_);
+        indexCount_ = fresher.indexCount_;
+        bounds_ = fresher.bounds_;
+        positions_ = std::move(fresher.positions_);
+        indices_ = std::move(fresher.indices_);
+    }
     /// Where a ray in the mesh's own space first meets one of its triangles, as a multiple
     /// of the ray's direction. For tools that need to know what is under the pointer.
     std::optional<float> raycast(const Ray& ray) const;

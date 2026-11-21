@@ -14,6 +14,13 @@ int AnimatorController::findState(const std::string& name) const {
     return -1;
 }
 
+int AnimatorController::Layer::findState(const std::string& name) const {
+    for (size_t i = 0; i < states.size(); i++) {
+        if (states[i].name == name) return int(i);
+    }
+    return -1;
+}
+
 const AnimatorController::Parameter* AnimatorController::findParameter(const std::string& name) const {
     for (const Parameter& parameter : parameters) {
         if (parameter.name == name) return &parameter;
@@ -62,6 +69,10 @@ std::optional<AnimatorController> AnimatorController::parse(const std::string& t
         return std::nullopt;
     };
     State* state = nullptr;
+    // Where states, transitions and "start" go: the controller's own, or the layer begun last.
+    std::vector<State>* states = &controller.states;
+    std::vector<Transition>* transitions = &controller.transitions;
+    std::string* start = &controller.start;
     bool sawHeader = false;
     while (std::getline(lines, line)) {
         lineNumber++;
@@ -79,19 +90,45 @@ std::optional<AnimatorController> AnimatorController::parse(const std::string& t
             parameter.name = w[2];
             if (w.size() > 3) parameter.value = w[3] == "true" ? 1.0f : w[3] == "false" ? 0.0f : std::strtof(w[3].c_str(), nullptr);
             controller.parameters.push_back(parameter);
+        } else if (key == "layer" && w.size() >= 2) {
+            controller.layers.push_back(Layer{});
+            Layer& layer = controller.layers.back();
+            layer.name = w[1];
+            for (size_t i = 2; i < w.size(); i++) {
+                if (w[i] == "additive") layer.additive = true;
+                else if (w[i] == "weight" && i + 1 < w.size()) {
+                    const std::string& value = w[++i];
+                    char* end = nullptr;
+                    float number = std::strtof(value.c_str(), &end);
+                    if (end && *end == 0 && end != value.c_str()) layer.weight = std::clamp(number, 0.0f, 1.0f);
+                    else layer.weightBy = value;
+                } else if (w[i] == "mask") {
+                    while (i + 1 < w.size() && w[i + 1] != "weight" && w[i + 1] != "additive") layer.mask.push_back(w[++i]);
+                } else {
+                    return fail("\"" + w[i] + "\" is not understood in a layer");
+                }
+            }
+            states = &layer.states;
+            transitions = &layer.transitions;
+            start = &layer.start;
+            state = nullptr;
         } else if (key == "state" && w.size() >= 2) {
-            controller.states.push_back(State{});
-            state = &controller.states.back();
+            states->push_back(State{});
+            state = &states->back();
             state->name = w[1];
             for (size_t i = 2; i + 1 < w.size(); i += 2) {
-                if (w[i] == "blend") state->blendBy = w[i + 1];
-                else if (w[i] == "loops") state->loops = w[i + 1] != "0" && w[i + 1] != "false";
+                if (w[i] == "blend") {
+                    state->blendBy = w[i + 1];
+                    // A second name, not a keyword: the other parameter of a 2D blend tree.
+                    if (i + 2 < w.size() && w[i + 2] != "loops" && w[i + 2] != "speed" && w[i + 2] != "blend") state->blendByY = w[i + 2], i++;
+                } else if (w[i] == "loops") state->loops = w[i + 1] != "0" && w[i + 1] != "false";
                 else if (w[i] == "speed") state->speed = std::strtof(w[i + 1].c_str(), nullptr);
             }
         } else if ((key == "motion" || key == "event" || key == "loops" || key == "speed" || key == "blend") && !state) {
             return fail("\"" + key + "\" before any state");
         } else if (key == "motion" && w.size() >= 2) {
-            state->motions.push_back(Motion{w[1], w.size() > 2 ? std::strtof(w[2].c_str(), nullptr) : 0.0f});
+            state->motions.push_back(Motion{w[1], w.size() > 2 ? std::strtof(w[2].c_str(), nullptr) : 0.0f,
+                                            w.size() > 3 ? std::strtof(w[3].c_str(), nullptr) : 0.0f});
         } else if (key == "event" && w.size() >= 2) {
             state->events.push_back(Event{w[1], w.size() > 2 ? std::clamp(std::strtof(w[2].c_str(), nullptr), 0.0f, 1.0f) : 0.0f});
         } else if (key == "loops" && w.size() >= 2) {
@@ -100,8 +137,9 @@ std::optional<AnimatorController> AnimatorController::parse(const std::string& t
             state->speed = std::strtof(w[1].c_str(), nullptr);
         } else if (key == "blend" && w.size() >= 2) {
             state->blendBy = w[1];
+            if (w.size() > 2) state->blendByY = w[2];
         } else if (key == "start" && w.size() >= 2) {
-            controller.start = w[1];
+            *start = w[1];
         } else if (key == "transition" && w.size() >= 3) {
             Transition transition;
             transition.from = w[1];
@@ -135,26 +173,38 @@ std::optional<AnimatorController> AnimatorController::parse(const std::string& t
                     return fail("\"" + w[i] + "\" is not understood in a transition");
                 }
             }
-            controller.transitions.push_back(transition);
+            transitions->push_back(transition);
         } else {
             return fail("\"" + key + "\" is not understood");
         }
     }
     if (!sawHeader) return fail("not an animator file: the first line must be \"molten-animator 1\"");
-    // Triggers are tested as triggers, whatever the line said.
-    for (Transition& transition : controller.transitions) {
-        for (Condition& condition : transition.conditions) {
-            const Parameter* parameter = controller.findParameter(condition.parameter);
-            if (!parameter) {
-                lineNumber = 0;
-                return fail("the transition " + transition.from + " to " + transition.to + " tests \"" + condition.parameter + "\", which is no parameter");
+    // Triggers are tested as triggers, whatever the line said; and every state named is there.
+    auto check = [&](std::vector<Transition>& transitions, const std::vector<State>& states, std::string& start) -> std::optional<std::string> {
+        auto findState = [&](const std::string& name) {
+            for (size_t i = 0; i < states.size(); i++) if (states[i].name == name) return int(i);
+            return -1;
+        };
+        for (Transition& transition : transitions) {
+            for (Condition& condition : transition.conditions) {
+                const Parameter* parameter = controller.findParameter(condition.parameter);
+                if (!parameter) {
+                    lineNumber = 0;
+                    return "the transition " + transition.from + " to " + transition.to + " tests \"" + condition.parameter + "\", which is no parameter";
+                }
+                if (parameter->kind == Parameter::Kind::Trigger) condition.test = Condition::Test::Triggered;
             }
-            if (parameter->kind == Parameter::Kind::Trigger) condition.test = Condition::Test::Triggered;
+            if (transition.from != "Any" && findState(transition.from) < 0) return "no state called \"" + transition.from + "\"";
+            if (findState(transition.to) < 0) return "no state called \"" + transition.to + "\"";
         }
-        if (transition.from != "Any" && controller.findState(transition.from) < 0) return fail("no state called \"" + transition.from + "\"");
-        if (controller.findState(transition.to) < 0) return fail("no state called \"" + transition.to + "\"");
+        if (start.empty() && !states.empty()) start = states.front().name;
+        return std::nullopt;
+    };
+    if (std::optional<std::string> problem = check(controller.transitions, controller.states, controller.start)) return fail(*problem);
+    for (Layer& layer : controller.layers) {
+        if (std::optional<std::string> problem = check(layer.transitions, layer.states, layer.start)) return fail("layer " + layer.name + ": " + *problem);
+        if (!layer.weightBy.empty() && !controller.findParameter(layer.weightBy)) return fail("layer " + layer.name + ": \"" + layer.weightBy + "\" is no parameter");
     }
-    if (controller.start.empty() && !controller.states.empty()) controller.start = controller.states.front().name;
     return controller;
 }
 
@@ -166,18 +216,22 @@ std::string AnimatorController::toText() const {
         if (parameter.kind != Parameter::Kind::Trigger) out += " " + number(parameter.value);
         out += "\n";
     }
+    auto writeStates = [&](const std::vector<State>& states, const std::string& indent) {
     for (const State& state : states) {
-        out += "\nstate " + named(state.name);
-        if (!state.blendBy.empty()) out += " blend " + named(state.blendBy);
+        out += "\n" + indent + "state " + named(state.name);
+        if (!state.blendBy.empty()) out += " blend " + named(state.blendBy) + (state.blendByY.empty() ? "" : " " + named(state.blendByY));
         if (!state.loops) out += " loops 0";
         if (state.speed != 1) out += " speed " + number(state.speed);
         out += "\n";
-        for (const Motion& motion : state.motions) out += "  motion " + named(motion.clip) + (state.blendBy.empty() ? "" : " " + number(motion.at)) + "\n";
-        for (const Event& event : state.events) out += "  event " + named(event.name) + " " + number(event.at) + "\n";
+        for (const Motion& motion : state.motions) out += indent + "  motion " + named(motion.clip) + (state.blendBy.empty() ? "" : " " + number(motion.at)) +
+                                                    (state.blendByY.empty() ? "" : " " + number(motion.y)) + "\n";
+        for (const Event& event : state.events) out += indent + "  event " + named(event.name) + " " + number(event.at) + "\n";
     }
-    if (!start.empty()) out += "\nstart " + named(start) + "\n";
+    };
+    auto writeTransitions = [&](const std::vector<Transition>& transitions, const std::string& start, const std::string& indent) {
+    if (!start.empty()) out += "\n" + indent + "start " + named(start) + "\n";
     for (const Transition& transition : transitions) {
-        out += "transition " + named(transition.from) + " " + named(transition.to);
+        out += indent + "transition " + named(transition.from) + " " + named(transition.to);
         for (size_t i = 0; i < transition.conditions.size(); i++) {
             const Condition& condition = transition.conditions[i];
             out += (i == 0 ? " when " : " and ") + named(condition.parameter);
@@ -192,6 +246,22 @@ std::string AnimatorController::toText() const {
         if (transition.exitAt >= 0) out += " exit " + number(transition.exitAt);
         if (transition.blend != 0.2f) out += " blend " + number(transition.blend);
         out += "\n";
+    }
+    };
+    writeStates(states, "");
+    writeTransitions(transitions, start, "");
+    for (const Layer& layer : layers) {
+        out += "\nlayer " + named(layer.name);
+        if (!layer.mask.empty()) {
+            out += " mask";
+            for (const std::string& bone : layer.mask) out += " " + named(bone);
+        }
+        if (!layer.weightBy.empty()) out += " weight " + named(layer.weightBy);
+        else if (layer.weight != 1) out += " weight " + number(layer.weight);
+        if (layer.additive) out += " additive";
+        out += "\n";
+        writeStates(layer.states, "  ");
+        writeTransitions(layer.transitions, layer.start, "  ");
     }
     return out;
 }
@@ -219,6 +289,38 @@ std::vector<float> AnimatorController::blendWeights(const std::vector<Motion>& m
             break;
         }
     }
+    return weights;
+}
+
+std::vector<float> AnimatorController::blendWeights2D(const std::vector<Motion>& motions, float x, float y) {
+    std::vector<float> weights(motions.size(), 0.0f);
+    if (motions.empty()) return weights;
+    float sum = 0;
+    for (size_t i = 0; i < motions.size(); i++) {
+        float weight = 1;
+        float px = x - motions[i].at, py = y - motions[i].y;
+        for (size_t j = 0; j < motions.size() && weight > 0; j++) {
+            if (j == i) continue;
+            float ex = motions[j].at - motions[i].at, ey = motions[j].y - motions[i].y;
+            float length = ex * ex + ey * ey;
+            if (length <= 1e-8f) continue;                         // two at the same point
+            weight = std::min(weight, std::clamp(1 - (px * ex + py * ey) / length, 0.0f, 1.0f));
+        }
+        weights[i] = weight;
+        sum += weight;
+    }
+    if (sum > 0) {
+        for (float& weight : weights) weight /= sum;
+        return weights;
+    }
+    // Outside every band (cannot happen for a point among them): the nearest alone.
+    size_t nearest = 0;
+    float best = 1e30f;
+    for (size_t i = 0; i < motions.size(); i++) {
+        float d = (x - motions[i].at) * (x - motions[i].at) + (y - motions[i].y) * (y - motions[i].y);
+        if (d < best) best = d, nearest = i;
+    }
+    weights[nearest] = 1;
     return weights;
 }
 

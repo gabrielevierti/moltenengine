@@ -87,6 +87,11 @@ public:
     /// Call when something in the scene was edited. The step is recorded by endFrame() once
     /// `interacting` is false (the drag is over, the text field is left).
     void markChanged() { touched_ = true; }
+    /// The scene read again from itself: copies of prefabs made again from their prefabs (with
+    /// their own changes). One step of undo.
+    void rebuild();
+    /// A part of a prefab's copy was moved: where it is now is kept as the copy's own change.
+    void keepPartPlace(Entity part);
     void undo();
     void redo();
     bool canUndo() const { return !undo_.empty() && !isPlaying_; }

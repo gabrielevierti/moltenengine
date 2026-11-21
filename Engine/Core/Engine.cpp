@@ -83,6 +83,7 @@ Engine::Engine(const EngineConfig& config) : config_(config) {
     // The engine's own icon, until a game says it has one of its own.
     if (window_) window_->setIcon(root + "/Assets/Branding/icon.png");
     renderer_->surfaceShaders().pathOf = [this](const std::string& name) { return assets_->path(name); };
+    renderer_->loadPicture = [this](const std::string& name, TextureFormat format) { return assets_->texture(name, format); };
     audio_ = std::make_unique<Audio>(!isCapturing);
     setFont(assets_->font("Fonts/Default"));
     script::registerStandardNodes();        // visual scripts: the nodes, and with them the VisualScript component
@@ -280,11 +281,12 @@ void Engine::runBehaviors(bool isFixedStep, float dt) {
 
 // ---------------------------------------------------------------- what a World leaves to an engine
 
-void Engine::playSound(const std::string& name, float volume) {
+void Engine::playSound(const std::string& name, float volume, const std::string& group) {
     if (!audio_) return;
     if (std::shared_ptr<AudioClip> clip = assets_->sound(name)) {
         PlayOptions options;
         options.volume = volume * soundVolume;
+        options.group = audio_->mixer().group(group);
         audio_->play(clip, options);
     }
 }
@@ -336,6 +338,29 @@ void Engine::endSound(uint32_t sound) {
     audio_->stop(sound);
 }
 
+void Engine::groupSound(uint32_t sound, const std::string& group) {
+    if (audio_) audio_->mixer().setGroup(sound, audio_->mixer().group(group));
+}
+
+void Engine::mixGroup(const std::string& group, float volume, bool isMuted) {
+    if (!audio_) return;
+    int index = audio_->mixer().group(group);
+    audio_->mixer().setGroupVolume(index, volume);
+    audio_->mixer().setGroupMuted(index, isMuted);
+}
+
+void Engine::duckGroup(const std::string& group, const std::string& under, float to) {
+    if (audio_) audio_->mixer().duck(audio_->mixer().group(group), under.empty() ? -1 : audio_->mixer().group(under), to);
+}
+
+void Engine::muffleSound(uint32_t sound, float muffle) {
+    if (audio_) audio_->mixer().setMuffle(sound, muffle);
+}
+
+void Engine::setRoom(float size, float damping, float wet) {
+    if (audio_) audio_->mixer().setReverb(size, damping, wet);
+}
+
 void Engine::showMesh(Entity entity, const MeshData& data) {
     MeshRenderer* renderer = scene.get<MeshRenderer>(entity);
     if (!renderer || data.indices.empty()) return;
@@ -358,6 +383,14 @@ std::shared_ptr<Mesh> Engine::loadMesh(const std::string& name) {
 
 std::shared_ptr<Texture> Engine::loadTexture(const std::string& name, TextureFormat format) {
     return assets_->texture(name, format);
+}
+
+void Engine::preloadMesh(const std::string& name, MeshData data) {
+    assets_->preload(name, std::move(data));
+}
+
+std::shared_ptr<Font> Engine::loadFont(const std::string& name) {
+    return assets_->font(name);
 }
 
 /// A scene says how it wants to be rendered: sky, fog, shadows, exposure.

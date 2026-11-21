@@ -56,6 +56,34 @@ void SceneDocument::syncCamera() {
 
 /// Replaces the scene with the one `text` describes. The selection is kept by position
 /// in the scene: the entities are new, but the third one is still the third one.
+void SceneDocument::keepPartPlace(Entity part) {
+    Scene& scene = engine_.scene;
+    if (!scene.has<FromPrefab>(part)) return;
+    Entity copy = part;
+    for (int depth = 0; depth < 64 && scene.isAlive(copy); depth++) {
+        if (scene.has<PrefabInstance>(copy) && !scene.has<FromPrefab>(copy)) break;
+        const Transform* transform = scene.get<Transform>(copy);
+        copy = transform ? transform->parent : Entity{};
+    }
+    PrefabInstance* instance = scene.get<PrefabInstance>(copy);
+    const Transform* transform = scene.get<Transform>(part);
+    std::string path;
+    if (!instance || !transform || !pathBelow(scene, copy, part, path)) return;
+    char text[128];
+    auto vec = [&](Vec3 v) {
+        std::snprintf(text, sizeof(text), "%g %g %g", double(v.x), double(v.y), double(v.z));
+        return std::string(text);
+    };
+    instance->setOverride(PrefabOverride{path, "Transform", "position", vec(transform->position)});
+    instance->setOverride(PrefabOverride{path, "Transform", "rotation", vec(toEulerAngles(transform->rotation) * (180.0f / kPi))});
+    instance->setOverride(PrefabOverride{path, "Transform", "scale", vec(transform->scale)});
+}
+
+void SceneDocument::rebuild() {
+    restore(snapshot());
+    markChanged();
+}
+
 void SceneDocument::restore(const std::string& text) {
     std::vector<int> selectedIndices;
     for (Entity entity : selection_) {

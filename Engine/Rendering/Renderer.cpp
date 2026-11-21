@@ -99,7 +99,7 @@ void Renderer::ensureTargets(int width, int height) {
     int samples = std::clamp(settings.sampleCount, 1, 4);
     if (samples == 3) samples = 2;
     if (!device_.device()->supportsTextureSampleCount(NS::UInteger(samples))) samples = 1;
-    bool wantOcclusion = settings.ambientOcclusionEnabled;
+    bool wantOcclusion = wantsDepth();
     if (width == targetWidth_ && height == targetHeight_ && samples == targetSamples_ && wantOcclusion == targetHasOcclusion_) return;
     targetWidth_ = width;
     targetHeight_ = height;
@@ -118,9 +118,15 @@ void Renderer::ensureTargets(int width, int height) {
         prepassNormal_ = device_.makeRenderTarget(MTL::PixelFormatRGBA8Unorm, width, height);
         occlusionRaw_ = device_.makeRenderTarget(MTL::PixelFormatR8Unorm, width, height);
         occlusion_ = device_.makeRenderTarget(MTL::PixelFormatR8Unorm, width, height);
+        postColor_ = device_.makeRenderTarget(kSceneFormat, width, height);
     } else {
-        prepassDepth_ = prepassNormal_ = occlusionRaw_ = occlusion_ = NS::SharedPtr<MTL::Texture>();
+        prepassDepth_ = prepassNormal_ = occlusionRaw_ = occlusion_ = postColor_ = NS::SharedPtr<MTL::Texture>();
     }
+    // How bright the scene is: a small picture of its brightness, averaged down to one pixel.
+    luminance_ = device_.makeRenderTarget(MTL::PixelFormatR16Float, 64, 64, 1, false, 7);
+    adapted_[0] = device_.makeRenderTarget(MTL::PixelFormatR16Float, 1, 1);
+    adapted_[1] = device_.makeRenderTarget(MTL::PixelFormatR16Float, 1, 1);
+    hasPreviousView_ = false;
 
     // The bloom chain: half size, quarter size, and so on.
     bloom_.clear();
@@ -185,9 +191,28 @@ Renderer::View Renderer::findView(Scene& scene, float aspect) const {
 
 void Renderer::collectItems(Scene& scene, const View& view, std::vector<DrawItem>& items) const {
     chooseLevelsOfDetail(scene, view.position);
-    scene.each<MeshRenderer, Transform>([&](Entity, MeshRenderer& renderer, Transform& transform) {
+    scene.each<MeshRenderer, Transform>([&](Entity entity, MeshRenderer& renderer, Transform& transform) {
         if (!transform.isActiveInHierarchy) return;
         if (!renderer.isVisible || !renderer.mesh || renderer.isBeyondItsDetail) return;
+        // Many copies: one item each, those too far away left out.
+        if (const MeshInstances* copies = scene.get<MeshInstances>(entity)) {
+            float reach = copies->drawDistance > 0 ? copies->drawDistance * copies->drawDistance : 1e30f;
+            const Material* material = renderer.material ? renderer.material.get() : &defaultMaterial_;
+            const AABB local = renderer.mesh->bounds();
+            for (const Mat4& place : copies->places) {
+                DrawItem item;
+                item.world = transform.world * place;
+                item.distanceSquared = simd::length_squared(xyz(item.world.columns[3]) - view.position);
+                if (item.distanceSquared > reach) continue;
+                item.mesh = renderer.mesh.get();
+                item.material = material;
+                item.tint = renderer.tint;
+                item.bounds = local.transformed(item.world);
+                item.castsShadows = renderer.castsShadows;
+                items.push_back(item);
+            }
+            return;
+        }
         DrawItem item;
         item.mesh = renderer.mesh.get();
         item.material = renderer.material ? renderer.material.get() : &defaultMaterial_;
@@ -292,6 +317,8 @@ gpu::PassUniforms Renderer::makePassUniforms(const Mat4& view, const Mat4& proje
     uniforms.viewportSize = Vec2{float(width), float(height)};
     uniforms.nearPlane = nearPlane;
     uniforms.farPlane = farPlane;
+    uniforms.wind = settings.wind;
+    uniforms.windGust = std::clamp(settings.windGustiness, 0.0f, 1.0f);
     return uniforms;
 }
 
@@ -408,6 +435,14 @@ void Renderer::swapTargets(size_t slot) {
     std::swap(kept.occlusion, occlusion_);
     std::swap(kept.bloom, bloom_);
     std::swap(kept.upscaler, upscaler_);
+    std::swap(kept.postColor, postColor_);
+    std::swap(kept.luminance, luminance_);
+    std::swap(kept.adapted[0], adapted_[0]);
+    std::swap(kept.adapted[1], adapted_[1]);
+    std::swap(kept.adaptIndex, adaptIndex_);
+    std::swap(kept.previousViewProjection, previousViewProjection_);
+    std::swap(kept.hasPreviousView, hasPreviousView_);
+    std::swap(kept.lastViewTime, lastViewTime_);
 }
 
 void Renderer::render(Scene& scene, const Canvas& canvas, const RenderTarget& target, double time) {
@@ -550,6 +585,12 @@ void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const
     frame.cloudScale = settings.sky.cloudScale;
     frame.cloudOffset = settings.sky.cloudSpeed * float(time);
     frame.sunAngularRadius = settings.sky.sunAngularRadius;
+    frame.physicalSky = settings.sky.isPhysical ? 1u : 0u;
+    frame.skyHaze = std::clamp(settings.sky.haze, 0.0f, 1.0f);
+    frame.starBrightness = std::max(settings.sky.stars, 0.0f);
+    frame.starTime = float(std::fmod(time, 86400.0));
+    float deltaTime = lastViewTime_ >= 0 ? float(std::clamp(time - lastViewTime_, 0.0, 0.25)) : 0.0f;
+    lastViewTime_ = time;
     time_ = time;
 
     // ---- what the camera can see, in the order it will be drawn
@@ -597,9 +638,16 @@ void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const
         Profiler::Scope timed(timing, "Shadow maps");
         renderShadows(commandBuffer, items, cascades);
     }
-    if (settings.ambientOcclusionEnabled) {
+    // Decals this frame: they need the depth of what is under them.
+    hasDecals_ = false;
+    scene.each<Decal, Transform>([&](Entity, Decal& decal, Transform& transform) {
+        hasDecals_ = hasDecals_ || (transform.isActiveInHierarchy && !decal.picture.empty());
+    });
+    if (wantsDepth() && !prepassDepth_) ensureTargets(width, height);
+    if (wantsDepth()) {
         Profiler::Scope timed(timing, "Ambient occlusion");
-        renderOcclusion(commandBuffer, opaque, view, passUniforms);
+        renderPrepass(commandBuffer, opaque, passUniforms);
+        if (settings.ambientOcclusionEnabled) renderOcclusion(commandBuffer, opaque, view, passUniforms);
     }
     {
         Profiler::Scope timed(timing, "Scene pass");
@@ -607,6 +655,7 @@ void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const
     }
     {
         Profiler::Scope timed(timing, "Bloom and final");
+        renderEffects(commandBuffer, view, deltaTime);
         renderBloom(commandBuffer);
         renderFinal(commandBuffer, canvas, target, withOverlay);
     }

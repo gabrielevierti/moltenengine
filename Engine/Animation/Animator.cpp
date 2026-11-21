@@ -1,4 +1,5 @@
 #include "Animation/Animator.hpp"
+#include "Kit/Character.hpp"
 
 #include "Core/Log.hpp"
 #include "Core/TextFile.hpp"
@@ -42,11 +43,12 @@ void Animator::update(World& world, Entity self, float dt) {
         animation = -1;
         playing = "\n";                 // no clip has this name: the one asked for is looked up below
     }
-    if (!loaded || loaded->animations.empty()) return;
+    if (!loaded || loaded->animations.empty() || isHeldByRagdoll) return;
 
     if (!controller.empty()) {
         updateStates(world, dt);
         if (graph) {
+            moveWithRoot(world, self);
             reachWithLimbs(world, self);
             world.showMesh(self, loaded->assembled(pose));
             return;
@@ -93,8 +95,68 @@ void Animator::update(World& world, Entity self, float dt) {
             pose.rotations[i] = simd::slerp(blendFrom.rotations[i], pose.rotations[i], share);
         }
     }
+    moveWithRoot(world, self);
     reachWithLimbs(world, self);
     world.showMesh(self, loaded->assembled(pose));
+}
+
+void Animator::moveWithRoot(World& world, Entity self) {
+    rootMoved = Vec3{0, 0, 0};
+    if (!rootMotion || !loaded) return;
+    // The bone: the one named, or the first of the skeleton.
+    int root = -1;
+    if (!rootBone.empty()) {
+        for (size_t i = 0; i < loaded->nodes.size(); i++) {
+            if (loaded->nodes[i].name == rootBone) root = int(i);
+        }
+    } else if (!loaded->skins.empty() && !loaded->skins[0].joints.empty()) {
+        root = loaded->skins[0].joints[0];
+    }
+    if (root < 0 || size_t(root) >= pose.translations.size()) return;
+    Vec3 now = pose.translations[size_t(root)];
+    Vec3 step{0, 0, 0};
+    if (hasLastRoot && lastRootAnimation == animation) {
+        if (time >= lastRootTime || graph) {
+            step = now - lastRoot;
+        } else if (animation >= 0) {
+            // Round again: to the end of the clip, then from its start.
+            GltfPose ends = loaded->restPose();
+            float duration = loaded->animations[size_t(animation)].duration;
+            loaded->sample(animation, duration, ends);
+            Vec3 end = ends.translations[size_t(root)];
+            ends = loaded->restPose();
+            loaded->sample(animation, 0, ends);
+            step = (end - lastRoot) + (now - ends.translations[size_t(root)]);
+        }
+    }
+    // A jump of more than a meter in one frame is a change of clip, not a step; so is one that
+    // goes back the way it came (a state of the controller starting again).
+    if (simd::length(step) > 1.0f || (graph && simd::dot(step, lastStep) < 0 && simd::length(step) > 0.2f)) step = Vec3{0, 0, 0};
+    lastStep = step;
+    lastRoot = now;
+    lastRootTime = time;
+    lastRootAnimation = animation;
+    hasLastRoot = true;
+    // The bone stays over its entity: only its height moves (a step's bounce).
+    Vec3 rest = loaded->nodes[size_t(root)].translation;
+    pose.translations[size_t(root)] = Vec3{rest.x, now.y, rest.z};
+    // Across the ground, turned and sized as the entity is.
+    Transform* transform = world.scene.get<Transform>(self);
+    if (!transform) return;
+    Vec3 position, scale;
+    Quat rotation;
+    decompose(transform->world, position, rotation, scale);
+    Vec3 across = rotate(rotation, Vec3{step.x * scale.x, 0, step.z * scale.z});
+    if (simd::length(across) < 1e-7f) return;
+    if (kit::CharacterController* body = world.scene.get<kit::CharacterController>(self)) {
+        rootMoved = body->move(world, self, across);
+    } else {
+        Mat4 placed = compose(position + across, rotation, scale);
+        if (const Transform* parent = world.scene.get<Transform>(transform->parent)) placed = simd::inverse(parent->world) * placed;
+        Vec3 ignored;
+        decompose(placed, transform->position, transform->rotation, ignored);
+        rootMoved = across;
+    }
 }
 
 void Animator::reachWithLimbs(World& world, Entity self) {
@@ -207,16 +269,32 @@ void Animator::updateStates(World& world, float dt) {
         state = graph->findState(graph->start);
         progress = 0;
         blend = 1;
+        layerPlaying.clear();
     }
     if (!graph || state < 0) return;
 
+    Playing base{state, progress, blend, stateBlendTime, std::move(pose), std::move(blendFrom)};
+    runStates(world, dt, graph->states, graph->transitions, base, true);
+    state = base.state, progress = base.progress, blend = base.blend, stateBlendTime = base.stateBlendTime;
+    pose = std::move(base.pose);
+    blendFrom = std::move(base.blendFrom);
+    putLayers(world, dt);
+}
+
+void Animator::runStates(World& world, float dt, const std::vector<AnimatorController::State>& states,
+                         const std::vector<AnimatorController::Transition>& transitions, Playing& run, bool isBase) {
+    if (run.state < 0 || size_t(run.state) >= states.size()) return;
+    auto findIn = [&](const std::string& name) {
+        for (size_t i = 0; i < states.size(); i++) if (states[i].name == name) return int(i);
+        return -1;
+    };
     // A transition whose conditions hold: the first, in the file's order.
     using Test = AnimatorController::Condition::Test;
-    for (const AnimatorController::Transition& transition : graph->transitions) {
-        int to = graph->findState(transition.to);
+    for (const AnimatorController::Transition& transition : transitions) {
+        int to = findIn(transition.to);
         if (to < 0) continue;
-        if (transition.from == "Any" ? to == state : graph->findState(transition.from) != state) continue;
-        if (transition.exitAt >= 0 && progress < transition.exitAt) continue;
+        if (transition.from == "Any" ? to == run.state : findIn(transition.from) != run.state) continue;
+        if (transition.exitAt >= 0 && run.progress < transition.exitAt) continue;
         bool holds = true;
         for (const AnimatorController::Condition& condition : transition.conditions) {
             float value = parameter(condition.parameter);
@@ -233,23 +311,24 @@ void Animator::updateStates(World& world, float dt) {
         for (const AnimatorController::Condition& condition : transition.conditions) {
             if (condition.test == Test::Triggered) parameters[condition.parameter] = 0;        // used up
         }
-        blendFrom = pose;
-        blend = transition.blend > 0 && pose.translations.size() == loaded->nodes.size() ? 0.0f : 1.0f;
-        stateBlendTime = transition.blend;
-        state = to;
-        progress = 0;
+        run.blendFrom = run.pose;
+        run.blend = transition.blend > 0 && run.pose.translations.size() == loaded->nodes.size() ? 0.0f : 1.0f;
+        run.stateBlendTime = transition.blend;
+        run.state = to;
+        run.progress = 0;
         // Its events at the very start happen now.
-        for (const AnimatorController::Event& event : graph->states[size_t(state)].events) {
+        for (const AnimatorController::Event& event : states[size_t(run.state)].events) {
             if (event.at <= 0) fileIsSound(event.name) ? world.playSound(event.name) : firedEvents.push_back(event.name);
         }
         break;
     }
 
-    const AnimatorController::State& now = graph->states[size_t(state)];
+    const AnimatorController::State& now = states[size_t(run.state)];
     if (now.motions.empty()) return;
     // How much of each clip: one, or a blend tree's two around the parameter's value.
-    std::vector<float> weights = now.blendBy.empty() ? std::vector<float>(now.motions.size(), 0.0f)
-                                                     : AnimatorController::blendWeights(now.motions, parameter(now.blendBy));
+    std::vector<float> weights = now.blendBy.empty()    ? std::vector<float>(now.motions.size(), 0.0f)
+                                 : now.blendByY.empty() ? AnimatorController::blendWeights(now.motions, parameter(now.blendBy))
+                                                        : AnimatorController::blendWeights2D(now.motions, parameter(now.blendBy), parameter(now.blendByY));
     if (now.blendBy.empty()) weights[0] = 1;
     std::vector<int> clips(now.motions.size(), -1);
     float duration = 0;
@@ -260,17 +339,17 @@ void Animator::updateStates(World& world, float dt) {
 
     // Through the state: the clips of a blend tree keep step with one another (a walk and a run
     // put each foot down at the same moment of their cycles).
-    float before = progress;
-    if (isPlaying && duration > 0) progress += dt * speed * now.speed / duration;
-    if (!now.loops) progress = std::min(progress, 1.0f);
-    hasEnded = !now.loops && progress >= 1.0f;
+    float before = run.progress;
+    if (isPlaying && duration > 0) run.progress += dt * speed * now.speed / duration;
+    if (!now.loops) run.progress = std::min(run.progress, 1.0f);
+    if (isBase) hasEnded = !now.loops && run.progress >= 1.0f;
     for (const AnimatorController::Event& event : now.events) {
         if (event.at <= 0) continue;
         // Passed this frame, in any of the cycles crossed.
         float first = std::floor(before - event.at) + 1 + event.at;
-        if (first <= progress && first > before) fileIsSound(event.name) ? world.playSound(event.name) : firedEvents.push_back(event.name);
+        if (first <= run.progress && first > before) fileIsSound(event.name) ? world.playSound(event.name) : firedEvents.push_back(event.name);
     }
-    float phase = now.loops ? progress - std::floor(progress) : progress;
+    float phase = now.loops ? run.progress - std::floor(run.progress) : run.progress;
 
     GltfPose mixed = loaded->restPose();
     float sum = 0;
@@ -282,14 +361,67 @@ void Animator::updateStates(World& world, float dt) {
         else lerpPose(mixed, one, weights[i] / (sum + weights[i]));
         sum += weights[i];
     }
-    if (dt > 0) blend = stateBlendTime > 0 ? std::min(1.0f, blend + dt / stateBlendTime) : 1.0f;
-    if (blend < 1 && blendFrom.translations.size() == mixed.translations.size()) {
-        float share = blend * blend * (3 - 2 * blend);
-        GltfPose from = blendFrom;
+    if (dt > 0) run.blend = run.stateBlendTime > 0 ? std::min(1.0f, run.blend + dt / run.stateBlendTime) : 1.0f;
+    if (run.blend < 1 && run.blendFrom.translations.size() == mixed.translations.size()) {
+        float share = run.blend * run.blend * (3 - 2 * run.blend);
+        GltfPose from = run.blendFrom;
         lerpPose(from, mixed, share);
         mixed = from;
     }
-    pose = mixed;
+    run.pose = mixed;
+}
+
+void Animator::putLayers(World& world, float dt) {
+    if (!graph || graph->layers.empty() || pose.translations.size() != loaded->nodes.size()) return;
+    // Each layer's states from its start, and the nodes its mask covers, once.
+    if (layerPlaying.size() != graph->layers.size()) {
+        layerPlaying.assign(graph->layers.size(), Playing{});
+        layerMasks.assign(graph->layers.size(), {});
+        for (size_t l = 0; l < graph->layers.size(); l++) {
+            const AnimatorController::Layer& layer = graph->layers[l];
+            layerPlaying[l].state = layer.findState(layer.start);
+            std::vector<float>& mask = layerMasks[l];
+            mask.assign(loaded->nodes.size(), layer.mask.empty() ? 1.0f : 0.0f);
+            for (const std::string& bone : layer.mask) {
+                int found = -1;
+                for (size_t i = 0; i < loaded->nodes.size(); i++) if (loaded->nodes[i].name == bone) found = int(i);
+                if (found < 0) {
+                    logError("animator: layer %s: the model has no bone called \"%s\"", layer.name.c_str(), bone.c_str());
+                    continue;
+                }
+                // It and everything below it.
+                std::vector<int> open{found};
+                while (!open.empty()) {
+                    int node = open.back();
+                    open.pop_back();
+                    mask[size_t(node)] = 1;
+                    for (int child : loaded->nodes[size_t(node)].children) open.push_back(child);
+                }
+            }
+        }
+    }
+    GltfPose rest = loaded->restPose();
+    for (size_t l = 0; l < graph->layers.size(); l++) {
+        const AnimatorController::Layer& layer = graph->layers[l];
+        Playing& run = layerPlaying[l];
+        runStates(world, dt, layer.states, layer.transitions, run, false);
+        float weight = std::clamp(layer.weightBy.empty() ? layer.weight : parameter(layer.weightBy), 0.0f, 1.0f);
+        if (weight <= 0 || run.pose.translations.size() != pose.translations.size()) continue;
+        for (size_t i = 0; i < pose.translations.size(); i++) {
+            float share = weight * layerMasks[l][i];
+            if (share <= 0) continue;
+            if (layer.additive) {
+                // What the layer moves the node from where it rests, added to what is under it.
+                pose.translations[i] += (run.pose.translations[i] - rest.translations[i]) * share;
+                Quat turn = simd::normalize(run.pose.rotations[i] * simd::conjugate(rest.rotations[i]));
+                pose.rotations[i] = simd::normalize(simd::slerp(Quat(0, 0, 0, 1), turn, share) * pose.rotations[i]);
+            } else {
+                pose.translations[i] += (run.pose.translations[i] - pose.translations[i]) * share;
+                pose.scales[i] += (run.pose.scales[i] - pose.scales[i]) * share;
+                pose.rotations[i] = simd::slerp(pose.rotations[i], run.pose.rotations[i], share);
+            }
+        }
+    }
 }
 
 MOLTEN_COMPONENT(TwoBoneIK, MOLTEN_FIELD(bone).help("The end of the limb: the foot's or hand's node in the model"),
@@ -298,6 +430,8 @@ MOLTEN_COMPONENT(TwoBoneIK, MOLTEN_FIELD(bone).help("The end of the limb: the fo
 MOLTEN_COMPONENT(Animator, MOLTEN_FIELD(model).help("The .gltf or .glb file. Empty uses the file the entity's mesh came from"),
                  MOLTEN_FIELD(clip).help("Which of the model's animations. Empty plays the first"), MOLTEN_FIELD(speed).range(-4, 4), MOLTEN_FIELD(loops),
                  MOLTEN_FIELD(isPlaying), MOLTEN_FIELD(blendTime).range(0, 2).help("Seconds to ease from one clip into the next"),
-                 MOLTEN_FIELD(controller).help("A .animator file: states and transitions the game drives with parameters. With one, `clip` is not used"))
+                 MOLTEN_FIELD(controller).help("A .animator file: states and transitions the game drives with parameters. With one, `clip` is not used"),
+                 MOLTEN_FIELD(rootMotion).help("The entity goes where the animation walks it, instead of the model walking away from it"),
+                 MOLTEN_FIELD(rootBone).help("The bone that carries the body. Empty: the skeleton's first"))
 
 }  // namespace molten

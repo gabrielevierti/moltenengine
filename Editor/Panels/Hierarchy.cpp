@@ -1,8 +1,13 @@
 // The hierarchy: every entity of the scene as a tree, parents above their children.
 // Click to select (Cmd adds), drag one onto another to parent it, F2 to rename.
+#include "HierarchySearch.hpp"
 #include "Editor.hpp"
 #include "Kit/Effects.hpp"
 #include "Kit/Spline.hpp"
+#include "Kit/Layout.hpp"
+#include "Kit/Terrain.hpp"
+#include "Kit/Foliage.hpp"
+#include "Kit/CameraShots.hpp"
 #include "Panels/Widgets.hpp"
 
 #include <algorithm>
@@ -14,12 +19,6 @@
 namespace molten::editor {
 
 namespace {
-
-bool containsIgnoringCase(const std::string& text, const std::string& part) {
-    auto found = std::search(text.begin(), text.end(), part.begin(), part.end(),
-                             [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b)); });
-    return found != text.end();
-}
 
 class HierarchyPanel final : public Panel {
 public:
@@ -38,7 +37,9 @@ public:
         }
         ImGui::SameLine(0, 6);
         ImGui::SetNextItemWidth(-FLT_MIN);
-        ImGui::InputTextWithHint("##search", "Search", &filter_);
+        ImGui::InputTextWithHint("##search", "Search: a name, c:Light, tag:Enemy", &filter_);
+        ui::tooltip("A name; c: a component; tag: a tag; layer: a layer; prefab: a prefab's copies; is:off. "
+                    "Every word must hold; a word with - before it must not.");
         ImGui::PopStyleVar();
         ImGui::Dummy(ImVec2(0, 2));
 
@@ -53,12 +54,25 @@ public:
             }
         } else {
             // A search shows what matches as a flat list: the tree would hide it in closed branches.
+            std::vector<SearchWord> words = parseSearch(filter_);
+            std::vector<Entity> found;
             for (Entity entity : scene.entities()) {
-                if (containsIgnoringCase(scene.nameOf(entity), filter_)) drawRow(editor, entity, 0, false);
+                if (matchesSearch(editor.engine.scene, entity, scene.nameOf(entity), words)) found.push_back(entity);
             }
+            if (found.size() > 1) {
+                // All of them at once: then the Inspector changes them all together.
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6, 2));
+                if (ImGui::SmallButton(("Select all " + std::to_string(found.size())).c_str())) {
+                    scene.clearSelection();
+                    for (Entity entity : found) scene.addToSelection(entity);
+                }
+                ImGui::PopStyleVar();
+                ImGui::Dummy(ImVec2(0, 2));
+            }
+            for (Entity entity : found) drawRow(editor, entity, 0, false);
             if (visible_.empty()) {
                 ImGui::Dummy(ImVec2(0, 8));
-                ImGui::TextDisabled("  Nothing is called that.");
+                ImGui::TextDisabled("  Nothing found.");
             }
         }
 
@@ -596,10 +610,64 @@ void registerCreateEntries(EditorContext& editor) {
     add("3D Object/Sphere", Primitive::Sphere);
     add("3D Object/Cylinder", Primitive::Cylinder);
     add("3D Object/Plane", Primitive::Plane);
+    // Ground to shape with brushes: flat at first, its heights a file once it is shaped.
+    editor.registry.addCreateEntry(nullptr, "3D Object/Terrain", [](EditorContext& context) {
+        Scene& scene = context.engine.scene;
+        Entity entity = scene.create("Terrain");
+        scene.add(entity, Transform{});
+        scene.add(entity, kit::Terrain{});
+        scene.add(entity, MeshRenderer{});
+        scene.updateTransforms();
+        context.scene.markChanged();
+        context.scene.select(entity);
+        return entity;
+    });
     add("Light/Directional Light", Primitive::DirectionalLight);
     add("Light/Point Light", Primitive::PointLight);
     add("Light/Spot Light", Primitive::SpotLight);
     add("Camera", Primitive::Camera);
+    // Copies of a model painted on the ground: put the model in its Mesh Renderer, then paint.
+    editor.registry.addCreateEntry(nullptr, "3D Object/Foliage", [](EditorContext& context) {
+        Scene& scene = context.engine.scene;
+        Entity entity = scene.create("Foliage");
+        scene.add(entity, Transform{});
+        kit::Foliage foliage;
+        foliage.smallest = 0.25f;               // little cubes until it is given its own model
+        foliage.largest = 0.45f;
+        scene.add(entity, foliage);
+        MeshRenderer renderer;
+        renderer.mesh = context.engine.assets().cube();
+        scene.add(entity, renderer);
+        scene.updateTransforms();
+        context.scene.markChanged();
+        context.scene.select(entity);
+        return entity;
+    });
+    // A shot, where the Scene view looks from now: the Camera Director glides to it.
+    editor.registry.addCreateEntry(nullptr, "Camera Shot", [](EditorContext& context) {
+        Scene& scene = context.engine.scene;
+        Entity entity = scene.create("Camera Shot");
+        Transform transform;
+        transform.position = context.scene.cameraPosition;
+        transform.rotation = context.scene.cameraRotation();
+        scene.add(entity, transform);
+        scene.add(entity, kit::CameraShot{});
+        // The first shot gives the scene's camera a director, so that it films the shots.
+        bool hasDirector = false;
+        scene.each<kit::CameraDirector>([&](Entity, kit::CameraDirector&) { hasDirector = true; });
+        if (!hasDirector) {
+            scene.each<Camera>([&](Entity camera, Camera&) {
+                if (!hasDirector) {
+                    scene.add(camera, kit::CameraDirector{});
+                    hasDirector = true;
+                }
+            });
+        }
+        scene.updateTransforms();
+        context.scene.markChanged();
+        context.scene.select(entity);
+        return entity;
+    });
     // The game's interface: each piece an entity with one component, placed in the Game view.
     auto addInterface = [&editor](const char* path, const char* name, const char* component) {
         editor.registry.addCreateEntry(nullptr, path, [name, component](EditorContext& context) {
@@ -623,6 +691,37 @@ void registerCreateEntries(EditorContext& editor) {
     addInterface("UI/Bar", "Bar", "UIBar");
     addInterface("UI/Gauge", "Gauge", "UIGauge");
     addInterface("UI/Stick", "Stick", "TouchStick");
+    addInterface("UI/Slider", "Slider", "UISlider");
+    addInterface("UI/Layout", "Layout", "UILayout");
+    addInterface("UI/Text Field", "Text Field", "UITextField");
+    // A menu: a column that places its buttons, as wide as it, one under the other.
+    editor.registry.addCreateEntry(nullptr, "UI/Menu", [](EditorContext& context) {
+        Scene& scene = context.engine.scene;
+        Entity menu = scene.create("Menu");
+        scene.add(menu, Transform{});
+        kit::UILayout layout;
+        layout.size = Vec2{320, 0};
+        layout.fitsContent = true;
+        layout.stretches = true;
+        layout.color = Vec4{0.08f, 0.09f, 0.11f, 0.8f};
+        scene.add(menu, layout);
+        float y = 0;
+        for (const char* label : {"PLAY", "SETTINGS", "QUIT"}) {
+            Entity entity = scene.create(std::string("Button ") + label);
+            Transform transform;
+            transform.parent = menu;
+            scene.add(entity, transform);
+            kit::UIButton button;
+            button.label = label;
+            button.offset = Vec2{0, y += 60};               // their order, until the menu places them
+            scene.add(entity, button);
+        }
+        scene.updateTransforms();
+        context.scene.markChanged();
+        context.scene.select(menu);
+        ImGui::SetWindowFocus("Game");
+        return menu;
+    });
     // A round button for a thumb: a Button, made round and shown only on touch screens.
     editor.registry.addCreateEntry(nullptr, "UI/Round Button", [](EditorContext& context) {
         Scene& scene = context.engine.scene;

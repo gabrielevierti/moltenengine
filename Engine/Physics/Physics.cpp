@@ -536,6 +536,19 @@ void Physics::solveJoints(Scene& scene, float dt) {
             Vec3 across = relative - axisA * simd::dot(relative, axisA);
             wanted = simd::cross(axisA, axisB) * -pull - across;
             turns = true;
+        } else if (joint.kind == "ball" && joint.swingLimit > 0) {
+            // Free within the limit; past it, brought back and kept from going further.
+            Quat error = simd::normalize(b.rotation * joint.restRelative * simd::conjugate(a.rotation));
+            Vec3 axis = error.vector.xyz * (error.vector.w < 0 ? -1.0f : 1.0f);
+            float half = simd::length(axis);
+            float angle = 2 * std::asin(std::min(half, 1.0f));
+            float limit = radians(joint.swingLimit);
+            if (half > 1e-6f && angle > limit) {
+                axis /= half;
+                float going = simd::dot(relative, axis);
+                wanted = axis * ((angle - limit) * -pull - std::max(going, 0.0f));
+                turns = true;
+            }
         } else if (joint.kind == "fixed") {
             Quat error = simd::normalize(b.rotation * joint.restRelative * simd::conjugate(a.rotation));
             Vec3 turn = error.vector.xyz * (error.vector.w < 0 ? -2.0f : 2.0f);
@@ -560,6 +573,7 @@ MOLTEN_COMPONENT(Joint, MOLTEN_FIELD(connectedTo).help("The name of the other en
                  MOLTEN_FIELD(kind).choices({"ball", "hinge", "fixed", "distance"}), MOLTEN_FIELD(anchor).help("Where on this body, in its own axes"),
                  MOLTEN_FIELD(axis).help("Hinge: the axis it turns about"), MOLTEN_FIELD(length).help("Distance: 0 keeps the length there is at the start"),
                  MOLTEN_FIELD(isRope).help("Distance: only pulls, as a rope. Off: a rod, which also pushes"),
-                 MOLTEN_FIELD(breakForce).help("Above zero: gives way when pulled harder than this, in newtons"))
+                 MOLTEN_FIELD(breakForce).help("Above zero: gives way when pulled harder than this, in newtons"),
+                 MOLTEN_FIELD(swingLimit).range(0, 180).help("Ball: the most it bends from how it started, in degrees. 0: as far as it likes"))
 
 }  // namespace molten

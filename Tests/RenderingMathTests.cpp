@@ -19,10 +19,10 @@ TEST(gpu_structs_have_the_sizes_the_shaders_expect) {
     // Sizes and offsets under the C layout rules, which the Metal Shading Language shares
     // for these types (a float3 is 16 bytes, aligned to 16). The Swift tests check the
     // same numbers. If a field is added to ShaderTypes.h, update them on purpose.
-    CHECK(sizeof(gpu::PassUniforms) == 368);
+    CHECK(sizeof(gpu::PassUniforms) == 400);
     CHECK(sizeof(gpu::InstanceData) == 144);
     CHECK(sizeof(gpu::LightData) == 96);
-    CHECK(sizeof(gpu::MaterialUniforms) == 208);
+    CHECK(sizeof(gpu::MaterialUniforms) == 224);
     CHECK(offsetof(gpu::MaterialUniforms, customShader) == 72);
     CHECK(offsetof(gpu::MaterialUniforms, custom) == 80);
     CHECK(offsetof(gpu::MaterialUniforms, water) == 64);
@@ -33,7 +33,7 @@ TEST(gpu_structs_have_the_sizes_the_shaders_expect) {
     CHECK(offsetof(gpu::PassUniforms, time) == 336);
     CHECK(offsetof(gpu::LightData, type) == 48);
     CHECK(offsetof(gpu::FrameUniforms, cascadeSplits) == 256);
-    CHECK(sizeof(gpu::FrameUniforms) == 544);
+    CHECK(sizeof(gpu::FrameUniforms) == 560);
     CHECK(offsetof(gpu::FrameUniforms, fogShaftSteps) == 528);
     CHECK(offsetof(gpu::FrameUniforms, volumetricClouds) == 532);
     CHECK(offsetof(gpu::FrameUniforms, fogHeightFalloff) == 508);

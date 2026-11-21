@@ -53,6 +53,10 @@ struct GizmoSettings {
     float moveSnap = 0.5f;              // world units
     float rotateSnap = 15.0f;           // degrees
     float scaleSnap = 0.1f;
+    /// What moving snaps to: steps of moveSnap (with Snap on), the surface under the mouse, or
+    /// the nearest corner of another model. Holding V while moving snaps to corners too.
+    enum class SnapTo { Steps, Surfaces, Corners } snapTo = SnapTo::Steps;
+    bool standsOnSurface = true;        // snapped to a surface: turned to stand on it, too
     bool showGrid = true;
     // What the scene view draws over the scene, kind by kind (the Snap menu lists them).
     bool showLights = true;             // their icon, and which way they shine

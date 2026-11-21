@@ -46,9 +46,29 @@ struct EditorOnly {};
 /// name, its place, the prefab's file); what the prefab holds is put under it each time the
 /// scene is read, so that a change to the prefab shows in every scene that has it. Prefabs
 /// may hold such copies of other prefabs.
+/// A value of a prefab's copy that is not the prefab's: changed on this copy only, kept in the
+/// scene as `override "Crate/Lid" MeshRenderer material "Materials/Red.material"`. The path is
+/// of names below the copy (its prefab's root first); the value as a variant's `set` takes it.
+struct PrefabOverride {
+    std::string path, component, field, value;
+};
+
 struct PrefabInstance {
     std::string prefab;                 // "Prefabs/Wheel.prefab"
+    std::vector<PrefabOverride> overrides;
+    /// Sets (or replaces) one; false if nothing changed.
+    bool setOverride(const PrefabOverride& change);
+    bool removeOverride(const std::string& path, const std::string& component, const std::string& field);
+    const PrefabOverride* findOverride(const std::string& path, const std::string& component, const std::string& field) const;
 };
+
+/// Changes one value of an entity found by its path below `root`, as variants and prefab
+/// overrides do. False if there is no such entity, component or field.
+bool applyPrefabValue(Scene& scene, Entity root, const PrefabOverride& change, const struct SceneAssets& assets);
+/// The entity found by a path of names below `root` ("Body/Hat"; "" is root itself); invalid if none.
+Entity entityAtPath(Scene& scene, Entity root, const std::string& path);
+/// The path of names from `root` down to `entity` ("" for root itself); empty and false if it is not below it.
+bool pathBelow(const Scene& scene, Entity root, Entity entity, std::string& path);
 /// Marks what a PrefabInstance put under itself: it comes from the prefab, and is not written.
 struct FromPrefab {};
 

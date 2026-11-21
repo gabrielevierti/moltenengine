@@ -25,6 +25,7 @@ enum class BlendMode : uint8_t {
     Opaque,         // the new color replaces the old one
     AlphaBlend,     // new * alpha + old * (1 - alpha)
     Additive,       // new * alpha + old
+    Multiply,       // new * old: darkens what is there (decals of dirt)
 };
 
 struct PipelineDescription {

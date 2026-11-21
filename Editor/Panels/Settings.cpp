@@ -63,8 +63,16 @@ private:
             }
         }
         if (ui::section("Sky")) {
-            changed |= ui::color("Zenith", settings.sky.zenithColor, true);
-            changed |= ui::color("Horizon", settings.sky.horizonColor, true);
+            changed |= ui::checkbox("From the Air", settings.sky.isPhysical);
+            ui::tooltip("The sky's colors worked out from how sunlight scatters in the air: blue by day, gold and red at sunset, dark at night, from the sun's height. "
+                        "Off: the three colors below");
+            if (settings.sky.isPhysical) changed |= ui::sliderFloat("Haze", settings.sky.haze, 0.0f, 1.0f);
+            changed |= ui::sliderFloat("Stars", settings.sky.stars, 0.0f, 3.0f);
+            ui::tooltip("At night, when the sun is down: 0 none, 1 a clear night far from any town");
+            if (!settings.sky.isPhysical) {
+                changed |= ui::color("Zenith", settings.sky.zenithColor, true);
+                changed |= ui::color("Horizon", settings.sky.horizonColor, true);
+            }
             changed |= ui::color("Ground", settings.sky.groundColor, true);
             changed |= ui::dragFloat("Brightness", settings.sky.intensity, 0.01f, 0.0f, 100.0f);
             changed |= ui::dragFloat("Light from the Sky", settings.environmentIntensity, 0.01f, 0.0f, 10.0f);
@@ -249,6 +257,36 @@ public:
             changed |= ui::sliderFloat("Lens Distortion", settings.lensDistortion, 0.0f, 1.0f);
             changed |= ui::dragFloat("Color Fringes", settings.chromaticAberration, 0.0005f, 0.0f, 0.1f, "%.4f");
             changed |= ui::dragFloat("Film Grain", settings.filmGrain, 0.001f, 0.0f, 0.5f);
+        }
+        if (ui::section("Exposure and Color")) {
+            changed |= ui::checkbox("Adapts", settings.autoExposure);
+            ui::tooltip("The exposure follows how bright the scene is, as an eye does: brighter in a tunnel, darker in the sun");
+            if (settings.autoExposure) {
+                changed |= ui::dragFloat("Compensation", settings.exposureCompensation, 0.01f, -6.0f, 6.0f, "%.2f stops");
+                changed |= ui::dragFloat("Speed", settings.exposureAdaptSpeed, 0.01f, 0.05f, 20.0f);
+                changed |= ui::dragFloat("Darkest", settings.darkestExposure, 0.01f, 0.01f, 10.0f);
+                changed |= ui::dragFloat("Brightest", settings.brightestExposure, 0.05f, 0.1f, 100.0f);
+            }
+            std::string grading = settings.colorGrading;
+            if (ImGui::InputTextWithHint("Grading Table", "Grading/Neutral 32.png", &grading, ImGuiInputTextFlags_EnterReturnsTrue)) {
+                settings.colorGrading = grading;
+                changed = true;
+            }
+            ui::tooltip("A picture in Assets of 32 squares of 32 pixels side by side (red across, green down, blue square to square). "
+                        "Assets/Grading/Neutral 32.png changes nothing: grade a copy of it in a photo editor. Empty: none");
+            if (!settings.colorGrading.empty()) changed |= ui::sliderFloat("Grading Amount", settings.colorGradingAmount, 0.0f, 1.0f);
+        }
+        if (ui::section("Depth of Field and Motion Blur")) {
+            changed |= ui::checkbox("Depth of Field", settings.depthOfField);
+            if (settings.depthOfField) {
+                changed |= ui::dragFloat("Focus Distance", settings.focusDistance, 0.05f, 0.1f, 1000.0f, "%.2f m");
+                changed |= ui::dragFloat("In Focus", settings.focusRange, 0.05f, 0.0f, 500.0f, "%.2f m");
+                ui::tooltip("How many meters around the focus distance stay sharp");
+                changed |= ui::sliderFloat("Blur", settings.focusBlur, 0.0f, 32.0f);
+            }
+            changed |= ui::checkbox("Motion Blur", settings.motionBlur);
+            ui::tooltip("What streaks past as the camera turns or speeds along");
+            if (settings.motionBlur) changed |= ui::sliderFloat("Shutter", settings.motionBlurAmount, 0.0f, 1.0f);
         }
         if (ui::section("Quality")) {
             static const int sampleCounts[] = {1, 2, 4};

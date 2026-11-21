@@ -2,6 +2,8 @@
 // The editor as the engine sees it: a Game whose "gameplay" is editing the scene it shows.
 #pragma once
 
+#include "Shortcuts.hpp"
+#include "Assets/FileChanges.hpp"
 #include "CommandPalette.hpp"
 #include "DeviceExport.hpp"
 #include "ProjectWindow.hpp"
@@ -57,6 +59,10 @@ private:
     void drawUnsavedChangesDialog();
     void drawAboutDialog();
     void drawCommandPalette();
+    void drawSettingsWindow();
+    /// The action's keys were pressed this frame (see Shortcuts).
+    bool isPressed(const std::string& action);
+    void saveEditorSettings();
     std::vector<PaletteCommand> paletteCommands();
     void drawBuildWindow();
     void updateTitle();
@@ -81,6 +87,10 @@ private:
     bool needsDefaultLayout_ = false;
     bool showsAbout_ = false;
     CommandPalette palette_;            // Cmd+K
+    Shortcuts shortcuts_;               // changed in Edit > Editor Settings
+    bool showsSettings_ = false;
+    std::string recording_;             // the action whose new keys are being pressed
+    std::string settingsFile_;
     bool showsBuild_ = false;           // the Build and Export window
     int buildPlatform_ = 0;             // 0 Mac, 1 iPhone and iPad
     bool lastBuildFailed_ = false;
@@ -90,6 +100,7 @@ private:
     bool exportsForOtherMacs_ = false;  // Developer ID and notarization after a Mac export
     bool exportsDevelopment_ = false;   // a development build: the developer keys on in the exported game
     double nextAssetScan_ = 0;
+    FileChanges assetChanges_;          // pictures, models, materials written by other programs: read again
     std::string shownTitle_;
 
     // The project list's "new project" form.

@@ -34,6 +34,7 @@ void Renderer::bindMaterial(MTL::RenderCommandEncoder* encoder, const Material& 
     uniforms.uvScale = material.uvScale;
     uniforms.water = material.isWater ? std::max(material.waveScale, 0.01f) : 0.0f;
     uniforms.waveHeight = material.waveHeight;
+    uniforms.sway = std::max(material.sway, 0.0f);
     if (!material.shader.empty()) {
         // Its own shader: which one, and its properties in the order the shader declares them.
         int place = surfaceShaders_.use(material.shader);
@@ -48,6 +49,7 @@ void Renderer::bindMaterial(MTL::RenderCommandEncoder* encoder, const Material& 
     }
     // A few dozen bytes: Metal copies them into the command buffer, no buffer of our own needed.
     encoder->setFragmentBytes(&uniforms, sizeof(uniforms), gpu::MMBufferMaterial);
+    encoder->setVertexBytes(&uniforms, sizeof(uniforms), gpu::MMBufferMaterial);      // the wind sways it in the vertex stage
 
     // A material without a map gets a one-pixel stand-in, so the shader needs no branches.
     auto textureOr = [](const std::shared_ptr<Texture>& texture, const std::shared_ptr<Texture>& fallback) {
@@ -98,7 +100,8 @@ void Renderer::drawBatches(MTL::RenderCommandEncoder* encoder, const std::vector
 
         encoder->setRenderPipelineState(pipeline);
         encoder->setCullMode(material.isDoubleSided ? MTL::CullModeNone : MTL::CullModeBack);
-        if (batch.material != boundMaterial && (pass == MeshPass::Forward || isMasked)) {
+        // vertex_mesh reads the material too (how the wind sways it): every pass that uses it binds it.
+        if (batch.material != boundMaterial && (pass == MeshPass::Forward || pass == MeshPass::Prepass || isMasked)) {
             bindMaterial(encoder, material);
             boundMaterial = batch.material;
         }
@@ -161,8 +164,7 @@ void Renderer::renderShadows(MTL::CommandBuffer* commandBuffer, const std::vecto
 
 // ---------------------------------------------------------------- 2 and 3. ambient occlusion
 
-void Renderer::renderOcclusion(MTL::CommandBuffer* commandBuffer, const std::vector<Batch>& opaque, const View& view,
-                               const FrameAllocator::Allocation& passUniforms) {
+void Renderer::renderPrepass(MTL::CommandBuffer* commandBuffer, const std::vector<Batch>& opaque, const FrameAllocator::Allocation& passUniforms) {
     // Depth and view-space normals of everything opaque, without multisampling.
     auto pass = NS::TransferPtr(MTL::RenderPassDescriptor::alloc()->init());
     MTL::RenderPassColorAttachmentDescriptor* color = pass->colorAttachments()->object(0);
@@ -185,7 +187,12 @@ void Renderer::renderOcclusion(MTL::CommandBuffer* commandBuffer, const std::vec
     encoder->setFragmentSamplerState(device_.materialSampler(), gpu::MMSamplerMaterial);
     drawBatches(encoder, opaque, MeshPass::Prepass, MTL::PixelFormatRGBA8Unorm, 1);
     encoder->endEncoding();
+}
 
+void Renderer::renderOcclusion(MTL::CommandBuffer* commandBuffer, const std::vector<Batch>& opaque, const View& view,
+                               const FrameAllocator::Allocation& passUniforms) {
+    (void)opaque;
+    (void)passUniforms;
     gpu::AmbientOcclusionUniforms uniforms{};
     uniforms.projection = view.projection;
     uniforms.inverseProjection = simd::inverse(view.projection);
@@ -259,6 +266,7 @@ void Renderer::renderScene(MTL::CommandBuffer* commandBuffer, Scene& scene, cons
     encoder->setDepthStencilState(device_.depthWrite());
     drawBatches(encoder, opaque, MeshPass::Forward, kSceneFormat, targetSamples_);
     encoder->popDebugGroup();
+    if (hasDecals_ && prepassDepth_) drawDecals(encoder, scene, view);
 
     // The sky, only where nothing was drawn. From here on nothing writes depth.
     encoder->setDepthStencilState(device_.depthReadOnly());
@@ -374,6 +382,96 @@ void Renderer::renderBloom(MTL::CommandBuffer* commandBuffer) {
     }
 }
 
+// ---------------------------------------------------------------- decals
+
+void Renderer::drawDecals(MTL::RenderCommandEncoder* encoder, Scene& scene, const View& view) {
+    (void)view;
+    PipelineDescription description;
+    description.vertexFunction = "vertex_decal";
+    description.fragmentFunction = "fragment_decal";
+    description.colorFormat = kSceneFormat;
+    description.depthFormat = kDepthFormat;
+    description.sampleCount = targetSamples_;
+    description.blend = BlendMode::AlphaBlend;
+    PipelineDescription darkening = description;
+    darkening.blend = BlendMode::Multiply;
+    encoder->pushDebugGroup(label("Decals"));
+    // Their boxes' far sides, with no depth test: drawn wherever the box is on screen, even from inside it.
+    encoder->setDepthStencilState(device_.depthOff());
+    encoder->setCullMode(MTL::CullModeFront);
+    encoder->setFragmentTexture(prepassDepth_.get(), 0);
+    scene.each<Decal, Transform>([&](Entity, Decal& decal, Transform& transform) {
+        if (!transform.isActiveInHierarchy || decal.picture.empty() || decal.opacity <= 0) return;
+        if (decal.loadedName != decal.picture) {
+            decal.loadedName = decal.picture;
+            decal.loaded = loadPicture ? loadPicture(decal.picture, TextureFormat::RGBA8_sRGB) : nullptr;
+        }
+        MTL::RenderPipelineState* pipeline = shaders_.pipeline(decal.darkens ? darkening : description);
+        if (!pipeline) return;
+        gpu::DecalUniforms uniforms{};
+        uniforms.model = transform.world;
+        uniforms.inverseModel = simd::inverse(transform.world);
+        uniforms.color = Vec4{decal.color.x, decal.color.y, decal.color.z, std::clamp(decal.opacity, 0.0f, 1.0f)};
+        uniforms.darkens = decal.darkens ? 1.0f : 0.0f;
+        encoder->setRenderPipelineState(pipeline);
+        encoder->setVertexBytes(&uniforms, sizeof(uniforms), gpu::MMBufferMaterial);
+        encoder->setFragmentBytes(&uniforms, sizeof(uniforms), gpu::MMBufferMaterial);
+        encoder->setFragmentTexture((decal.loaded ? decal.loaded : white_)->handle(), 1);
+        encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0), NS::UInteger(36));
+        stats.drawCalls++;
+    });
+    encoder->setCullMode(MTL::CullModeBack);
+    encoder->setDepthStencilState(device_.depthWrite());
+    encoder->popDebugGroup();
+}
+
+// ---------------------------------------------------------------- effects before the bloom
+
+void Renderer::renderEffects(MTL::CommandBuffer* commandBuffer, const View& view, float deltaTime) {
+    gpu::EffectUniforms uniforms{};
+    uniforms.inverseViewProjection = simd::inverse(view.viewProjection);
+    uniforms.previousViewProjection = hasPreviousView_ ? previousViewProjection_ : view.viewProjection;
+    uniforms.texelSize = texelSize(sceneColor_.get());
+    uniforms.focusDistance = std::max(settings.focusDistance, 0.01f);
+    uniforms.focusRange = std::max(settings.focusRange, 0.0f);
+    uniforms.blurSize = std::clamp(settings.focusBlur, 0.0f, 32.0f);
+    uniforms.motionBlur = std::clamp(settings.motionBlurAmount, 0.0f, 1.0f);
+    uniforms.deltaTime = deltaTime;
+    uniforms.adaptSpeed = std::max(settings.exposureAdaptSpeed, 0.01f);
+    uniforms.darkestExposure = std::max(settings.darkestExposure, 0.001f);
+    uniforms.brightestExposure = std::max(settings.brightestExposure, uniforms.darkestExposure);
+    uniforms.pictureHeight = float(sceneColor_->height());
+    previousViewProjection_ = view.viewProjection;
+    bool hadPrevious = hasPreviousView_;
+    hasPreviousView_ = true;
+
+    // Each effect reads the scene's picture and writes the other one; then they change places.
+    auto apply = [&](const char* function) {
+        drawFullscreen(commandBuffer, postColor_.get(), function, BlendMode::Opaque, false, &uniforms, sizeof(uniforms), sceneColor_.get(),
+                       prepassDepth_.get(), device_.pointClampSampler());
+        std::swap(sceneColor_, postColor_);
+    };
+    if (prepassDepth_ && postColor_) {
+        if (settings.motionBlur && hadPrevious && uniforms.motionBlur > 0) apply("fragment_motion_blur");
+        if (settings.depthOfField && uniforms.blurSize > 0) apply("fragment_depth_of_field");
+    }
+
+    // How bright the scene is, for the exposure to adapt to: its brightness in a small picture,
+    // averaged down to one pixel, then the exposure eased toward what that pixel asks.
+    if (settings.autoExposure && luminance_ && adapted_[0] && adapted_[1]) {
+        drawFullscreen(commandBuffer, luminance_.get(), "fragment_luminance", BlendMode::Opaque, false, &uniforms, sizeof(uniforms),
+                       sceneColor_.get(), nullptr, nullptr);
+        MTL::BlitCommandEncoder* blit = commandBuffer->blitCommandEncoder();
+        blit->generateMipmaps(luminance_.get());
+        blit->endEncoding();
+        int next = 1 - adaptIndex_;
+        if (!hadPrevious) uniforms.deltaTime = 1000;                // the first picture: at once
+        drawFullscreen(commandBuffer, adapted_[next].get(), "fragment_adapt_exposure", BlendMode::Opaque, false, &uniforms, sizeof(uniforms),
+                       luminance_.get(), adapted_[adaptIndex_].get(), nullptr);
+        adaptIndex_ = next;
+    }
+}
+
 // ---------------------------------------------------------------- 6. the final pass
 
 void Renderer::renderFinal(MTL::CommandBuffer* commandBuffer, const Canvas& canvas, const RenderTarget& target, bool withOverlay) {
@@ -388,11 +486,28 @@ void Renderer::renderFinal(MTL::CommandBuffer* commandBuffer, const Canvas& canv
     uniforms.grain = settings.filmGrain;
     uniforms.interference = settings.interference;
     uniforms.time = float(time_);
+    // The color grading table, read again when another is named.
+    if (settings.colorGrading != lutName_) {
+        lutName_ = settings.colorGrading;
+        lut_ = !lutName_.empty() && loadPicture ? loadPicture(lutName_, TextureFormat::RGBA8) : nullptr;
+    }
+    MTL::Texture* lut = lut_ ? lut_->handle() : nullptr;
+    if (lut && lut->height() >= 2 && lut->width() == lut->height() * lut->height()) {
+        uniforms.lutSize = float(lut->height());
+        uniforms.lutAmount = std::clamp(settings.colorGradingAmount, 0.0f, 1.0f);
+    } else {
+        lut = nullptr;
+    }
+    MTL::Texture* adapted = settings.autoExposure && adapted_[adaptIndex_] ? adapted_[adaptIndex_].get() : nullptr;
+    uniforms.autoExposure = adapted ? 1u : 0u;
+    uniforms.exposureCompensation = settings.exposureCompensation;
 
     // Drawn smaller (renderScale): tone mapped at that size, then made the target's size by
     // MetalFX, which keeps edges and detail sharp where plain stretching blurs them.
     Rect area = sceneRect(target.texture);
     MTL::Texture* upscaled = nullptr;
+    upscaleLUT_ = lut;
+    upscaleAdapted_ = adapted;
     if (settings.metalFXUpscaling && sceneColor_ && int(sceneColor_->width()) < area.width) {
         upscaled = upscaleWithMetalFX(commandBuffer, &uniforms, sizeof(uniforms), hasBloom, area.width, area.height);
     }
@@ -427,6 +542,8 @@ void Renderer::renderFinal(MTL::CommandBuffer* commandBuffer, const Canvas& canv
         encoder->setFragmentBytes(&uniforms, sizeof(uniforms), gpu::MMBufferPass);
         encoder->setFragmentTexture(upscaled ? upscaled : sceneColor_.get(), 0);
         encoder->setFragmentTexture(hasBloom ? bloom_[0].get() : white_->handle(), 1);
+        encoder->setFragmentTexture(lut ? lut : white_->handle(), 2);
+        encoder->setFragmentTexture(adapted ? adapted : white_->handle(), 3);
         encoder->setFragmentSamplerState(device_.linearClampSampler(), gpu::MMSamplerLinearClamp);
         encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0), NS::UInteger(3));
         stats.drawCalls++;
@@ -499,6 +616,8 @@ MTL::Texture* Renderer::upscaleWithMetalFX(MTL::CommandBuffer* commandBuffer, co
     encoder->setFragmentBytes(postUniforms, uniformsSize, gpu::MMBufferPass);
     encoder->setFragmentTexture(sceneColor_.get(), 0);
     encoder->setFragmentTexture(hasBloom ? bloom_[0].get() : white_->handle(), 1);
+    encoder->setFragmentTexture(upscaleLUT_ ? upscaleLUT_ : white_->handle(), 2);
+    encoder->setFragmentTexture(upscaleAdapted_ ? upscaleAdapted_ : white_->handle(), 3);
     encoder->setFragmentSamplerState(device_.linearClampSampler(), gpu::MMSamplerLinearClamp);
     encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0), NS::UInteger(3));
     encoder->endEncoding();
@@ -577,7 +696,7 @@ void Renderer::drawCanvas(MTL::RenderCommandEncoder* encoder, const Canvas& canv
 
 void Renderer::drawFullscreen(MTL::CommandBuffer* commandBuffer, MTL::Texture* target, const char* fragmentFunction,
                               BlendMode blend, bool keepContents, const void* uniforms, size_t uniformsSize,
-                              MTL::Texture* source0, MTL::Texture* source1, MTL::SamplerState* sampler0) {
+                              MTL::Texture* source0, MTL::Texture* source1, MTL::SamplerState* sampler0, MTL::Texture* source2) {
     PipelineDescription description;
     description.vertexFunction = "vertex_fullscreen";
     description.fragmentFunction = fragmentFunction;
@@ -598,6 +717,7 @@ void Renderer::drawFullscreen(MTL::CommandBuffer* commandBuffer, MTL::Texture* t
     if (uniforms) encoder->setFragmentBytes(uniforms, NS::UInteger(uniformsSize), gpu::MMBufferPass);
     if (source0) encoder->setFragmentTexture(source0, 0);
     if (source1) encoder->setFragmentTexture(source1, 1);
+    if (source2) encoder->setFragmentTexture(source2, 2);
     if (sampler0) encoder->setFragmentSamplerState(sampler0, 0);
     encoder->setFragmentSamplerState(device_.linearClampSampler(), gpu::MMSamplerLinearClamp);
     encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0), NS::UInteger(3));

@@ -220,6 +220,12 @@ MTL::RenderPipelineState* ShaderLibrary::pipeline(const PipelineDescription& des
             bool additive = description.blend == BlendMode::Additive;
             color->setDestinationRGBBlendFactor(additive ? MTL::BlendFactorOne : MTL::BlendFactorOneMinusSourceAlpha);
             color->setDestinationAlphaBlendFactor(additive ? MTL::BlendFactorOne : MTL::BlendFactorOneMinusSourceAlpha);
+            if (description.blend == BlendMode::Multiply) {
+                color->setSourceRGBBlendFactor(MTL::BlendFactorDestinationColor);
+                color->setDestinationRGBBlendFactor(MTL::BlendFactorZero);
+                color->setSourceAlphaBlendFactor(MTL::BlendFactorZero);
+                color->setDestinationAlphaBlendFactor(MTL::BlendFactorOne);
+            }
         }
     }
     descriptor->setDepthAttachmentPixelFormat(description.depthFormat);

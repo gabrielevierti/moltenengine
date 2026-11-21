@@ -93,6 +93,8 @@ public:
     void beginArea(Vec2 origin, Vec2 size, float scale = 1.0f);
     void endArea();
     void setFont(const FontMetrics* metrics, const Texture* atlas);
+    const FontMetrics* font() const { return font_; }
+    const Texture* fontAtlas() const { return fontAtlas_; }
     const std::vector<gpu::CanvasVertex>& vertices() const { return vertices_; }
     const std::vector<Batch>& batches() const { return batches_; }
     /// The distance-field spread of the current font, which the text shader needs.

@@ -3,6 +3,7 @@
 // bend, cut and save, a file of text to read.
 #include "Editor.hpp"
 #include "Assets/ImportSettings.hpp"
+#include "Assets/AssetDependencies.hpp"
 #include "Audio/AudioEdit.hpp"
 #include "Rendering/Particles.hpp"
 #include "Assets/Gltf.hpp"
@@ -65,6 +66,7 @@ public:
         const AssetInfo* asset = editor.selectedAsset.empty() ? nullptr : editor.assets.find(editor.selectedAsset);
         if (!asset || asset->isFolder()) {
             ImGui::TextDisabled("Click an asset in the Explorer to see it here.");
+            drawUnused(editor);
             return;
         }
         // Opened when it is chosen, and again when its file is saved by another program: a
@@ -85,6 +87,7 @@ public:
         ImGui::SameLine();
         if (ImGui::SmallButton("Finder")) platform::revealInFinder(editor.assets.absolutePath(asset->path));
         ImGui::Separator();
+        drawDependencies(editor, *asset);
         drawImportSettings(editor, *asset);
 
         std::string extension = loweredExtension(asset->path);
@@ -99,6 +102,73 @@ public:
     }
 
 private:
+    // ---------------------------------------------------------------- what uses what
+
+    /// Read again when the project's files have changed, at most every two seconds.
+    const AssetDependencies& dependencies(EditorContext& editor) {
+        uint64_t signature = editor.assets.assets().size();
+        for (const AssetInfo& asset : editor.assets.assets()) signature = signature * 1099511628211ull + uint64_t(asset.modified) + std::hash<std::string>{}(asset.path);
+        double now = ImGui::GetTime();
+        if (signature != dependencySignature_ && now - dependenciesRead_ > 2.0) {
+            std::vector<std::string> files;
+            for (const AssetInfo& asset : editor.assets.assets()) {
+                if (!asset.isFolder()) files.push_back(asset.path);
+            }
+            dependencies_.build(editor.assets.absolutePath(""), files);
+            dependencySignature_ = signature;
+            dependenciesRead_ = now;
+        }
+        return dependencies_;
+    }
+
+    void listAssets(EditorContext& editor, const std::vector<std::string>& paths) {
+        for (const std::string& path : paths) {
+            if (ImGui::Selectable(path.c_str(), false)) {
+                editor.selectedAsset = path;
+                editor.currentFolder = std::filesystem::path(path).parent_path().generic_string();
+            }
+        }
+    }
+
+    void drawDependencies(EditorContext& editor, const AssetInfo& asset) {
+        const AssetDependencies& found = dependencies(editor);
+        const std::vector<std::string>& users = found.usedBy(asset.path);
+        const std::vector<std::string>& uses = found.uses(asset.path);
+        char title[96];
+        std::snprintf(title, sizeof(title), "Used by %zu, uses %zu###dependencies", users.size(), uses.size());
+        if (!ImGui::CollapsingHeader(title)) return;
+        if (users.empty()) ImGui::TextDisabled("Nothing names it: a scene, a material or a script.");
+        else listAssets(editor, users);
+        if (!uses.empty()) {
+            ImGui::SeparatorText("It uses");
+            listAssets(editor, uses);
+        }
+        ImGui::Spacing();
+    }
+
+    void drawUnused(EditorContext& editor) {
+        if (!editor.hasProject) return;
+        ImGui::Spacing();
+        if (ImGui::Button("Find Assets Nothing Uses")) {
+            unused_ = dependencies(editor).unused();
+            hasLookedForUnused_ = true;
+        }
+        if (!hasLookedForUnused_) return;
+        if (unused_.empty()) {
+            ImGui::TextDisabled("Every picture, model, sound and material is used.");
+            return;
+        }
+        ImGui::TextWrapped("No scene, prefab, material or script names these. Code that builds a name from pieces "
+                           "(\"engine_\" + rpm + \".wav\") cannot be read: look before deleting.");
+        listAssets(editor, unused_);
+    }
+
+    AssetDependencies dependencies_;
+    uint64_t dependencySignature_ = 0;
+    double dependenciesRead_ = -100;
+    std::vector<std::string> unused_;
+    bool hasLookedForUnused_ = false;
+
     void open(EditorContext& editor, const AssetInfo& asset) {
         stop(editor);
         shown_ = asset.path;

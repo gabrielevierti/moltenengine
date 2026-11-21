@@ -37,6 +37,8 @@ struct Play {
         isLoaded = world.loadSceneNow("Scenes/Main.scene");
         // Straight into the race: the title screen waits for a player the tests do not have.
         if (!keepsTitle) setField("GameMenu", "showsTitle", "0");
+        // Alone on the track, unless a test races (the preference "mode" 0): no lights to wait for.
+        world.setPreference("mode", 1);
     }
     explicit Play(const char* name, bool withTitle) : keepsTitle(withTitle) {
         script::registerStandardNodes();
@@ -44,6 +46,7 @@ struct Play {
         world.assetRoot = templateAssets(name);
         isLoaded = world.loadSceneNow("Scenes/Main.scene");
         if (!keepsTitle) setField("GameMenu", "showsTitle", "0");
+        world.setPreference("mode", 1);
     }
     bool keepsTitle = false;
     /// A field of every component of a type the game's scripts declare (the tests do not know their types).
@@ -1186,7 +1189,10 @@ TEST(rain_wets_the_road_and_the_tyres_grip_less) {
         play.world.setPreference("startCompound", compound);
         play.frames(20);
         float grip = 0;
-        play.world.scene.each<kit::Wheel>([&](Entity, kit::Wheel& wheel) { grip += wheel.grip; });
+        Entity car = play.world.find("Car");
+        play.world.scene.each<kit::Wheel>([&](Entity entity, kit::Wheel& wheel) {
+            if (kit::vehicleOf(play.world.scene, entity) == car) grip += wheel.grip;            // the player's own car's
+        });
         return std::make_pair(grip, play.world.value("wetness"));
     };
     auto [dry, dryWet] = gripIn(0, 1);
@@ -1213,6 +1219,8 @@ TEST(the_game_opens_on_its_title_and_pauses) {
         return group && group->isActiveInHierarchy;
     };
     CHECK(isShown("Title Screen") && !isShown("Interface") && play.world.time.timeScale == 0);
+    // The menu finds its buttons by name: "Race" must be the title's button and nothing else.
+    CHECK(play.world.scene.get<kit::UIButton>(play.world.find("Race")) != nullptr);
     play.world.input.handleKey(Key::Enter, true);
     play.frames(1);
     play.world.input.handleKey(Key::Enter, false);
@@ -1253,6 +1261,183 @@ TEST(preferences_are_kept_from_one_game_to_the_next) {
     CHECK(none.preference("a") == 3);
 }
 
+TEST(the_race_starts_when_five_lights_go_out) {
+    if (!hasScripts({"RaceDirector", "RacerAI"})) return;
+    Play play("Driving");
+    if (!play.world.find("Rival 1").isValid()) return;
+    play.world.setPreference("mode", 0);
+    play.world.input.handleKey(Key::W, true);                       // the player is on the throttle all the time
+    play.frames(60 * 3 + 30);
+    CHECK(play.world.value("startLights") == 3 && play.world.value("raceStarted") == 0);
+    CHECK(play.world.value("cars") == 5 && play.world.value("isRacing") == 1);
+    const kit::VehicleBody* car = play.world.scene.get<kit::VehicleBody>(play.world.find("Car"));
+    const kit::VehicleBody* rival = play.world.scene.get<kit::VehicleBody>(play.world.find("Rival 1"));
+    CHECK(car && rival && std::abs(car->speed()) < 0.3f && std::abs(rival->speed()) < 0.3f);    // held on the grid
+    // The player is on the last place of the grid, behind the four.
+    CHECK(car && rival && car->body.position.x < rival->body.position.x - 15);
+    play.frames(60 * 4);                                            // all five, and at most two seconds more
+    CHECK(play.world.value("raceStarted") == 1 && play.world.value("startLights") == 0);
+    play.frames(60 * 3);
+    // The player has the car back (the test drives straight on, the race is the player's to steer).
+    CHECK(car && !car->controlsAreGiven && car->controls.throttle > 0.5f && rival && rival->speed() > 8);
+    CHECK(play.world.value("position") >= 1 && play.world.value("position") <= 5 && play.world.value("raceLap") == 1);
+}
+
+TEST(the_rivals_race_round_and_the_results_come_at_the_end) {
+    if (!hasScripts({"RaceDirector", "RacerAI"})) return;
+    Play play("Driving");
+    if (!play.world.find("Rival 1").isValid()) return;
+    play.world.setPreference("mode", 0);
+    play.world.setPreference("laps", 1);
+    play.world.setPreference("weather", std::getenv("MOLTEN_RACE_RAIN") ? 2 : 0);
+    // The player's car is driven by a RacerAI of its own here: the test has no hands.
+    play.frames(1);
+    const ComponentType* ai = ComponentRegistry::instance().find("RacerAI");
+    CHECK(ai != nullptr);
+    if (!ai) return;
+    ai->add(play.world.scene, play.world.find("Car"));
+    std::vector<std::string> names = {"Rival 1", "Rival 2", "Rival 3", "Rival 4"};
+    float worstOff = 0;
+    const kit::UIButton* again = nullptr;
+    int seconds = 0;
+    std::vector<float> offRoad(names.size(), 0), worstEach(names.size(), 0);
+    for (; seconds < 150; seconds++) {
+        for (int f = 0; f < 6; f++) {
+            play.frames(10);
+            for (size_t r = 0; r < names.size(); r++) {
+                Vec3 at = play.positionOf(names[r].c_str());
+                float nearest = 1e9f;
+                for (int k = 1; k < 400; k++) {
+                    Entity point = play.world.find("Waypoint " + std::to_string(k));
+                    if (!point.isValid()) break;
+                    nearest = std::min(nearest, simd::length(play.positionOf(("Waypoint " + std::to_string(k)).c_str()) - at));
+                }
+                worstEach[r] = std::max(worstEach[r], nearest);
+                if (nearest > 5.6f) offRoad[r] += 1.0f / 6.0f;
+                float watchFrom = std::getenv("MOLTEN_RACE_WATCH") ? float(std::atof(std::getenv("MOLTEN_RACE_WATCH"))) : 1e9f;
+                bool watched = std::getenv("MOLTEN_RACE_WHO") && names[r] == std::getenv("MOLTEN_RACE_WHO") && seconds + f / 6.0f >= watchFrom && seconds < watchFrom + 4;
+                if ((nearest > 5.6f || watched) && std::getenv("MOLTEN_RACE_DETAIL")) {
+                    float closest = 1e9f;
+                    const char* who = "";
+                    for (const char* other : {"Car", "Rival 1", "Rival 2", "Rival 3", "Rival 4"}) {
+                        if (names[r] == other) continue;
+                        float d = simd::length(play.positionOf(other) - at);
+                        if (d < closest) closest = d, who = other;
+                    }
+                    const kit::VehicleBody* body = play.world.scene.get<kit::VehicleBody>(play.world.find(names[r]));
+                    std::fprintf(stderr, "    %.1fs %s off %.1f at %.0f %.0f, %.0f km/h, %s %.1f m away, steer %.2f throttle %.2f brake %.2f slip %.0f wet %.2f\n", seconds + f / 6.0f, names[r].c_str(), nearest, at.x, at.z,
+                                 body ? body->speed() * 3.6f : 0.0f, who, closest, body ? body->controls.steer : 0, body ? body->controls.throttle : 0, body ? body->controls.brake : 0,
+                                 body ? degrees(std::atan2(simd::dot(body->body.velocity, simd::normalize(simd::cross(body->body.forward(), Vec3{0, 1, 0}))), std::max(body->speed(), 0.5f))) : 0.0f,
+                                 play.world.value("wetness"));
+                }
+            }
+        }
+        // Every car stays near the road: how far it is from the nearest waypoint.
+        for (const std::string& name : names) {
+            Vec3 at = play.positionOf(name.c_str());
+            float nearest = 1e9f;
+            for (int k = 1; k < 400; k++) {
+                Entity point = play.world.find("Waypoint " + std::to_string(k));
+                if (!point.isValid()) break;
+                nearest = std::min(nearest, simd::length(play.positionOf(("Waypoint " + std::to_string(k)).c_str()) - at));
+            }
+            worstOff = std::max(worstOff, nearest);
+        }
+        const Transform* results = play.world.scene.get<Transform>(play.world.find("Results"));
+        if (results && results->isActive) break;
+    }
+    std::fprintf(stderr, "race: a lap in %d s, the farthest a rival went from the line %.1f m\n", seconds, worstOff);
+    if (std::getenv("MOLTEN_RACE_DETAIL")) {
+        for (size_t r = 0; r < names.size(); r++) std::fprintf(stderr, "  %s: farthest %.1f m, %.1f s off the road\n", names[r].c_str(), worstEach[r], offRoad[r]);
+        std::fprintf(stderr, "  position of the player's own AI car: %g\n", play.world.value("position"));
+        for (int k = 1; k <= 5; k++) {
+            const kit::HudText* a = play.world.scene.get<kit::HudText>(play.world.find("Result " + std::to_string(k)));
+            const kit::HudText* b = play.world.scene.get<kit::HudText>(play.world.find("Result " + std::to_string(k) + " Time"));
+            if (a && b) std::fprintf(stderr, "  %d %s %s\n", k, a->text.c_str(), b->text.c_str());
+        }
+    }
+    const Transform* results = play.world.scene.get<Transform>(play.world.find("Results"));
+    CHECK(results && results->isActive);
+    CHECK(worstOff < 7);
+    CHECK(seconds < 110);
+    // The results name all five, the winner with a time and the others with a gap or a lap.
+    const kit::HudText* first = play.world.scene.get<kit::HudText>(play.world.find("Result 1 Time"));
+    CHECK(first && first->text.find(':') != std::string::npos);
+    int named = 0;
+    for (int k = 1; k <= 5; k++) {
+        const kit::HudText* row = play.world.scene.get<kit::HudText>(play.world.find("Result " + std::to_string(k)));
+        if (row && !row->text.empty()) named++;
+    }
+    CHECK(named == 5);
+    again = play.world.scene.get<kit::UIButton>(play.world.find("Race Again"));
+    CHECK(again != nullptr);
+}
+
+TEST(a_time_trial_is_alone_on_the_track) {
+    if (!hasScripts({"RaceDirector"})) return;
+    Play play("Driving");
+    if (!play.world.find("Rival 1").isValid()) return;
+    play.frames(5);
+    const Transform* rival = play.world.scene.get<Transform>(play.world.find("Rival 3"));
+    CHECK(rival && !rival->isActive && play.world.value("isRacing") == 0);
+    play.world.input.handleKey(Key::W, true);
+    play.frames(90);
+    const kit::VehicleBody* car = play.world.scene.get<kit::VehicleBody>(play.world.find("Car"));
+    CHECK(car && car->speed() > 5);                                 // no lights to wait for
+}
+
+#include "Rendering/LevelOfDetail.hpp"
+TEST(a_lod_group_draws_its_far_model_from_far_away) {
+    Scene scene;
+    Entity car = scene.create();
+    scene.add<Transform>(car);
+    scene.add<LodGroup>(car).distance = 30;
+    Entity body = scene.create();
+    scene.add<Transform>(body).parent = car;
+    scene.add<MeshRenderer>(body);
+    Entity far = scene.create("Far");
+    scene.add<Transform>(far).parent = car;
+    Entity farBody = scene.create();
+    scene.add<Transform>(farBody).parent = far;
+    scene.add<MeshRenderer>(farBody);
+    Entity alone = scene.create();
+    scene.add<Transform>(alone);
+    scene.add<MeshRenderer>(alone);
+    scene.updateTransforms();
+    chooseLevelsOfDetail(scene, Vec3{0, 0, 10});
+    CHECK(!scene.get<MeshRenderer>(body)->isBeyondItsDetail && scene.get<MeshRenderer>(farBody)->isBeyondItsDetail);
+    chooseLevelsOfDetail(scene, Vec3{0, 0, 80});
+    CHECK(scene.get<MeshRenderer>(body)->isBeyondItsDetail && !scene.get<MeshRenderer>(farBody)->isBeyondItsDetail);
+    CHECK(!scene.get<MeshRenderer>(alone)->isBeyondItsDetail);
+}
+
+namespace {
+struct ListeningWorld : World {
+    float lastVolume = -1, lastPan = 0;
+    uint32_t beginSound(const std::string&, float, float, bool) override { return 7; }
+    void adjustSound(uint32_t, float volume, float) override { lastVolume = volume; }
+    void panSound(uint32_t, float pan) override { lastPan = pan; }
+    bool listener(Mat4& ears) override {
+        ears = identity();
+        return true;
+    }
+};
+}  // namespace
+
+TEST(a_placed_sound_is_quieter_far_away_and_heard_from_its_side) {
+    ListeningWorld world;
+    uint32_t engine = world.startSound("Audio/engine.wav", 1.0f);
+    CHECK(engine == 7);
+    world.placeSound(engine, Vec3{3, 0, 0}, 6, 100);
+    world.changeSound(engine, 0.8f, 1);
+    CHECK_NEAR(world.lastVolume, 0.8, 1e-4);                        // within its full distance
+    CHECK(world.lastPan > 0.5f);                                    // on the right
+    world.placeSound(engine, Vec3{-53, 0, 0}, 6, 100);
+    CHECK(world.lastVolume > 0.1f && world.lastVolume < 0.3f && world.lastPan < -0.5f);
+    world.placeSound(engine, Vec3{0, 0, -150}, 6, 100);
+    CHECK(world.lastVolume < 1e-4f);
+}
+
 #include <chrono>
 TEST(profile_the_driving_game_when_asked) {
     // MOLTEN_PROFILE=1: how long a frame of the race takes on this machine, in the worst
@@ -1260,6 +1445,8 @@ TEST(profile_the_driving_game_when_asked) {
     if (!std::getenv("MOLTEN_PROFILE")) return;
     Play play("Driving");
     play.world.setPreference("weather", 2);
+    play.world.setPreference("mode", 0);                            // with the four rivals
+    play.world.setPreference("laps", 20);
     play.frames(30);
     play.world.input.handleKey(Key::W, true);
     auto begin = std::chrono::steady_clock::now();

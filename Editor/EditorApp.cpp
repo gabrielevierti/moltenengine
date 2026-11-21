@@ -1,3 +1,4 @@
+#include "Theme.hpp"
 #include "EditorApp.hpp"
 
 #include "GameBuild.hpp"
@@ -7,6 +8,8 @@
 #include "Core/Paths.hpp"
 #include "Core/TextFile.hpp"
 
+#include <sstream>
+#include <unordered_map>
 #include <imgui_internal.h>         // the dock builder, for the default layout
 
 #ifndef GLFW_INCLUDE_NONE
@@ -64,6 +67,19 @@ void EditorApp::start(Engine& engine) {
     };
 
     std::string userData = userDataDirectory();
+    // The editor's own settings: its look, and the shortcuts changed.
+    settingsFile_ = userData + "/editor-settings.txt";
+    if (std::optional<std::string> settings = text::readFile(settingsFile_)) {
+        std::string shortcutLines;
+        std::istringstream lines(*settings);
+        std::string line;
+        while (std::getline(lines, line)) {
+            if (line.rfind("theme ", 0) == 0) setTheme(line.substr(6));
+            else if (line.rfind("shortcut ", 0) == 0) shortcutLines += line.substr(9) + "\n";
+        }
+        shortcuts_.fromText(shortcutLines);
+        if (ImGui::GetCurrentContext()) applyTheme(1.0f);       // otherwise the interface starts with it
+    }
     recentFile_ = userData + "/recent-projects.txt";
     recent_.load(recentFile_);
     const char* home = std::getenv("HOME");
@@ -85,6 +101,9 @@ void EditorApp::start(Engine& engine) {
     registerAssetViewerPanel(editor);
     registerConsolePanel(editor);
     registerProfilerPanel(editor);
+    registerTimelinePanel(editor);
+    registerSourceControlPanel(editor);
+    registerSceneWeightPanel(editor);
     registerRenderingPanel(editor);
     registerProjectPanel(editor);
     registerVisualScriptPanel(editor);
@@ -135,6 +154,7 @@ bool EditorApp::openProject(const std::string& path) {
     editor.engine.preferencesFile = project->libraryDirectory() + "/Preferences.txt";
     editor.hasProject = true;
     editor.engine.assets().setProjectDirectory(editor.project.assetsDirectory());
+    assetChanges_.forget();
     editor.assets.open(editor.project.assetsDirectory());
     editor.currentFolder.clear();
     editor.selectedAsset.clear();
@@ -445,6 +465,23 @@ void EditorApp::draw(Engine& engine, Canvas& canvas) {
     if (editor.hasProject && engine.time.elapsed >= nextAssetScan_) {
         nextAssetScan_ = engine.time.elapsed + 1.0;
         editor.assets.refresh();
+        // Written again (a picture saved in another program, a model exported again): read
+        // into what already uses it, so the scene changes without being opened again.
+        std::vector<std::pair<std::string, int64_t>> files;
+        for (const AssetInfo& asset : editor.assets.assets()) {
+            bool isReadAgain = asset.type == AssetType::Texture || asset.type == AssetType::Mesh || asset.type == AssetType::Material ||
+                               asset.type == AssetType::Audio;
+            if (isReadAgain) files.push_back({asset.path, asset.modified});
+        }
+        std::vector<std::string> changed = assetChanges_.look(files, engine.time.elapsed);
+        if (!changed.empty()) {
+            engine.renderer().waitUntilIdle();          // nothing the GPU is drawing is replaced under it
+            for (const std::string& path : changed) {
+                // Said for files written elsewhere; a material saved here is read back without a word.
+                bool isMaterial = path.size() > 9 && path.compare(path.size() - 9, 9, ".material") == 0;
+                if (engine.assets().refreshInPlace(path) > 0 && !isMaterial) editor.notify("Read again: " + path);
+            }
+        }
     }
 
     // Code saved in another program (Xcode, any text editor) is rebuilt by itself.
@@ -493,6 +530,7 @@ void EditorApp::draw(Engine& engine, Canvas& canvas) {
     drawUnsavedChangesDialog();
     drawAboutDialog();
     drawCommandPalette();
+    drawSettingsWindow();
     drawBuildWindow();
 drawNewScriptDialog();
     drawSaveLayoutDialog();
@@ -518,30 +556,45 @@ void EditorApp::updateTitle() {
     }
 }
 
+/// ImGui's number for a key, by the name it gives it ("S", "F5", "Comma").
+static ImGuiKey keyNamed(const std::string& name) {
+    static std::unordered_map<std::string, ImGuiKey> keys;
+    if (keys.empty()) {
+        for (int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_NamedKey_END; key++) keys[ImGui::GetKeyName(ImGuiKey(key))] = ImGuiKey(key);
+    }
+    auto found = keys.find(name);
+    return found == keys.end() ? ImGuiKey_None : found->second;
+}
+
+bool EditorApp::isPressed(const std::string& action) {
+    if (!recording_.empty()) return false;              // the keys are being taken for a shortcut
+    const KeyChord& chord = shortcuts_.chord(action);
+    ImGuiKey key = keyNamed(chord.key);
+    if (key == ImGuiKey_None) return false;
+    ImGuiKeyChord mods = (chord.shift ? ImGuiMod_Shift : 0) | (chord.alt ? ImGuiMod_Alt : 0);
+    // ImGui calls the Command key "Ctrl" on a Mac; the key that says Control works too: hands
+    // that learned the shortcuts elsewhere find them here.
+    if (!chord.command) return ImGui::Shortcut(mods | key, ImGuiInputFlags_RouteGlobal);
+    return ImGui::Shortcut(mods | ImGuiMod_Ctrl | key, ImGuiInputFlags_RouteGlobal) || ImGui::Shortcut(mods | ImGuiMod_Super | key, ImGuiInputFlags_RouteGlobal);
+}
+
 void EditorApp::handleShortcuts() {
     EditorContext& editor = *context_;
     SceneDocument& scene = editor.scene;
     ImGuiIO& io = ImGui::GetIO();
-    // ImGui calls the Command key "Ctrl" on a Mac, so these are Cmd+S, Cmd+Z and so on.
-    // The key that says Control on the keyboard works too: hands that learned the
-    // shortcuts elsewhere find them here.
-    auto pressed = [](ImGuiKeyChord chord) {
-        if (ImGui::Shortcut(chord, ImGuiInputFlags_RouteGlobal)) return true;
-        if (!(chord & ImGuiMod_Ctrl)) return false;
-        return ImGui::Shortcut((chord & ~ImGuiMod_Ctrl) | ImGuiMod_Super, ImGuiInputFlags_RouteGlobal);
-    };
 
-    if (pressed(ImGuiMod_Ctrl | ImGuiKey_Q)) editor.requestQuit();
-    if (pressed(ImGuiMod_Ctrl | ImGuiKey_K) && !(scene.isPlaying() && editor.gameViewHasFocus)) palette_.open();
-    if (pressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_O)) chooseAndOpenProject();
-    else if (!editor.hasProject && pressed(ImGuiMod_Ctrl | ImGuiKey_O)) chooseAndOpenScene();
+    if (isPressed("quit")) editor.requestQuit();
+    if (isPressed("findAnything") && !(scene.isPlaying() && editor.gameViewHasFocus)) palette_.open();
+    if (isPressed("settings")) showsSettings_ = true;
+    if (isPressed("openProject")) chooseAndOpenProject();
+    else if (!editor.hasProject && isPressed("openScene")) chooseAndOpenScene();
     if (!editor.hasProject) return;
 
-    if (pressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_P)) {
+    if (isPressed("pause")) {
         if (scene.isPlaying()) scene.setPaused(!scene.isPaused());
-    } else if (pressed(ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiKey_P)) {
+    } else if (isPressed("step")) {
         scene.stepFrame();
-    } else if (pressed(ImGuiMod_Ctrl | ImGuiKey_P)) {
+    } else if (isPressed("play")) {
         scene.setPlaying(!scene.isPlaying());
     }
     if (scene.isPlaying() && editor.gameViewHasFocus) {
@@ -551,29 +604,142 @@ void EditorApp::handleShortcuts() {
     }
     const bool isEditing = !scene.isPlaying();
     if (isEditing) {
-        if (pressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S)) saveScene(true);
-        else if (pressed(ImGuiMod_Ctrl | ImGuiKey_S)) saveScene(false);
-        if (pressed(ImGuiMod_Ctrl | ImGuiKey_N)) editor.requestNewScene();
-        if (pressed(ImGuiMod_Ctrl | ImGuiKey_O)) chooseAndOpenScene();
-        if (pressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_B)) showsBuild_ = true;
-        else if (pressed(ImGuiMod_Ctrl | ImGuiKey_B)) buildGame();
+        if (isPressed("saveAs")) saveScene(true);
+        else if (isPressed("save")) saveScene(false);
+        if (isPressed("newScene")) editor.requestNewScene();
+        if (isPressed("openScene")) chooseAndOpenScene();
+        if (isPressed("export")) showsBuild_ = true;
+        else if (isPressed("buildScripts")) buildGame();
     }
-    if (pressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_F)) editor.alignWithViewRequested = true;
+    if (isPressed("alignWithView")) editor.alignWithViewRequested = true;
 
     // These would fight with typing in a text field, or belong to a panel with a document of its own.
     bool panelHasThem = editor.panelOwnsEditKeys;
     editor.panelOwnsEditKeys = false;           // the panel says so again this frame if it still has the keyboard
     if (io.WantTextInput || panelHasThem) return;
     if (isEditing) {
-        if (pressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z) || pressed(ImGuiMod_Ctrl | ImGuiKey_Y)) scene.redo();
-        else if (pressed(ImGuiMod_Ctrl | ImGuiKey_Z)) scene.undo();
+        bool redoes = isPressed("redo") || ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Y, ImGuiInputFlags_RouteGlobal);
+        if (redoes) scene.redo();
+        else if (isPressed("undo")) scene.undo();
     }
-    if (pressed(ImGuiMod_Ctrl | ImGuiKey_D)) scene.duplicateSelection();
-    if (pressed(ImGuiMod_Ctrl | ImGuiKey_A)) scene.selectAll();
+    if (isPressed("duplicate")) scene.duplicateSelection();
+    if (isPressed("selectAll")) scene.selectAll();
     if (!ImGui::IsAnyItemActive() && (ImGui::IsKeyPressed(ImGuiKey_Delete, false) || ImGui::IsKeyPressed(ImGuiKey_Backspace, false))) {
         // Only when the scene is what the user is working on, not the asset browser.
         if (!scene.selection().empty() && editor.selectedAsset.empty()) scene.deleteSelection();
     }
+}
+
+// ---------------------------------------------------------------- Edit > Editor Settings
+
+void EditorApp::saveEditorSettings() {
+    std::string out = "theme " + currentTheme() + "\n";
+    std::istringstream changed(shortcuts_.toText());
+    std::string line;
+    while (std::getline(changed, line)) out += "shortcut " + line + "\n";
+    std::error_code code;
+    fs::create_directories(fs::path(settingsFile_).parent_path(), code);
+    text::writeFile(settingsFile_, out);
+}
+
+void EditorApp::drawSettingsWindow() {
+    if (!showsSettings_) {
+        recording_.clear();
+        return;
+    }
+    ImGui::SetNextWindowSize(ImVec2(620, 560), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Editor Settings", &showsSettings_, ImGuiWindowFlags_NoDocking)) {
+        ImGui::End();
+        return;
+    }
+    if (ImGui::BeginTabBar("##settings")) {
+        if (ImGui::BeginTabItem("Shortcuts")) {
+            // Taking the keys for one: the next key pressed, with what is held with it.
+            if (!recording_.empty()) {
+                if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+                    recording_.clear();
+                } else {
+                    for (int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_NamedKey_END && !recording_.empty(); key++) {
+                        ImGuiKey k = ImGuiKey(key);
+                        bool isModifier = k == ImGuiKey_LeftCtrl || k == ImGuiKey_RightCtrl || k == ImGuiKey_LeftShift || k == ImGuiKey_RightShift ||
+                                          k == ImGuiKey_LeftAlt || k == ImGuiKey_RightAlt || k == ImGuiKey_LeftSuper || k == ImGuiKey_RightSuper ||
+                                          (k >= ImGuiKey_MouseLeft && k <= ImGuiKey_MouseWheelY) || k >= ImGuiKey_ReservedForModCtrl;
+                        if (isModifier || !ImGui::IsKeyPressed(k, false)) continue;
+                        ImGuiIO& io = ImGui::GetIO();
+                        KeyChord chord;
+                        chord.command = io.KeyCtrl || io.KeySuper;
+                        chord.shift = io.KeyShift;
+                        chord.alt = io.KeyAlt;
+                        chord.key = ImGui::GetKeyName(k);
+                        // Backspace alone takes the shortcut away.
+                        if (k == ImGuiKey_Backspace && !chord.command && !chord.shift && !chord.alt) chord = KeyChord{};
+                        shortcuts_.set(recording_, chord);
+                        recording_.clear();
+                        saveEditorSettings();
+                    }
+                }
+            }
+            ImGui::TextDisabled("Click one, then press its new keys. Backspace: none. Esc: as it was.");
+            if (ImGui::BeginTable("##shortcuts", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY, ImVec2(0, -34))) {
+                ImGui::TableSetupColumn("What", ImGuiTableColumnFlags_WidthStretch);
+                ImGui::TableSetupColumn("Keys", ImGuiTableColumnFlags_WidthFixed, 170);
+                ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 60);
+                std::string group;
+                for (const Shortcuts::Action& action : shortcuts_.actions()) {
+                    ImGui::PushID(action.id.c_str());
+                    if (action.group != group) {
+                        group = action.group;
+                        ImGui::TableNextRow();
+                        ImGui::TableNextColumn();
+                        ImGui::TextDisabled("%s", group.c_str());
+                    }
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(action.title.c_str());
+                    std::vector<std::string> sharing = shortcuts_.sharing(action.id);
+                    if (!sharing.empty()) {
+                        ImGui::SameLine();
+                        ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.3f, 1), "also %s", sharing.front().c_str());
+                    }
+                    ImGui::TableNextColumn();
+                    bool isTaking = recording_ == action.id;
+                    std::string shown = isTaking ? std::string("Press the keys...") : shortcuts_.text(action.id);
+                    if (shown.empty()) shown = "none";
+                    if (ImGui::Button(shown.c_str(), ImVec2(-1, 0))) recording_ = isTaking ? std::string() : action.id;
+                    ImGui::TableNextColumn();
+                    if (!(action.chord == action.original)) {
+                        if (ImGui::SmallButton("Reset")) {
+                            shortcuts_.reset(action.id);
+                            saveEditorSettings();
+                        }
+                    }
+                    ImGui::PopID();
+                }
+                ImGui::EndTable();
+            }
+            if (ImGui::Button("All as They Were")) {
+                shortcuts_.resetAll();
+                recording_.clear();
+                saveEditorSettings();
+            }
+            ImGui::EndTabItem();
+        } else {
+            recording_.clear();
+        }
+        if (ImGui::BeginTabItem("Look")) {
+            ImGui::TextDisabled("The colors of the editor. The game's own are in its scenes.");
+            for (const std::string& name : themeNames()) {
+                if (ImGui::RadioButton(name.c_str(), currentTheme() == name)) {
+                    setTheme(name);
+                    applyTheme(1.0f);
+                    saveEditorSettings();
+                }
+            }
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
+    ImGui::End();
 }
 
 void EditorApp::chooseAndOpenProject() {
@@ -633,8 +799,8 @@ void EditorApp::drawMenuBar() {
     bool hasProject = editor.hasProject, isEditing = hasProject && !scene.isPlaying();
 
     if (ImGui::BeginMenu("File")) {
-        if (ImGui::MenuItem("New Scene", "Cmd+N", false, isEditing)) editor.requestNewScene();
-        if (ImGui::MenuItem("Open...", "Cmd+O")) chooseAndOpenScene();
+        if (ImGui::MenuItem("New Scene", shortcuts_.text("newScene").c_str(), false, isEditing)) editor.requestNewScene();
+        if (ImGui::MenuItem("Open...", shortcuts_.text("openScene").c_str())) chooseAndOpenScene();
         ui::tooltip("A scene of this project, or another project (its .molten file)");
         if (ImGui::BeginMenu("Open Scene of the Project", isEditing)) {
             bool any = false;
@@ -647,10 +813,10 @@ void EditorApp::drawMenuBar() {
             ImGui::EndMenu();
         }
         ImGui::Separator();
-        if (ImGui::MenuItem("Save Scene", "Cmd+S", false, isEditing)) saveScene(false);
-        if (ImGui::MenuItem("Save Scene As New File", "Shift+Cmd+S", false, isEditing)) saveScene(true);
+        if (ImGui::MenuItem("Save Scene", shortcuts_.text("save").c_str(), false, isEditing)) saveScene(false);
+        if (ImGui::MenuItem("Save Scene As New File", shortcuts_.text("saveAs").c_str(), false, isEditing)) saveScene(true);
         ImGui::Separator();
-        if (ImGui::MenuItem("Open Project...", "Shift+Cmd+O")) chooseAndOpenProject();
+        if (ImGui::MenuItem("Open Project...", shortcuts_.text("openProject").c_str())) chooseAndOpenProject();
         if (ImGui::BeginMenu("Recent Projects", !recent_.paths.empty())) {
             for (const std::string& path : std::vector<std::string>(recent_.paths)) {
                 if (ImGui::MenuItem(path.c_str())) editor.requestOpenProject(path);
@@ -663,23 +829,24 @@ void EditorApp::drawMenuBar() {
         }
         drawRegisteredMenuItems("File");
         ImGui::Separator();
-        if (ImGui::MenuItem("Quit", "Cmd+Q")) editor.requestQuit();
+        if (ImGui::MenuItem("Quit", shortcuts_.text("quit").c_str())) editor.requestQuit();
         ImGui::EndMenu();
     }
 
     if (ImGui::BeginMenu("Edit")) {
-        if (ImGui::MenuItem("Undo", "Cmd+Z", false, scene.canUndo())) scene.undo();
-        if (ImGui::MenuItem("Redo", "Shift+Cmd+Z", false, scene.canRedo())) scene.redo();
+        if (ImGui::MenuItem("Undo", shortcuts_.text("undo").c_str(), false, scene.canUndo())) scene.undo();
+        if (ImGui::MenuItem("Redo", shortcuts_.text("redo").c_str(), false, scene.canRedo())) scene.redo();
         ImGui::Separator();
         bool hasSelection = hasProject && !scene.selection().empty();
-        if (ImGui::MenuItem("Duplicate", "Cmd+D", false, hasSelection)) scene.duplicateSelection();
+        if (ImGui::MenuItem("Duplicate", shortcuts_.text("duplicate").c_str(), false, hasSelection)) scene.duplicateSelection();
         if (ImGui::MenuItem("Delete", "Del", false, hasSelection)) scene.deleteSelection();
-        if (ImGui::MenuItem("Select All", "Cmd+A", false, isEditing)) scene.selectAll();
+        if (ImGui::MenuItem("Select All", shortcuts_.text("selectAll").c_str(), false, isEditing)) scene.selectAll();
         if (ImGui::MenuItem("Frame Selection", "F", false, hasSelection)) editor.frameSelectionRequested = true;
-        if (ImGui::MenuItem("Align with View", "Shift+Cmd+F", false, hasSelection)) editor.alignWithViewRequested = true;
+        if (ImGui::MenuItem("Align with View", shortcuts_.text("alignWithView").c_str(), false, hasSelection)) editor.alignWithViewRequested = true;
         if (ImGui::MenuItem("Align View with Selection", nullptr, false, hasSelection)) scene.alignViewWithSelection();
         ImGui::Separator();
-        if (ImGui::MenuItem("Find Anything...", "Cmd+K")) palette_.open();
+        if (ImGui::MenuItem("Find Anything...", shortcuts_.text("findAnything").c_str())) palette_.open();
+        if (ImGui::MenuItem("Editor Settings...", shortcuts_.text("settings").c_str())) showsSettings_ = true;
         drawRegisteredMenuItems("Edit");
         ImGui::Separator();
         if (ImGui::MenuItem("Project Settings...", nullptr, false, hasProject)) {
@@ -694,9 +861,9 @@ void EditorApp::drawMenuBar() {
     }
 
     if (ImGui::BeginMenu("Play", hasProject)) {
-        if (ImGui::MenuItem(scene.isPlaying() ? "Stop" : "Play", "Cmd+P")) scene.setPlaying(!scene.isPlaying());
-        if (ImGui::MenuItem(scene.isPaused() ? "Resume" : "Pause", "Shift+Cmd+P", false, scene.isPlaying())) scene.setPaused(!scene.isPaused());
-        if (ImGui::MenuItem("Step One Frame", "Alt+Cmd+P", false, scene.isPlaying())) scene.stepFrame();
+        if (ImGui::MenuItem(scene.isPlaying() ? "Stop" : "Play", shortcuts_.text("play").c_str())) scene.setPlaying(!scene.isPlaying());
+        if (ImGui::MenuItem(scene.isPaused() ? "Resume" : "Pause", shortcuts_.text("pause").c_str(), false, scene.isPlaying())) scene.setPaused(!scene.isPaused());
+        if (ImGui::MenuItem("Step One Frame", shortcuts_.text("step").c_str(), false, scene.isPlaying())) scene.stepFrame();
         ImGui::EndMenu();
     }
 
@@ -732,7 +899,7 @@ void EditorApp::drawMenuBar() {
             ImGui::EndMenu();
         }
         ImGui::Separator();
-        if (ImGui::MenuItem("Build Scripts Now", "Cmd+B")) buildGame();
+        if (ImGui::MenuItem("Build Scripts Now", shortcuts_.text("buildScripts").c_str())) buildGame();
         ui::tooltip("Scripts are built by themselves when one is saved, and before the game is exported: this is for doing it by hand");
         if (ImGui::MenuItem("Show Scripts Folder")) platform::revealInFinder(editor.project.sourceDirectory());
         if (ImGui::BeginMenu("Components", gameModule_.isLoaded())) {
@@ -740,7 +907,7 @@ void EditorApp::drawMenuBar() {
             ImGui::EndMenu();
         }
         ImGui::Separator();
-        if (ImGui::MenuItem("Build and Export...", "Shift+Cmd+B")) showsBuild_ = true;
+        if (ImGui::MenuItem("Build and Export...", shortcuts_.text("export").c_str())) showsBuild_ = true;
         drawRegisteredMenuItems("Game");
         ImGui::EndMenu();
     }
@@ -796,36 +963,37 @@ std::vector<PaletteCommand> EditorApp::paletteCommands() {
         commands.push_back(PaletteCommand{std::move(title), std::move(kind), std::move(shortcut), isEnabled, std::move(run)});
     };
     // What the menus do.
-    add("New Scene", "File", "Cmd+N", isEditing, [&editor] { editor.requestNewScene(); });
-    add("Open Scene...", "File", "Cmd+O", true, [this] { chooseAndOpenScene(); });
-    add("Save Scene", "File", "Cmd+S", isEditing, [this] { saveScene(false); });
-    add("Save Scene As New File", "File", "Shift+Cmd+S", isEditing, [this] { saveScene(true); });
-    add("Open Project...", "File", "Shift+Cmd+O", true, [this] { chooseAndOpenProject(); });
-    add("Undo", "Edit", "Cmd+Z", isEditing && scene.canUndo(), [&scene] { scene.undo(); });
-    add("Redo", "Edit", "Shift+Cmd+Z", isEditing && scene.canRedo(), [&scene] { scene.redo(); });
-    add("Duplicate", "Edit", "Cmd+D", hasSelection, [&scene] { scene.duplicateSelection(); });
+    add("New Scene", "File", shortcuts_.text("newScene"), isEditing, [&editor] { editor.requestNewScene(); });
+    add("Open Scene...", "File", shortcuts_.text("openScene"), true, [this] { chooseAndOpenScene(); });
+    add("Save Scene", "File", shortcuts_.text("save"), isEditing, [this] { saveScene(false); });
+    add("Save Scene As New File", "File", shortcuts_.text("saveAs"), isEditing, [this] { saveScene(true); });
+    add("Open Project...", "File", shortcuts_.text("openProject"), true, [this] { chooseAndOpenProject(); });
+    add("Undo", "Edit", shortcuts_.text("undo"), isEditing && scene.canUndo(), [&scene] { scene.undo(); });
+    add("Redo", "Edit", shortcuts_.text("redo"), isEditing && scene.canRedo(), [&scene] { scene.redo(); });
+    add("Duplicate", "Edit", shortcuts_.text("duplicate"), hasSelection, [&scene] { scene.duplicateSelection(); });
     add("Delete", "Edit", "Del", hasSelection, [&scene] { scene.deleteSelection(); });
-    add("Select All", "Edit", "Cmd+A", isEditing, [&scene] { scene.selectAll(); });
+    add("Select All", "Edit", shortcuts_.text("selectAll"), isEditing, [&scene] { scene.selectAll(); });
     add("Frame Selection", "Edit", "F", hasSelection, [&editor] { editor.frameSelectionRequested = true; });
-    add("Align with View", "Edit", "Shift+Cmd+F", hasSelection, [&editor] { editor.alignWithViewRequested = true; });
+    add("Align with View", "Edit", shortcuts_.text("alignWithView"), hasSelection, [&editor] { editor.alignWithViewRequested = true; });
     add("Align View with Selection", "Edit", "", hasSelection, [&scene] { scene.alignViewWithSelection(); });
     add("Project Settings", "Edit", "", hasProject, [&editor] {
         if (Panel* panel = editor.registry.findPanel("Project Settings")) panel->isOpen = true;
     });
-    add(scene.isPlaying() ? "Stop" : "Play", "Play", "Cmd+P", hasProject, [&scene] { scene.setPlaying(!scene.isPlaying()); });
-    add(scene.isPaused() ? "Resume" : "Pause", "Play", "Shift+Cmd+P", scene.isPlaying(), [&scene] { scene.setPaused(!scene.isPaused()); });
-    add("Step One Frame", "Play", "Alt+Cmd+P", scene.isPlaying(), [&scene] { scene.stepFrame(); });
+    add(scene.isPlaying() ? "Stop" : "Play", "Play", shortcuts_.text("play"), hasProject, [&scene] { scene.setPlaying(!scene.isPlaying()); });
+    add(scene.isPaused() ? "Resume" : "Pause", "Play", shortcuts_.text("pause"), scene.isPlaying(), [&scene] { scene.setPaused(!scene.isPaused()); });
+    add("Step One Frame", "Play", shortcuts_.text("step"), scene.isPlaying(), [&scene] { scene.stepFrame(); });
     add("New Script...", "Game", "", hasProject, [this] {
         showsNewScript_ = true;
         newScriptError_.clear();
     });
-    add("Build Scripts Now", "Game", "Cmd+B", hasProject, [this] { buildGame(); });
-    add("Build and Export...", "Game", "Shift+Cmd+B", hasProject, [this] { showsBuild_ = true; });
+    add("Build Scripts Now", "Game", shortcuts_.text("buildScripts"), hasProject, [this] { buildGame(); });
+    add("Build and Export...", "Game", shortcuts_.text("export"), hasProject, [this] { showsBuild_ = true; });
     add("Show Scripts Folder", "Game", "", hasProject, [&editor] { platform::revealInFinder(editor.project.sourceDirectory()); });
     add(editor.engine.showsColliders ? "Hide All Colliders" : "Show All Colliders", "Window", "", true,
         [&editor] { editor.engine.showsColliders = !editor.engine.showsColliders; });
     add("Reset Layout", "Window", "", true, [this] { pendingLayout_ = "Default"; });
     add("About Molten Metal Engine", "Help", "", true, [this] { showsAbout_ = true; });
+    add("Editor Settings: Shortcuts and Look", "Edit", shortcuts_.text("settings"), true, [this] { showsSettings_ = true; });
     // The windows: opened and brought to the front.
     for (auto& item : editor.registry.panels) {
         Panel* panel = item.value.get();

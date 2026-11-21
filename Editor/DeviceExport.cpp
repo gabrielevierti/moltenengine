@@ -1,4 +1,5 @@
 // DeviceExport.cpp
+#include "Assets/BuildAssets.hpp"
 #include "DeviceExport.hpp"
 
 #include "Assets/AppIcon.hpp"
@@ -49,6 +50,19 @@ std::string phoneIconFor(const std::string& picture, const std::string& buildFol
     return stbi_write_png(out.c_str(), 1024, 1024, 4, icon.data(), 1024 * 4) ? out : picture;
 }
 
+/// The project's assets as a phone takes them: pictures no larger than 2048 pixels, sounds in 16
+/// bits, the art programs' own files left behind. In the build folder; the project's own files
+/// are not changed.
+std::string phoneAssetsFor(const Project& project, const std::string& buildFolder) {
+    std::string out = buildFolder + "/Assets";
+    std::error_code code;
+    std::filesystem::remove_all(out, code);
+    ShrinkOptions shrink;
+    shrink.largestPicture = 2048;
+    copyAssetsSmaller(project.assetsDirectory(), out, shrink);
+    return out;
+}
+
 }  // namespace
 
 std::string DeviceExport::script(const Project& project, const std::string& engineRoot, const std::string& team, Goal goal) {
@@ -69,7 +83,8 @@ std::string DeviceExport::script(const Project& project, const std::string& engi
     s += "cmake -S " + shellQuoted(engineRoot) + " -B \"$BUILD\" -G Xcode -DCMAKE_SYSTEM_NAME=iOS -DMOLTEN_IOS_PROJECT=" + shellQuoted(project.directory) +
          " -DMOLTEN_IOS_BUNDLE_ID=" + shellQuoted(identifier) + " -DMOLTEN_IOS_NAME=" + shellQuoted(name) + " -DMOLTEN_IOS_TEAM=" + shellQuoted(team) +
          " -DMOLTEN_IOS_VERSION=" + shellQuoted(project.version.empty() ? std::string("1.0") : project.version) + " -DMOLTEN_IOS_BUILD_NUMBER=\"$BUILD_NUMBER\"" +
-         " -DMOLTEN_IOS_ICON=" + shellQuoted(phoneIconFor(project.iconFile(engineRoot), build)) + " || exit 1\n";
+         " -DMOLTEN_IOS_ICON=" + shellQuoted(phoneIconFor(project.iconFile(engineRoot), build)) +
+         " -DMOLTEN_IOS_ASSETS=" + shellQuoted(phoneAssetsFor(project, build)) + " || exit 1\n";
     if (goal == Goal::OpenInXcode) {
         s += "echo '== Opening it in Xcode: choose the MoltenPlayer scheme and your device, and press Run'\n";
         s += "open \"$BUILD/MoltenMetalEngine.xcodeproj\" || exit 1\n";

@@ -45,6 +45,49 @@ void Assets::setProjectDirectory(std::string directory) {
     reload();
 }
 
+size_t Assets::refreshInPlace(const std::string& name) {
+    size_t refreshed = 0;
+    // Pictures: each format it was asked for ("name|format").
+    std::vector<std::string> keys;
+    for (const auto& [key, texture] : textures_) {
+        if (key.compare(0, name.size() + 1, name + "|") == 0) keys.push_back(key);
+    }
+    for (const std::string& key : keys) {
+        std::shared_ptr<Texture> old = textures_[key];
+        TextureFormat format = TextureFormat(std::stoi(key.substr(name.size() + 1)));
+        textures_.erase(key);
+        std::shared_ptr<Texture> fresh = texture(name, format);
+        if (old && fresh && fresh != old) {
+            old->adopt(*fresh);
+            refreshed++;
+        }
+        if (old) textures_[key] = old;
+    }
+    // Shapes: the file, and each part of a model ("car.glb#3").
+    keys.clear();
+    for (const auto& [key, mesh] : meshes_) {
+        if (key == name || key.compare(0, name.size() + 1, name + "#") == 0) keys.push_back(key);
+    }
+    models_.erase(name);
+    for (const std::string& key : keys) {
+        std::shared_ptr<Mesh> old = meshes_[key];
+        meshes_.erase(key);
+        std::shared_ptr<Mesh> fresh = mesh(key);
+        if (old && fresh && fresh != old && !old->isDynamic) {
+            old->adopt(std::move(*fresh));
+            refreshed++;
+        }
+        if (old) meshes_[key] = old;
+    }
+    // A material is read again into the object the meshes hold; a sound when next played.
+    if (materials_.count(name)) {
+        reload(name);
+        if (materials_.count(name)) refreshed++;
+    }
+    if (sounds_.erase(name)) refreshed++;
+    return refreshed;
+}
+
 void Assets::reload(const std::string& name) {
     if (name.empty()) {
         textures_.clear();
@@ -132,6 +175,13 @@ std::shared_ptr<Mesh> Assets::mesh(const std::string& name) {
     auto found = meshes_.find(name);
     if (found != meshes_.end()) return found->second;
     std::shared_ptr<Mesh> mesh;
+    if (auto ready = preloaded_.find(name); ready != preloaded_.end()) {
+        mesh = std::make_shared<Mesh>(device_, ready->second);
+        mesh->name = name;
+        preloaded_.erase(ready);
+        meshes_[name] = mesh;
+        return mesh;
+    }
     if (isGltfFile(name)) {
         // A glTF model: every mesh of it in its place, as one, standing as it was modeled.
         // "car.glb#3" is one part of the model; "car.glb" is all of it as one. The file is

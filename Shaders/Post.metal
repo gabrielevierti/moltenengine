@@ -77,6 +77,30 @@ static float videoNoise(float2 p, float time) {
     return fract(sin(dot(p + fract(time * 7.13) * float2(37.0, 17.0), float2(12.9898, 78.233))) * 43758.5453);
 }
 
+// Linear light to the numbers of an sRGB picture, and back.
+static float3 gradeToSRGB(float3 c) {
+    c = saturate(c);
+    return select(1.055 * pow(c, float3(1.0 / 2.4)) - 0.055, c * 12.92, c <= 0.0031308);
+}
+static float3 gradeToLinear(float3 c) {
+    return select(pow((c + 0.055) / 1.055, float3(2.4)), c / 12.92, c <= 0.04045);
+}
+
+// The color grading table: `size` squares side by side, red across each, green down it, blue
+// from one square to the next. The color is looked up between the two squares its blue falls
+// between, as an sRGB picture painted by eye.
+static float3 gradeWithTable(float3 linearColor, texture2d<float> table, sampler linearSampler, float size) {
+    float3 c = gradeToSRGB(linearColor);
+    float blue = c.b * (size - 1.0);
+    float lower = floor(blue);
+    float upper = min(lower + 1.0, size - 1.0);
+    float x = (c.r * (size - 1.0) + 0.5) / (size * size);
+    float y = (c.g * (size - 1.0) + 0.5) / size;
+    float3 a = table.sample(linearSampler, float2(x + lower / size, y), level(0.0)).rgb;
+    float3 b = table.sample(linearSampler, float2(x + upper / size, y), level(0.0)).rgb;
+    return gradeToLinear(mix(a, b, blue - lower));
+}
+
 // The last pass: the lens, scene plus bloom, exposure, tone mapping, vignette, and the
 // flaws of a video link. The result is linear; the drawable has an sRGB format, so
 // Metal applies the gamma curve itself.
@@ -84,6 +108,8 @@ fragment float4 fragment_tonemap(FullscreenOut in [[stage_in]],
                                  constant PostUniforms &post [[buffer(MMBufferPass)]],
                                  texture2d<float> scene [[texture(0)]],
                                  texture2d<float> bloom [[texture(1)]],
+                                 texture2d<float> gradingTable [[texture(2)]],
+                                 texture2d<float> adaptedExposure [[texture(3)]],
                                  sampler linearSampler [[sampler(MMSamplerLinearClamp)]]) {
     float2 uv = in.uv;
 
@@ -118,6 +144,9 @@ fragment float4 fragment_tonemap(FullscreenOut in [[stage_in]],
     }
     hdr += bloom.sample(linearSampler, lensUV).rgb * post.bloomIntensity;
     hdr *= post.exposure;
+    if (post.autoExposure != 0u) {
+        hdr *= adaptedExposure.read(uint2(0, 0)).r * exp2(post.exposureCompensation);
+    }
 
     float3 mapped;
     if (post.toneMapper == 0) {
@@ -126,6 +155,10 @@ fragment float4 fragment_tonemap(FullscreenOut in [[stage_in]],
         mapped = hdr / (hdr + 1.0);                     // Reinhard
     } else {
         mapped = saturate(hdr);
+    }
+
+    if (post.lutSize >= 2.0 && post.lutAmount > 0.0) {
+        mapped = mix(mapped, gradeWithTable(mapped, gradingTable, linearSampler, post.lutSize), post.lutAmount);
     }
 
     float2 fromCenter = in.uv - 0.5;

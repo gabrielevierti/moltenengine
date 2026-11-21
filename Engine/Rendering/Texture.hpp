@@ -22,6 +22,12 @@ public:
     explicit Texture(NS::SharedPtr<MTL::Texture> texture) : texture_(std::move(texture)) {}
 
     MTL::Texture* handle() const { return texture_.get(); }
+    /// Takes the pixels of `fresher` (the same file, read again): everything that holds this
+    /// texture draws the new picture. The GPU must not be using the old one.
+    void adopt(const Texture& fresher) {
+        texture_ = fresher.texture_;
+        isPixelated = fresher.isPixelated;
+    }
     int width() const { return int(texture_->width()); }
     int height() const { return int(texture_->height()); }
 

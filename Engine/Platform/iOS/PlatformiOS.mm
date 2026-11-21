@@ -35,6 +35,12 @@ struct Shared {
     bool primaryBegan = false, primaryEnded = false;
     molten::Vec2 primaryPosition{0, 0}, primaryDelta{0, 0};
 
+    // The on-screen keyboard, while a text field of the game is being typed in.
+    UIView* view = nil;
+    std::vector<uint32_t> typed;                    // letters typed since the last frame
+    std::vector<molten::Key> keysPressed;           // Return and Backspace from the keyboard, pressed this frame
+    std::vector<molten::Key> keysToRelease;         // and let go the next
+
     std::unique_ptr<molten::Engine> engine;
     std::unique_ptr<molten::Game> game;
 };
@@ -48,7 +54,7 @@ Shared& shared() {
 
 // ---------------------------------------------------------------- the view
 
-@interface MoltenView : UIView
+@interface MoltenView : UIView <UIKeyInput>
 @end
 
 @implementation MoltenView
@@ -64,6 +70,38 @@ Shared& shared() {
         self.backgroundColor = UIColor.blackColor;
     }
     return self;
+}
+
+// ---- the keyboard: shown while the game has a text field that takes what is typed
+
+- (BOOL)canBecomeFirstResponder {
+    return YES;
+}
+
+- (BOOL)hasText {
+    return YES;                                     // so that Backspace is always sent
+}
+
+- (void)insertText:(NSString*)text {
+    Shared& state = shared();
+    NSData* letters = [text dataUsingEncoding:NSUTF32LittleEndianStringEncoding];
+    const uint32_t* codes = static_cast<const uint32_t*>(letters.bytes);
+    for (NSUInteger i = 0; i < letters.length / 4; i++) {
+        if (codes[i] == '\n' || codes[i] == '\r') state.keysPressed.push_back(molten::Key::Enter);
+        else state.typed.push_back(codes[i]);
+    }
+}
+
+- (void)deleteBackward {
+    shared().keysPressed.push_back(molten::Key::Backspace);
+}
+
+- (UIKeyboardType)keyboardType {
+    return UIKeyboardTypeDefault;
+}
+
+- (UITextAutocorrectionType)autocorrectionType {
+    return UITextAutocorrectionTypeNo;              // a name is not a word to correct
 }
 
 /// Keeps the layer's textures the size of the view, in pixels. Called when the view
@@ -152,6 +190,7 @@ Shared& shared() {
 
 - (void)loadView {
     self.view = [[MoltenView alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    shared().view = self.view;
 }
 
 - (BOOL)prefersStatusBarHidden {
@@ -208,6 +247,12 @@ Shared& shared() {
 - (void)step:(CADisplayLink*)link {
     Shared& state = shared();
     if (state.engine && state.game) state.engine->frame();
+    // The keyboard comes up when a text field is clicked, and goes when it lets go.
+    UIView* view = state.view;
+    if (state.engine && view) {
+        if (state.engine->wantsTextInput && !view.isFirstResponder) [view becomeFirstResponder];
+        else if (!state.engine->wantsTextInput && view.isFirstResponder) [view resignFirstResponder];
+    }
 }
 
 /// In the background an application must not draw: the system would end it.
@@ -334,6 +379,16 @@ void Window::pollEvents(Input& input) {
     state.primaryDelta = Vec2{0, 0};
 
     input.handleTouches(state.touches);
+    // What the on-screen keyboard typed: letters, and Return and Backspace as keys for a frame.
+    for (molten::Key key : state.keysToRelease) input.handleKey(key, false);
+    state.keysToRelease.clear();
+    for (molten::Key key : state.keysPressed) {
+        input.handleKey(key, true);
+        state.keysToRelease.push_back(key);
+    }
+    state.keysPressed.clear();
+    for (uint32_t letter : state.typed) input.handleText(letter);
+    state.typed.clear();
     // For the next frame: lifted fingers are gone, and the others have not moved or just landed yet.
     std::vector<Input::Touch> remaining;
     for (Input::Touch touch : state.touches) {

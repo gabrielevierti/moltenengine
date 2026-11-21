@@ -1,4 +1,6 @@
 // The inspector: the components of the selected entity, or the facts of the selected asset.
+#include "MultiEdit.hpp"
+#include "Scene/SceneFile.hpp"
 #include "Editor.hpp"
 #include "Assets/Gltf.hpp"
 #include "Core/TextFile.hpp"
@@ -7,6 +9,7 @@
 #include "Platform.hpp"
 
 #include <algorithm>
+#include <map>
 #include <functional>
 #include <filesystem>
 
@@ -35,7 +38,23 @@ public:
         SceneDocument& scene = editor.scene;
         Entity entity = scene.primary();
         if (editor.engine.scene.isAlive(entity)) {
-            drawEntity(editor, entity);
+            // Many selected: what is changed on this one is changed on all of them.
+            const std::vector<Entity>& selected = scene.selection();
+            if (selected.size() > 1) {
+                EntityPicture before = pictureOf(editor.engine.scene, entity, scene.materials);
+                drawEntity(editor, entity);
+                if (editor.engine.scene.isAlive(entity)) {
+                    EntityPicture after = pictureOf(editor.engine.scene, entity, scene.materials);
+                    if (after.values != before.values || after.lines != before.lines) {
+                        std::vector<Entity> others(selected.begin(), selected.end());
+                        if (spreadChanges(editor.engine.scene, before, after, entity, others, scene.materials, sceneAssets(editor.engine.assets())) > 0) {
+                            scene.markChanged();
+                        }
+                    }
+                }
+            } else {
+                drawEntity(editor, entity);
+            }
         } else if (!editor.selectedAsset.empty() && editor.assets.find(editor.selectedAsset)) {
             drawAsset(editor, *editor.assets.find(editor.selectedAsset));
         } else {
@@ -45,7 +64,85 @@ public:
     }
 
 private:
+    // ---------------------------------------------------------------- parts of prefab copies
+
+    /// Every value of an entity that a prefab copy can change, as text, by "Component field".
+    static std::map<std::string, std::string> valuesOf(EditorContext& editor, Entity entity) {
+        std::map<std::string, std::string> values;
+        Scene& scene = editor.engine.scene;
+        char text[128];
+        if (const Transform* transform = scene.get<Transform>(entity)) {
+            auto vec = [&](Vec3 v) {
+                std::snprintf(text, sizeof(text), "%g %g %g", double(v.x), double(v.y), double(v.z));
+                return std::string(text);
+            };
+            values["Transform\nposition"] = vec(transform->position);
+            values["Transform\nrotation"] = vec(toEulerAngles(transform->rotation) * (180.0f / kPi));
+            values["Transform\nscale"] = vec(transform->scale);
+            values["Transform\nactive"] = transform->isActive ? "1" : "0";
+        }
+        if (const MeshRenderer* renderer = scene.get<MeshRenderer>(entity); renderer && renderer->material && !renderer->material->assetName.empty()) {
+            values["MeshRenderer\nmaterial"] = renderer->material->assetName;
+        }
+        for (const ComponentType& type : ComponentRegistry::instance().types()) {
+            void* component = type.get ? type.get(scene, entity) : nullptr;
+            if (!component) continue;
+            for (const Field& field : type.fields) values[type.name + "\n" + field.name] = field.valueText(component);
+        }
+        return values;
+    }
+
+    /// The copy a part belongs to: the nearest above it that is a prefab's copy and is in the scene's file.
+    static Entity copyOf(Scene& scene, Entity part) {
+        Entity at = part;
+        for (int depth = 0; depth < 64 && scene.isAlive(at); depth++) {
+            if (scene.has<PrefabInstance>(at) && !scene.has<FromPrefab>(at)) return at;
+            const Transform* transform = scene.get<Transform>(at);
+            at = transform ? transform->parent : Entity{};
+        }
+        return Entity{};
+    }
+
     void drawEntity(EditorContext& editor, Entity entity) {
+        Scene& scene = editor.engine.scene;
+        Entity copy = scene.has<FromPrefab>(entity) ? copyOf(scene, entity) : Entity{};
+        PrefabInstance* instance = scene.get<PrefabInstance>(copy);
+        std::string path;
+        if (!instance || !pathBelow(scene, copy, entity, path)) {
+            drawEntityBody(editor, entity);
+            return;
+        }
+        // What this part changes of its prefab, and a way to take it back.
+        size_t mine = 0;
+        for (const PrefabOverride& change : instance->overrides) mine += change.path == path;
+        ImGui::TextColored(ImVec4(0.45f, 0.7f, 1.0f, 1), "Part of a copy of %s", instance->prefab.c_str());
+        if (mine > 0) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("(%zu changed here)", mine);
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Take Back")) {
+                instance->overrides.erase(std::remove_if(instance->overrides.begin(), instance->overrides.end(),
+                                                         [&](const PrefabOverride& change) { return change.path == path; }),
+                                          instance->overrides.end());
+                editor.scene.rebuild();             // the part made again from its prefab
+                return;
+            }
+            ui::tooltip("This part as its prefab has it again");
+        }
+        std::map<std::string, std::string> before = valuesOf(editor, entity);
+        drawEntityBody(editor, entity);
+        if (!scene.isAlive(entity)) return;
+        std::map<std::string, std::string> after = valuesOf(editor, entity);
+        // What changed is kept as the copy's own, so that saving the scene keeps it.
+        for (const auto& [key, value] : after) {
+            auto was = before.find(key);
+            if (was != before.end() && was->second == value) continue;
+            size_t split = key.find('\n');
+            instance->setOverride(PrefabOverride{path, key.substr(0, split), key.substr(split + 1), value});
+        }
+    }
+
+    void drawEntityBody(EditorContext& editor, Entity entity) {
         SceneDocument& document = editor.scene;
         Scene& scene = editor.engine.scene;
 
@@ -111,7 +208,7 @@ private:
             }
         }
         if (document.selection().size() > 1) {
-            ImGui::TextDisabled("%zu entities selected. Changes here apply to this one.", document.selection().size());
+            ImGui::TextDisabled("%zu entities selected: what is changed here is changed on all of them.", document.selection().size());
         }
         ImGui::Spacing();
 

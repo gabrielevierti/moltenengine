@@ -1,5 +1,8 @@
 #include "GraphEditor.hpp"
 
+#include <cstdlib>
+#include <cstdio>
+#include <sstream>
 #include <misc/cpp/imgui_stdlib.h>
 
 #include <algorithm>
@@ -114,6 +117,21 @@ bool GraphEditor::drawNode(Graph& graph, Node& node, const NodeDef* definition, 
     drawList->AddRect(min, max, selected ? IM_COL32(255, 160, 80, 255) : IM_COL32(14, 15, 18, 255), round, 0, selected ? 2.0f : 1.0f);
     std::string title = definition ? definition->title : node.type + " (unknown)";
     drawList->AddText(ImVec2(min.x + 10 * z, min.y + (titleHeight - ImGui::GetFontSize()) * 0.5f), IM_COL32(255, 255, 255, 255), title.c_str());
+    if (debug) {
+        // Ran just now: lit, fading over half a second. Held before it: a thick yellow ring.
+        if (debug->ran) {
+            auto ran = debug->ran->find(node.id);
+            if (ran != debug->ran->end()) {
+                float fade = 1.0f - float(std::clamp((debug->now - ran->second) / 0.5, 0.0, 1.0));
+                if (fade > 0) drawList->AddRect(ImVec2(min.x - 2, min.y - 2), ImVec2(max.x + 2, max.y + 2), IM_COL32(120, 255, 160, int(220 * fade)), round + 2, 0, 3.0f);
+            }
+        }
+        if (debug->stoppedAt == node.id) drawList->AddRect(ImVec2(min.x - 4, min.y - 4), ImVec2(max.x + 4, max.y + 4), IM_COL32(255, 220, 60, 255), round + 4, 0, 4.0f);
+        if (debug->hasBreakpoint && debug->hasBreakpoint(node.id)) {
+            drawList->AddCircleFilled(ImVec2(max.x - 11 * z, min.y + titleHeight * 0.5f), 5.5f * z, IM_COL32(235, 60, 60, 255), 16);
+            drawList->AddCircle(ImVec2(max.x - 11 * z, min.y + titleHeight * 0.5f), 5.5f * z, IM_COL32(20, 0, 0, 255), 16, 1.2f);
+        }
+    }
 
     // The title is the handle the node is dragged by: with the others that are selected.
     ImGui::SetCursorScreenPos(min);
@@ -144,7 +162,18 @@ bool GraphEditor::drawNode(Graph& graph, Node& node, const NodeDef* definition, 
         menuNode_ = node.id;
         ImGui::OpenPopup("##node-menu");
     }
+    // F9 on the selected node: a breakpoint there, or none.
+    if (debug && debug->toggleBreakpoint && selection_.size() == 1 && *selection_.begin() == node.id && ImGui::IsKeyPressed(ImGuiKey_F9, false) &&
+        ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows)) {
+        debug->toggleBreakpoint(node.id);
+    }
     if (ImGui::BeginPopup("##node-menu")) {
+        if (debug && debug->toggleBreakpoint && definition && definition->execute) {
+            bool has = debug->hasBreakpoint && debug->hasBreakpoint(node.id);
+            if (ImGui::MenuItem(has ? "Remove Breakpoint" : "Add Breakpoint", "F9")) debug->toggleBreakpoint(node.id);
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("While the game runs, it is held when the flow comes to this node, before it runs");
+            ImGui::Separator();
+        }
         if (ImGui::MenuItem(selection_.size() > 1 ? "Delete Nodes" : "Delete Node")) {
             std::set<int> doomed = selection_;
             doomed.insert(node.id);
@@ -435,6 +464,37 @@ bool GraphEditor::draw(Graph& graph, ImVec2 size) {
         bool isFlow = from->second.type == PinType::Flow;
         ImU32 color = pinColor(from->second.type);
         drawWire(from->second.position, to->second.position, isFlow ? color : (color & IM_COL32(255, 255, 255, 0)) | IM_COL32(0, 0, 0, 200), isFlow ? 3.0f : 2.2f, true);
+        // What went along it last, while the game runs: a label half way.
+        if (!isFlow && debug && debug->values) {
+            auto seen = debug->values->find({link.fromNode, link.fromPin});
+            if (seen != debug->values->end()) {
+                std::string text = seen->second;
+                // Numbers shortened: "3.14159274" is "3.142".
+                std::string shortened, word;
+                std::istringstream words(text);
+                while (words >> word) {
+                    char* end = nullptr;
+                    double number = std::strtod(word.c_str(), &end);
+                    if (end && *end == 0 && end != word.c_str()) {
+                        char buffer[32];
+                        std::snprintf(buffer, sizeof(buffer), "%.3g", number);
+                        word = buffer;
+                    }
+                    shortened += (shortened.empty() ? "" : " ") + word;
+                }
+                if (!shortened.empty() || text.empty()) text = shortened;
+                if (text.size() > 28) text = text.substr(0, 27) + "\xE2\x80\xA6";
+                if (text.empty()) text = "\"\"";
+                ImVec2 a = from->second.position, d = to->second.position;
+                float bend = std::max(std::abs(d.x - a.x) * 0.5f, 40.0f * zoom_);
+                ImVec2 middle = bezierAt(a, ImVec2(a.x + bend, a.y), ImVec2(d.x - bend, d.y), d, 0.5f);
+                ImVec2 size = ImGui::CalcTextSize(text.c_str());
+                ImVec2 low(middle.x - size.x * 0.5f - 4, middle.y - size.y * 0.5f - 2), high(middle.x + size.x * 0.5f + 4, middle.y + size.y * 0.5f + 2);
+                drawList->AddRectFilled(low, high, IM_COL32(18, 20, 24, 235), 4);
+                drawList->AddRect(low, high, color, 4);
+                drawList->AddText(ImVec2(low.x + 4, low.y + 2), IM_COL32(235, 235, 235, 255), text.c_str());
+            }
+        }
     }
 
     // A wire being pulled follows the pointer; released over a pin of the other kind, it is plugged in.

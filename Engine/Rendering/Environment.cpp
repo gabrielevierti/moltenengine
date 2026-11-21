@@ -60,7 +60,8 @@ bool Environment::updateIfNeeded(MTL::CommandBuffer* commandBuffer, const gpu::F
                 simd::all(frame.skyHorizonColor == captured_.skyHorizonColor) &&
                 simd::all(frame.skyGroundColor == captured_.skyGroundColor) && frame.skyIntensity == captured_.skyIntensity &&
                 // Clouds drift every frame: only a change in how many there are is worth a new capture.
-                frame.cloudCoverage == captured_.cloudCoverage && frame.cloudScale == captured_.cloudScale;
+                frame.cloudCoverage == captured_.cloudCoverage && frame.cloudScale == captured_.cloudScale &&
+                frame.physicalSky == captured_.physicalSky && frame.skyHaze == captured_.skyHaze;
     if (same || !shaders_.isValid()) return false;
 
     gpu::CaptureUniforms capture{};

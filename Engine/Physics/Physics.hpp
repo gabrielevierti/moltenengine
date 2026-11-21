@@ -72,6 +72,7 @@ struct Joint {
     float length = 0;                   // distance: the length; 0 keeps what there is when the game starts
     bool isRope = false;                // distance: only pulls, as a rope; a rod also pushes
     float breakForce = 0;               // above zero: it gives way when pulled harder than this, newtons
+    float swingLimit = 0;               // ball: the most it bends from how it started, degrees; 0 as far as it likes (a ragdoll's knees, a chain)
 
     // Worked out when the game starts.
     bool isSet = false, isBroken = false;
