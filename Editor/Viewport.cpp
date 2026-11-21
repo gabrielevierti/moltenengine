@@ -989,7 +989,6 @@ void arrangeInterface(EditorContext& editor, ImVec2 at, ImVec2 shown, Vec2 scree
             } else {
                 // A piece already among the chosen keeps the others with it.
                 if (!isChosen(under->entity)) document.select(under->entity);
-                editor.selectedAsset.clear();
                 chosen.clear();
                 for (const InterfacePiece& piece : pieces) {
                     if (isChosen(piece.entity)) chosen.push_back(&piece);
@@ -1153,7 +1152,10 @@ void drawGameView(EditorContext& editor, bool takesCanvas) {
     Engine& engine = editor.engine;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::SetNextWindowSizeConstraints(kLeastViewSize, ImVec2(FLT_MAX, FLT_MAX));
-    bool isVisible = ImGui::Begin("Game", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoCollapse);
+    // Playing, nothing in it is reached by the keyboard's navigation: the keys steer the game.
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoCollapse;
+    if (editor.scene.isPlaying()) flags |= ImGuiWindowFlags_NoNav;
+    bool isVisible = ImGui::Begin("Game", nullptr, flags);
     ImGui::PopStyleVar();
     keepViewAtLeast();
     editor.gameViewHasFocus = isVisible && ImGui::IsWindowFocused();
@@ -1667,7 +1669,6 @@ void drawSceneView(EditorContext& editor) {
         } else {
             document.select(hit);
         }
-        if (hit.isValid()) editor.selectedAsset.clear();
     }
 
     // Things dragged in from the asset browser land where the pointer is on the ground.

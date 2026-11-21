@@ -73,7 +73,11 @@ An arrow leads to one place; wiring it somewhere else moves the wire. An input t
 
 **Variables** — Set Variable · Get Variable (numbers remembered by name, separately for each entity)
 
-Keys are written by name: `A`, `7`, `Space`, `Enter`, `Left`, `Right`, `Up`, `Down`, `Shift`, `Escape`, `Tab`.
+**Animation** (the entity's Animator) — Set Animator Float · Set Animator Bool · Set Animator Trigger · Play State (a state now, eased over some seconds) · Play Clip (without a controller) · Set Animator Speed · Animator Parameter · Animator State (the state it is in, whether it is a given one, whether a clip that does not loop has ended). Parameters and states are chosen from the controller's lists; the events of clips come as messages to On Message.
+
+Every text box that names something (a key, a sound, a scene, a prefab, an entity, a message, a shared value, a variable, a parameter, a state) is a list of what it can be, never typed: only the words of a Log are.
+
+Keys are chosen by name from the list: `A`, `7`, `Space`, `Enter`, `Left`, `Right`, `Up`, `Down`, `Shift`, `Escape`, `Tab`.
 
 Hover a node's title to read what it does.
 

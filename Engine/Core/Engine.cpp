@@ -1,3 +1,4 @@
+#include "Water/Ocean.hpp"
 #include "Core/Engine.hpp"
 #include "Platform/DeviceState.hpp"
 
@@ -336,6 +337,10 @@ bool Engine::listener(Mat4& world) {
 
 void Engine::endSound(uint32_t sound) {
     audio_->stop(sound);
+}
+
+void Engine::showOcean(const Ocean& ocean, Vec2 origin) {
+    renderer_->showOcean(ocean, origin);
 }
 
 void Engine::groupSound(uint32_t sound, const std::string& group) {

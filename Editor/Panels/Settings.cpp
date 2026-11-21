@@ -2,6 +2,7 @@
 #include "Editor.hpp"
 #include "Core/TextFile.hpp"
 #include "Panels/Widgets.hpp"
+#include "Panels/Pickers.hpp"
 
 #include <algorithm>
 
@@ -63,6 +64,9 @@ private:
             }
         }
         if (ui::section("Sky")) {
+            changed |= ui::checkbox("Sunset Colors", settings.sky.sunsetColors);
+            ui::tooltip("As the sun nears the horizon: its light goes gold, orange and red, the sky glows round it, the clouds are lit from below; "
+                        "when it has set, the sky darkens into night");
             changed |= ui::checkbox("From the Air", settings.sky.isPhysical);
             ui::tooltip("The sky's colors worked out from how sunlight scatters in the air: blue by day, gold and red at sunset, dark at night, from the sun's height. "
                         "Off: the three colors below");
@@ -267,11 +271,7 @@ public:
                 changed |= ui::dragFloat("Darkest", settings.darkestExposure, 0.01f, 0.01f, 10.0f);
                 changed |= ui::dragFloat("Brightest", settings.brightestExposure, 0.05f, 0.1f, 100.0f);
             }
-            std::string grading = settings.colorGrading;
-            if (ImGui::InputTextWithHint("Grading Table", "Grading/Neutral 32.png", &grading, ImGuiInputTextFlags_EnterReturnsTrue)) {
-                settings.colorGrading = grading;
-                changed = true;
-            }
+            changed |= pickValue(editor, Entity{}, "picture", "Grading Table", settings.colorGrading);
             ui::tooltip("A picture in Assets of 32 squares of 32 pixels side by side (red across, green down, blue square to square). "
                         "Assets/Grading/Neutral 32.png changes nothing: grade a copy of it in a photo editor. Empty: none");
             if (!settings.colorGrading.empty()) changed |= ui::sliderFloat("Grading Amount", settings.colorGradingAmount, 0.0f, 1.0f);

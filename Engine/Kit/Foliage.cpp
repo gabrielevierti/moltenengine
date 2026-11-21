@@ -134,7 +134,7 @@ int Foliage::erase(Vec2 middle, float radius) {
 
 using namespace molten::kit;
 
-MOLTEN_COMPONENT(Foliage, MOLTEN_FIELD(places).help("The file of its copies in Assets: Foliage/Grass.foliage. Made when first painted"),
+MOLTEN_COMPONENT(Foliage, MOLTEN_FIELD(places).picks("foliage").help("The file of its copies in Assets: Foliage/Grass.foliage. Made when first painted"),
                  MOLTEN_FIELD(drawDistance).range(0, 2000).help("Meters: copies farther away are not drawn; 0 draws them all"),
                  MOLTEN_FIELD(density).range(0.01f, 50).help("Copies a square meter, where the brush paints"),
                  MOLTEN_FIELD(spacing).range(0, 50).help("Meters: no two copies closer"), MOLTEN_FIELD(smallest).range(0.05f, 10),

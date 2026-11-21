@@ -86,7 +86,11 @@ bool GraphEditor::drawValueEditor(Node& node, const PinDef& pin, float width) {
             value.z = v[2];
             break;
         }
-        case PinType::String: changed = ImGui::InputText("##value", &value.text); break;
+        case PinType::String:
+            // What it names, from a list (a sound, a scene, an entity, a key...); words only for words.
+            if (!pin.pick.empty() && pickText) changed = pickText(pin, value.text, width);
+            else changed = ImGui::InputText("##value", &value.text);
+            break;
         case PinType::Flow: break;
     }
     ImGui::PopID();

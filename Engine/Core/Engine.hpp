@@ -110,6 +110,7 @@ public:
     bool isSavingBattery() const override;
     void endSound(uint32_t sound) override;
     void groupSound(uint32_t sound, const std::string& group) override;
+    void showOcean(const class Ocean& ocean, Vec2 origin) override;
     void mixGroup(const std::string& group, float volume, bool isMuted) override;
     void duckGroup(const std::string& group, const std::string& under, float to) override;
     void muffleSound(uint32_t sound, float muffle) override;

@@ -717,28 +717,28 @@ MOLTEN_COMPONENT(Buoyancy, MOLTEN_FIELD(waterLevel), MOLTEN_FIELD(lift).range(0,
                  MOLTEN_FIELD(hull).help("Half its size each way: then it rocks on the waves and rights itself. Zero: held up at its middle"),
                  MOLTEN_FIELD(turnDrag).range(0, 10), MOLTEN_FIELD(current).help("The water's flow, meters per second"),
                  MOLTEN_FIELD(lengthDrag).range(0, 1).help("Of the drag, along its length: a hull cuts through the water ahead"))
-MOLTEN_COMPONENT(Follow, MOLTEN_FIELD(target).help("The name of the entity to follow"), MOLTEN_FIELD(offset), MOLTEN_FIELD(smoothness).range(0, 20),
+MOLTEN_COMPONENT(Follow, MOLTEN_FIELD(target).picks("entity").help("The name of the entity to follow"), MOLTEN_FIELD(offset), MOLTEN_FIELD(smoothness).range(0, 20),
                  MOLTEN_FIELD(looksAtTarget), MOLTEN_FIELD(turnsWithTarget))
 MOLTEN_COMPONENT(Spin, MOLTEN_FIELD(axis), MOLTEN_FIELD(degreesPerSecond))
 MOLTEN_COMPONENT(LodGroup, MOLTEN_FIELD(distance).range(1, 2000).help("Meters from the camera: nearer, the model in full; farther, the child named Far"),
-                 MOLTEN_FIELD(far).help("The child that is the simpler version, drawn only from far away"))
-MOLTEN_COMPONENT(Mover, MOLTEN_FIELD(velocity), MOLTEN_FIELD(isLocal), MOLTEN_FIELD(chases).help("If set: move toward the entity with this name"),
+                 MOLTEN_FIELD(far).picks("child").help("The child that is the simpler version, drawn only from far away"))
+MOLTEN_COMPONENT(Mover, MOLTEN_FIELD(velocity), MOLTEN_FIELD(isLocal), MOLTEN_FIELD(chases).picks("entity").help("If set: move toward the entity with this name"),
                  MOLTEN_FIELD(chaseSpeed))
 MOLTEN_COMPONENT(Lifetime, MOLTEN_FIELD(seconds))
 MOLTEN_COMPONENT(LoadingScreen)
-MOLTEN_COMPONENT(Collectible, MOLTEN_FIELD(collector).help("Who can pick it up, by name; empty for anyone"),
-                 MOLTEN_FIELD(counter).help("The shared value that goes up"), MOLTEN_FIELD(amount), MOLTEN_FIELD(sound), MOLTEN_FIELD(effect))
-MOLTEN_COMPONENT(Health, MOLTEN_FIELD(amount), MOLTEN_FIELD(counter).help("A shared value that shows it, for the screen"), MOLTEN_FIELD(scoreCounter),
-                 MOLTEN_FIELD(points), MOLTEN_FIELD(effect).help("A prefab spawned where it died"), MOLTEN_FIELD(restartsSceneOnDeath))
-MOLTEN_COMPONENT(Damage, MOLTEN_FIELD(amount), MOLTEN_FIELD(onlyTo).help("If set: only entities whose name starts with this"), MOLTEN_FIELD(destroysSelf))
-MOLTEN_COMPONENT(Shooter, MOLTEN_FIELD(prefab), MOLTEN_FIELD(key).choices({"Space", "Enter", "F", "E", "Q", "X", "Z", "LeftShift", "LeftControl"}), MOLTEN_FIELD(pointerToo), MOLTEN_FIELD(interval).range(0.02f, 3), MOLTEN_FIELD(muzzle),
-                 MOLTEN_FIELD(sound))
-MOLTEN_COMPONENT(Spawner, MOLTEN_FIELD(prefab), MOLTEN_FIELD(interval).help("Seconds between two"), MOLTEN_FIELD(radius), MOLTEN_FIELD(limit).help("Stop after this many; 0 for no limit"),
+MOLTEN_COMPONENT(Collectible, MOLTEN_FIELD(collector).picks("entityOrTag").help("Who can pick it up, by name; empty for anyone"),
+                 MOLTEN_FIELD(counter).picks("value").help("The shared value that goes up"), MOLTEN_FIELD(amount), MOLTEN_FIELD(sound).picks("sound"), MOLTEN_FIELD(effect).picks("prefab"))
+MOLTEN_COMPONENT(Health, MOLTEN_FIELD(amount), MOLTEN_FIELD(counter).picks("value").help("A shared value that shows it, for the screen"), MOLTEN_FIELD(scoreCounter).picks("value"),
+                 MOLTEN_FIELD(points), MOLTEN_FIELD(effect).picks("prefab").help("A prefab spawned where it died"), MOLTEN_FIELD(restartsSceneOnDeath))
+MOLTEN_COMPONENT(Damage, MOLTEN_FIELD(amount), MOLTEN_FIELD(onlyTo).picks("entityOrTag").help("If set: only entities whose name starts with this"), MOLTEN_FIELD(destroysSelf))
+MOLTEN_COMPONENT(Shooter, MOLTEN_FIELD(prefab).picks("prefab"), MOLTEN_FIELD(key).choices({"Space", "Enter", "F", "E", "Q", "X", "Z", "LeftShift", "LeftControl"}), MOLTEN_FIELD(pointerToo), MOLTEN_FIELD(interval).range(0.02f, 3), MOLTEN_FIELD(muzzle),
+                 MOLTEN_FIELD(sound).picks("sound"))
+MOLTEN_COMPONENT(Spawner, MOLTEN_FIELD(prefab).picks("prefab"), MOLTEN_FIELD(interval).help("Seconds between two"), MOLTEN_FIELD(radius), MOLTEN_FIELD(limit).help("Stop after this many; 0 for no limit"),
                  MOLTEN_FIELD(firstDelay), MOLTEN_FIELD(count).range(0, 1000).help("In a wave; 0: no waves"),
                  MOLTEN_FIELD(waves).range(0, 1000).help("With waves: how many; 0 forever"), MOLTEN_FIELD(waveSeconds).range(0, 600).help("The pause between two waves"),
                  MOLTEN_FIELD(maxAlive).range(0, 10000).help("No more than this about at once; 0: no limit"),
                  MOLTEN_FIELD(usesPool).help("Reuses those put back instead of making new ones"),
-                 MOLTEN_FIELD(aliveValue).help("A shared value kept at how many are about"))
+                 MOLTEN_FIELD(aliveValue).picks("value").help("A shared value kept at how many are about"))
 // ---------------------------------------------------------------- touch controls
 
 namespace {
@@ -989,45 +989,45 @@ MOLTEN_COMPONENT(UILayout, MOLTEN_FIELD(arrangement).range(0, 2).help("0 a row, 
                  MOLTEN_FIELD(color).color())
 MOLTEN_COMPONENT(UIPanel, MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(size), MOLTEN_FIELD(color).color(), MOLTEN_FIELD(border).range(0, 20),
                  MOLTEN_FIELD(borderColor).color())
-MOLTEN_COMPONENT(UIImage, MOLTEN_FIELD(picture).help("A picture of Assets: Textures/logo.png"), MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(size),
+MOLTEN_COMPONENT(UIImage, MOLTEN_FIELD(picture).picks("picture").help("A picture of Assets: Textures/logo.png"), MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(size),
                  MOLTEN_FIELD(tint).color())
 MOLTEN_COMPONENT(UIButton, MOLTEN_FIELD(label), MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(size), MOLTEN_FIELD(color).color(), MOLTEN_FIELD(textColor).color(),
-                 MOLTEN_FIELD(action).help("A button action it holds while pressed: jump, fire"),
+                 MOLTEN_FIELD(action).picks("action").help("A button action it holds while pressed: jump, fire"),
                  MOLTEN_FIELD(isRound).help("A circle for a thumb, of Radius, instead of a box of Size"), MOLTEN_FIELD(radius).range(12, 150),
-                 MOLTEN_FIELD(onlyOnTouchScreens).help("Hidden until the screen is touched: for a game that also has keys"), MOLTEN_FIELD(scene).help("A scene it loads when clicked: Scenes/Level1.scene"),
-                 MOLTEN_FIELD(value).help("A shared value it adds Amount to when clicked"), MOLTEN_FIELD(amount),
-                 MOLTEN_FIELD(font).help("Of its label: a font of Assets, Fonts/Title. Empty: the game's own"))
-MOLTEN_COMPONENT(UIGauge, MOLTEN_FIELD(value).help("The shared value it shows: speed, rpm, boost"), MOLTEN_FIELD(most),
+                 MOLTEN_FIELD(onlyOnTouchScreens).help("Hidden until the screen is touched: for a game that also has keys"), MOLTEN_FIELD(scene).picks("scene").help("A scene it loads when clicked: Scenes/Level1.scene"),
+                 MOLTEN_FIELD(value).picks("value").help("A shared value it adds Amount to when clicked"), MOLTEN_FIELD(amount),
+                 MOLTEN_FIELD(font).picks("font").help("Of its label: a font of Assets, Fonts/Title. Empty: the game's own"))
+MOLTEN_COMPONENT(UIGauge, MOLTEN_FIELD(value).picks("value").help("The shared value it shows: speed, rpm, boost"), MOLTEN_FIELD(most),
                  MOLTEN_FIELD(numbersEvery).help("A numbered mark at each multiple of this; 0 for none"),
                  MOLTEN_FIELD(numbersScale).help("The numbers as written: 0.001 writes rpm in thousands"),
                  MOLTEN_FIELD(redFrom).range(0, 1).help("Where the red part of the arc starts, as a share; 0 for none"), MOLTEN_FIELD(label), MOLTEN_FIELD(showsValue),
                  MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(radius).range(16, 300), MOLTEN_FIELD(thickness).range(1, 40),
                  MOLTEN_FIELD(color).color(), MOLTEN_FIELD(backColor).color())
-MOLTEN_COMPONENT(UIBar, MOLTEN_FIELD(value).help("The shared value it shows: health"), MOLTEN_FIELD(most), MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(size),
+MOLTEN_COMPONENT(UIBar, MOLTEN_FIELD(value).picks("value").help("The shared value it shows: health"), MOLTEN_FIELD(most), MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(size),
                  MOLTEN_FIELD(color).color(), MOLTEN_FIELD(backColor).color())
-MOLTEN_COMPONENT(UISlider, MOLTEN_FIELD(label), MOLTEN_FIELD(value).help("The shared value it shows and sets: volume"),
+MOLTEN_COMPONENT(UISlider, MOLTEN_FIELD(label), MOLTEN_FIELD(value).picks("value").help("The shared value it shows and sets: volume"),
                  MOLTEN_FIELD(isSaved).help("Kept between plays, as a preference of that name"), MOLTEN_FIELD(least), MOLTEN_FIELD(most),
                  MOLTEN_FIELD(step).help("It moves by this much; 0 smoothly"), MOLTEN_FIELD(showsNumber), MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset),
                  MOLTEN_FIELD(size), MOLTEN_FIELD(color).color(), MOLTEN_FIELD(backColor).color(), MOLTEN_FIELD(textColor).color())
-MOLTEN_COMPONENT(UITextField, MOLTEN_FIELD(value).help("The shared text it shows and sets: playerName. Shown by a text as {playerName}"),
+MOLTEN_COMPONENT(UITextField, MOLTEN_FIELD(value).picks("value").help("The shared text it shows and sets: playerName. Shown by a text as {playerName}"),
                  MOLTEN_FIELD(placeholder).help("Shown faintly while it is empty"), MOLTEN_FIELD(maxLength).range(0, 200),
                  MOLTEN_FIELD(isSaved).help("Kept between plays"), MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(size), MOLTEN_FIELD(color).color(),
-                 MOLTEN_FIELD(textColor).color(), MOLTEN_FIELD(focusColor).color(), MOLTEN_FIELD(font).help("A font of Assets; empty for the game's own"))
-MOLTEN_COMPONENT(TouchStick, MOLTEN_FIELD(horizontal).help("The axis action it pushes left and right"), MOLTEN_FIELD(vertical).help("The axis action it pushes up and down"),
+                 MOLTEN_FIELD(textColor).color(), MOLTEN_FIELD(focusColor).color(), MOLTEN_FIELD(font).picks("font").help("A font of Assets; empty for the game's own"))
+MOLTEN_COMPONENT(TouchStick, MOLTEN_FIELD(horizontal).picks("axis").help("The axis action it pushes left and right"), MOLTEN_FIELD(vertical).picks("axis").help("The axis action it pushes up and down"),
                  MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(radius).range(20, 200), MOLTEN_FIELD(verticalIsReversed),
                  MOLTEN_FIELD(onlyOnTouchScreens).help("Hidden until the screen is touched: for a game that also has keys"), MOLTEN_FIELD(color).color())
-MOLTEN_COMPONENT(TouchButton, MOLTEN_FIELD(action).help("The button action it holds: jump, fire..."), MOLTEN_FIELD(label), MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset),
+MOLTEN_COMPONENT(TouchButton, MOLTEN_FIELD(action).picks("action").help("The button action it holds: jump, fire..."), MOLTEN_FIELD(label), MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset),
                  MOLTEN_FIELD(radius).range(12, 150), MOLTEN_FIELD(onlyOnTouchScreens).help("Hidden until the screen is touched: for a game that also has keys"),
                  MOLTEN_FIELD(color).color())
 MOLTEN_COMPONENT(HudText, MOLTEN_FIELD(text).help("{name} shows a shared value: Coins: {score}"), MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset),
-                 MOLTEN_FIELD(font).help("A font of Assets made by Tools/bake_font.py: Fonts/Title. Empty: the game's own"),
+                 MOLTEN_FIELD(font).picks("font").help("A font of Assets made by Tools/bake_font.py: Fonts/Title. Empty: the game's own"),
                  MOLTEN_FIELD(size).range(8, 120), MOLTEN_FIELD(color).color())
-MOLTEN_COMPONENT(Goal, MOLTEN_FIELD(counter), MOLTEN_FIELD(target), MOLTEN_FIELD(message), MOLTEN_FIELD(nextScene), MOLTEN_FIELD(delay))
+MOLTEN_COMPONENT(Goal, MOLTEN_FIELD(counter).picks("value"), MOLTEN_FIELD(target), MOLTEN_FIELD(message), MOLTEN_FIELD(nextScene).picks("scene"), MOLTEN_FIELD(delay))
 MOLTEN_COMPONENT(RestartWhenBelow, MOLTEN_FIELD(height))
 MOLTEN_COMPONENT(ConstantSpeed, MOLTEN_FIELD(speed), MOLTEN_FIELD(startDirection), MOLTEN_FIELD(minimumAlongZ).range(0, 0.9f))
-MOLTEN_COMPONENT(Breakable, MOLTEN_FIELD(by), MOLTEN_FIELD(counter), MOLTEN_FIELD(points), MOLTEN_FIELD(effect), MOLTEN_FIELD(sound))
+MOLTEN_COMPONENT(Breakable, MOLTEN_FIELD(by).picks("entityOrTag"), MOLTEN_FIELD(counter).picks("value"), MOLTEN_FIELD(points), MOLTEN_FIELD(effect).picks("prefab"), MOLTEN_FIELD(sound).picks("sound"))
 MOLTEN_COMPONENT(Explosion, MOLTEN_FIELD(radius), MOLTEN_FIELD(force), MOLTEN_FIELD(damage), MOLTEN_FIELD(flashSeconds))
-MOLTEN_COMPONENT(Decal, MOLTEN_FIELD(picture).help("A picture in Assets, see-through where nothing is drawn. The entity's scale is the decal's size; its y how deep it reaches"),
+MOLTEN_COMPONENT(Decal, MOLTEN_FIELD(picture).picks("picture").help("A picture in Assets, see-through where nothing is drawn. The entity's scale is the decal's size; its y how deep it reaches"),
                  MOLTEN_FIELD(color).color(), MOLTEN_FIELD(opacity).range(0, 1),
                  MOLTEN_FIELD(darkens).help("Multiplies what is under it, as dirt, cracks and tire marks do. Off: painted over it"))
 MOLTEN_COMPONENT(Boat, MOLTEN_FIELD(acceleration).range(0, 40).help("Meters per second, per second, at full throttle"),
@@ -1035,7 +1035,7 @@ MOLTEN_COMPONENT(Boat, MOLTEN_FIELD(acceleration).range(0, 40).help("Meters per 
                  MOLTEN_FIELD(reverse).range(0, 1).help("Of the acceleration, going backwards"),
                  MOLTEN_FIELD(usesInput).help("Driven by the move actions. Off: by throttle and steer, from code"),
                  MOLTEN_FIELD(throttle).range(-1, 1), MOLTEN_FIELD(steer).range(-1, 1))
-MOLTEN_COMPONENT(AudioSource, MOLTEN_FIELD(clip).help("A sound in Assets, like Audio/music.wav"), MOLTEN_FIELD(volume).range(0, 2), MOLTEN_FIELD(pitch).range(0.1f, 4),
+MOLTEN_COMPONENT(AudioSource, MOLTEN_FIELD(clip).picks("sound").help("A sound in Assets, like Audio/music.wav"), MOLTEN_FIELD(volume).range(0, 2), MOLTEN_FIELD(pitch).range(0.1f, 4),
                  MOLTEN_FIELD(loops), MOLTEN_FIELD(playsOnStart),
                  MOLTEN_FIELD(group).choices({"Effects", "Music", "Voices", "Interface"}).help("Which volume it follows"),
                  MOLTEN_FIELD(comesFromHere).help("Heard from where it is: louder near it, from its side, muffled behind walls"),

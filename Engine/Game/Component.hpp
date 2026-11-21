@@ -63,6 +63,21 @@ struct Field {
     std::string tooltip;
 
     std::vector<std::string> options;   // see choices()
+    /// What a text field holds, so that the editor offers what it can be instead of a place to
+    /// type it (one wrong letter and nothing works):
+    ///   "sound", "picture", "prefab", "scene", "font", "model", "controller", "clip", "timeline",
+    ///   "graph", "material", "folder"           a file of the project's Assets, of that kind
+    ///   "entity", "child", "entityOrTag", "tag" an entity of the scene (by name), one under this one, a tag
+    ///   "bone", "bones", "animation"            of the entity's model: a bone, several, an animation in it
+    ///   "value", "message"                      a shared value's name, a message's name (those in use, or a new one)
+    ///   "action", "axis"                        an input action of the project, a button or an axis
+    ///   "state", "parameter"                    of the entity's Animator Controller
+    /// Empty: words typed freely, for what is read by people (a button's label, a text).
+    std::string pick;
+    /// The pick decided by another field of the component: When / Then's target is a sound for
+    /// "Play sound", a scene for "Load scene"...  (that field's value, the pick for it)
+    std::string pickBy;
+    std::vector<std::pair<std::string, std::string>> pickFor;
     Field& range(float low, float high) {
         minimum = low;
         maximum = high;
@@ -76,6 +91,17 @@ struct Field {
     ///     MOLTEN_FIELD(drive).choices({"front", "rear", "all"})
     Field& choices(std::vector<std::string> words) {
         options = std::move(words);
+        return *this;
+    }
+    /// What it holds, for the editor to offer (see `pick`): MOLTEN_FIELD(clip).picks("sound").
+    Field& picks(std::string kind) {
+        pick = std::move(kind);
+        return *this;
+    }
+    /// Its pick follows another field: picksBy("action1", {{"Play sound", "sound"}, {"Load scene", "scene"}}).
+    Field& picksBy(std::string field, std::vector<std::pair<std::string, std::string>> kinds) {
+        pickBy = std::move(field);
+        pickFor = std::move(kinds);
         return *this;
     }
     Field& help(std::string text) {

@@ -37,8 +37,9 @@ void Water::update(World& world, Entity self, float dt) {
             float rim = std::min({float(i), float(j), float(cells - i), float(cells - j)}) / 4.0f;
             float calm = std::clamp(rim, 0.0f, 1.0f);
             sheet.positions.push_back(Vec3{x + moved.x * choppiness * calm, moved.y * waveHeight * calm, z + moved.z * choppiness * calm});
-            Vec3 normal = ocean->normalAt(x, z);
-            sheet.normals.push_back(simd::normalize(Vec3{normal.x * waveHeight * calm, normal.y, normal.z * waveHeight * calm}));
+            // Straight up: the water's shader reads the slope of every wave, pixel by pixel, from the
+            // same sea (showOcean below), sharper than the sheet's points could hold it.
+            sheet.normals.push_back(Vec3{0, 1, 0});
             // The water shader reads foam from here: 2 and above, so that it is not taken for a picture's coordinates.
             sheet.uvs.push_back(Vec2{2.0f + std::clamp(ocean->foamAt(x, z) * foam * calm, 0.0f, 1.0f), 0.0f});
         }
@@ -51,6 +52,9 @@ void Water::update(World& world, Entity self, float dt) {
         }
     }
     world.showMesh(self, sheet);
+    const Transform* transform = world.scene.get<Transform>(self);
+    Vec3 origin = transform ? transform->worldPosition() : Vec3{0, 0, 0};
+    world.showOcean(*ocean, Vec2{origin.x, origin.z});
 }
 
 float Water::heightAt(const World& world, Entity self, Vec3 position) const {

@@ -1,7 +1,11 @@
 // Animator.hpp
-// Plays the animations of a glTF model on the entity that shows it: a character that
-// walks, a door that opens, a flag. Each frame the bones are put where the animation has
-// them at that moment and the model's vertices are moved with them.
+// Plays animations on an entity: those of a glTF model (a character that walks, a flag), whose
+// bones are put where the animation has them and the model's vertices moved with them; and
+// clips made in the editor (.anim, see AnimationClip.hpp: a door that opens, a light that
+// flickers), which move the entity and those under it. One clip by itself (`clip`), or an
+// Animator Controller (`controller`) whose states play clips of either kind as the game's
+// parameters say: from code (setFloat, setBool, setTrigger, crossFade) or from a visual script
+// (the Animation nodes).
 //
 //     entity "Robot"
 //       mesh "Models/robot.glb" ...
@@ -9,6 +13,7 @@
 //         field "clip" "Walk"
 #pragma once
 
+#include "Animation/AnimationClip.hpp"
 #include "Animation/AnimatorController.hpp"
 #include "Assets/Gltf.hpp"
 #include "Core/World.hpp"
@@ -55,8 +60,13 @@ struct Animator {
     /// The events of the states passed this frame (sounds are played; the rest are for the game).
     std::vector<std::string> firedEvents;
 
-    /// Starts another clip, easing into it from where the model is now.
+    /// Starts another clip (an animation of the model, or a .anim file), easing into it from
+    /// where things are now. Without a controller.
     void play(const std::string& name);
+    /// With a controller: goes to a state now, easing into it over `seconds`, whatever the
+    /// transitions say (Unity's CrossFade; 0 is Play).
+    void crossFade(const std::string& state, float seconds = 0.2f);
+    void playState(const std::string& state) { crossFade(state, 0); }
     /// True once a clip that does not loop has reached its end.
     bool isFinished() const { return hasEnded; }
 
@@ -82,6 +92,7 @@ struct Animator {
         float blend = 1;
         float stateBlendTime = 0.2f;
         GltfPose pose, blendFrom;
+        ClipPose props, propsFrom;      // what its clips made in the editor put on the properties
     };
     std::vector<Playing> layerPlaying;  // one for each layer of the controller
     std::vector<std::vector<float>> layerMasks;   // for each layer, how much of it each node takes (0 or 1)
@@ -89,6 +100,14 @@ struct Animator {
                    const std::vector<AnimatorController::Transition>& transitions, Playing& run, bool isBase);
     void putLayers(World& world, float dt);
     void moveWithRoot(World& world, Entity self);
+    ClipPose props, propsFrom;          // the properties the clips made in the editor animate, now
+    Entity owner{};
+    std::string pendingState;           // asked for by crossFade
+    float pendingBlend = 0;
+    void playClipFile(World& world, Entity self, float dt);
+    void fireClipEvents(World& world, Entity self, const AnimationClip& file, float after, float upTo);
+    /// A sound is played; any other name is the game's: in firedEvents, and sent to the entity as a message.
+    void fireEvent(World& world, Entity self, const std::string& name);
     Vec3 lastRoot{0, 0, 0};
     float lastRootTime = 0;
     int lastRootAnimation = -1;

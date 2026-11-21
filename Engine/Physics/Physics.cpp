@@ -569,7 +569,7 @@ void Physics::solveJoints(Scene& scene, float dt) {
     });
 }
 
-MOLTEN_COMPONENT(Joint, MOLTEN_FIELD(connectedTo).help("The name of the other entity. Empty ties it to where it is in the world"),
+MOLTEN_COMPONENT(Joint, MOLTEN_FIELD(connectedTo).picks("entity").help("The name of the other entity. Empty ties it to where it is in the world"),
                  MOLTEN_FIELD(kind).choices({"ball", "hinge", "fixed", "distance"}), MOLTEN_FIELD(anchor).help("Where on this body, in its own axes"),
                  MOLTEN_FIELD(axis).help("Hinge: the axis it turns about"), MOLTEN_FIELD(length).help("Distance: 0 keeps the length there is at the start"),
                  MOLTEN_FIELD(isRope).help("Distance: only pulls, as a rope. Off: a rod, which also pushes"),

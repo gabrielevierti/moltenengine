@@ -1,5 +1,6 @@
 #include "Script/Runtime.hpp"
 
+#include "Animation/Animator.hpp"
 #include "Kit/Saveable.hpp"
 
 #include "Core/World.hpp"
@@ -75,7 +76,7 @@ PinDef flow(const char* name) { return PinDef{name, PinType::Flow, Value{}}; }
 PinDef number(const char* name, float value = 0) { return PinDef{name, PinType::Float, Value::number(value)}; }
 PinDef flag(const char* name, bool value = false) { return PinDef{name, PinType::Bool, Value::boolean(value)}; }
 PinDef vector(const char* name, float x = 0, float y = 0, float z = 0) { return PinDef{name, PinType::Vec3, Value::vector(x, y, z)}; }
-PinDef string(const char* name, const char* value = "") { return PinDef{name, PinType::String, Value::string(value)}; }
+PinDef string(const char* name, const char* value = "", const char* pick = "") { return PinDef{name, PinType::String, Value::string(value), pick}; }
 
 Value vectorValue(Vec3 v) { return Value::vector(v.x, v.y, v.z); }
 
@@ -284,8 +285,8 @@ void registerStandardNodes() {
     event("OnStart", "On Start", "Once, when the game starts or the entity appears.", {}, {});
     event("OnUpdate", "On Update", "Every frame. \"dt\" is the length of the frame in seconds.", {}, {number("dt")},
           [](ExecContext& context, int) { return Value::number(context.dt); });
-    event("OnKeyPressed", "On Key Pressed", "When a key goes down. Write the key's name: A, Space, Left, 1.", {string("key", "Space")}, {});
-    event("OnKeyReleased", "On Key Released", "When a key comes up.", {string("key", "Space")}, {});
+    event("OnKeyPressed", "On Key Pressed", "When a key goes down.", {string("key", "Space", "key")}, {});
+    event("OnKeyReleased", "On Key Released", "When a key comes up.", {string("key", "Space", "key")}, {});
     event("OnPointerPressed", "On Pointer Pressed", "When the mouse button goes down, or a finger touches the screen.", {}, {});
 
     event("OnTimer", "On Timer", "Again and again, every so many seconds.", {number("seconds", 1)}, {});
@@ -301,7 +302,7 @@ void registerStandardNodes() {
     event("OnMessage", "On Message",
           "When a message is sent to this entity, or to everyone: \"doorOpened\". Empty: any message. "
           "It carries a number and a text; \"from\" is the name of who sent it.",
-          {string("message", "doorOpened")}, {number("number"), string("text"), string("from"), string("name")},
+          {string("message", "doorOpened", "message")}, {number("number"), string("text"), string("from"), string("name")},
           [](ExecContext& context, int output) {
               if (!context.message) return Value{};
               if (output == 1) return Value::number(context.message->number);
@@ -317,7 +318,7 @@ void registerStandardNodes() {
     action("SendMessage", "Flow", "Send Message",
            "Tells something happened: to the entity named in \"to\", or to everyone when it is empty. "
            "Scripts hear it in On Message, code in onMessage.",
-           {string("message", "doorOpened"), string("to", ""), number("number", 0), string("text", "")}, [](ExecContext& context) {
+           {string("message", "doorOpened", "message"), string("to", "", "entity"), number("number", 0), string("text", "")}, [](ExecContext& context) {
                if (!context.world) return;
                std::string to = context.string("to");
                Entity target = to.empty() ? Entity{} : context.scene->find(to);
@@ -363,55 +364,55 @@ void registerStandardNodes() {
 
     // ---- the game as a whole
     action("AddValue", "Game", "Add to Value", "Adds to a number the whole game shares: the score, coins, lives.",
-           {string("name", "score"), number("amount", 1)}, [](ExecContext& context) {
+           {string("name", "score", "value"), number("amount", 1)}, [](ExecContext& context) {
                if (context.world) context.world->addValue(context.string("name"), context.number("amount"));
            });
-    action("SetValue", "Game", "Set Value", "Sets a number the whole game shares.", {string("name", "score"), number("value", 0)},
+    action("SetValue", "Game", "Set Value", "Sets a number the whole game shares.", {string("name", "score", "value"), number("value", 0)},
            [](ExecContext& context) {
                if (context.world) context.world->setValue(context.string("name"), context.number("value"));
            });
-    value("GetValue", "Game", "Value", "A number the whole game shares; zero if nobody set it.", {string("name", "score")}, {number("value")},
+    value("GetValue", "Game", "Value", "A number the whole game shares; zero if nobody set it.", {string("name", "score", "value")}, {number("value")},
           [](ExecContext& context, int) { return Value::number(context.world ? context.world->value(context.string("name")) : 0.0f); });
-    action("LoadScene", "Game", "Load Scene", "Goes to another scene: the next level, the menu.", {string("scene", "Scenes/Main.scene")},
+    action("LoadScene", "Game", "Load Scene", "Goes to another scene: the next level, the menu.", {string("scene", "Scenes/Main.scene", "scene")},
            [](ExecContext& context) {
                if (context.world) context.world->loadScene(context.string("scene"));
            });
     action("LoadSceneInBackground", "Game", "Load Scene in Background",
            "Goes to another scene once its models are read, the game going on meanwhile: show a Loading Screen.",
-           {string("scene", "Scenes/Main.scene")}, [](ExecContext& context) {
+           {string("scene", "Scenes/Main.scene", "scene")}, [](ExecContext& context) {
                if (context.world) context.world->loadSceneInBackground(context.string("scene"));
            });
     action("AddScene", "Game", "Add Scene", "Adds another scene's entities to this one: the next room, a menu over the game.",
-           {string("scene", "Scenes/Room.scene")}, [](ExecContext& context) {
+           {string("scene", "Scenes/Room.scene", "scene")}, [](ExecContext& context) {
                if (context.world) context.world->addScene(context.string("scene"));
            });
-    action("RemoveScene", "Game", "Remove Scene", "Takes away a scene that was added.", {string("scene", "Scenes/Room.scene")},
+    action("RemoveScene", "Game", "Remove Scene", "Takes away a scene that was added.", {string("scene", "Scenes/Room.scene", "scene")},
            [](ExecContext& context) {
                if (context.world) context.world->removeScene(context.string("scene"));
            });
     action("ReloadScene", "Game", "Restart Scene", "Starts the scene over.", {}, [](ExecContext& context) {
         if (context.world) context.world->reloadScene();
     });
-    action("PlaySound", "Game", "Play Sound", "Plays a sound file from the project's Assets.", {string("sound", "Audio/sound.wav"), number("volume", 1)},
+    action("PlaySound", "Game", "Play Sound", "Plays a sound file from the project's Assets.", {string("sound", "Audio/sound.wav", "sound"), number("volume", 1)},
            [](ExecContext& context) {
                if (context.world) context.world->playSound(context.string("sound"), context.number("volume"));
            });
     action("SetVolume", "Game", "Set Volume", "The volume of a group of sounds, 0 to 1: Music, Effects, Voices, Interface.",
-           {string("group", "Music"), number("volume", 1)}, [](ExecContext& context) {
+           {string("group", "Music", "soundGroup"), number("volume", 1)}, [](ExecContext& context) {
                if (context.world) context.world->setVolume(context.string("group"), context.number("volume"));
            });
-    action("Spawn", "Game", "Spawn", "Adds a prefab to the scene at a point.", {string("prefab", "Prefabs/Thing.prefab"), vector("position")},
+    action("Spawn", "Game", "Spawn", "Adds a prefab to the scene at a point.", {string("prefab", "Prefabs/Thing.prefab", "prefab"), vector("position")},
            [](ExecContext& context) {
                if (context.world) context.world->spawn(context.string("prefab"), context.vector("position"));
            });
-    value("PositionOf", "Game", "Position Of", "Where the entity with this name is.", {string("name", "Player")}, {vector("position"), flag("exists")},
+    value("PositionOf", "Game", "Position Of", "Where the entity with this name is.", {string("name", "Player", "entity")}, {vector("position"), flag("exists")},
           [](ExecContext& context, int output) {
               Entity entity = context.scene->find(context.string("name"));
               const Transform* transform = context.scene->get<Transform>(entity);
               if (output == 1) return Value::boolean(transform != nullptr);
               return vectorValue(transform ? transform->worldPosition() : Vec3{0, 0, 0});
           });
-    value("OtherIs", "Game", "Other Is", "In a collision or trigger event: yes if the other thing has this name.", {string("name", "Player")},
+    value("OtherIs", "Game", "Other Is", "In a collision or trigger event: yes if the other thing has this name.", {string("name", "Player", "entity")},
           {flag("result")}, [](ExecContext& context, int) {
               const Name* name = context.scene->get<Name>(context.other);
               return Value::boolean(name && name->value == context.string("name"));
@@ -494,7 +495,7 @@ void registerStandardNodes() {
            [](ExecContext& context) { logInfo("%s", context.string("message").c_str()); });
 
     // ---- input
-    value("KeyIsDown", "Input", "Key Is Down", "Yes while a key is held.", {string("key", "Space")}, {flag("down")},
+    value("KeyIsDown", "Input", "Key Is Down", "Yes while a key is held.", {string("key", "Space", "key")}, {flag("down")},
           [](ExecContext& context, int) { return Value::boolean(context.input && context.input->isDown(keyByName(context.string("key")))); });
     value("KeyAxis", "Input", "Key Axis", "-1, 0 or 1 from two keys: for moving left and right, or back and forth.",
           {string("negative", "A"), string("positive", "D")}, {number("value")}, [](ExecContext& context, int) {
@@ -565,15 +566,57 @@ void registerStandardNodes() {
           [](ExecContext& context, int) { return Value::number(context.flag("condition") ? context.number("ifYes") : context.number("ifNo")); });
 
     // ---- memory
-    action("SetVariable", "Variables", "Set Variable", "Remembers a number under a name, for this entity.", {string("name", "score"), number("value")},
+    action("SetVariable", "Variables", "Set Variable", "Remembers a number under a name, for this entity.", {string("name", "score", "variable"), number("value")},
            [](ExecContext& context) {
                if (context.state) context.state->variables[context.string("name")] = Value::number(context.number("value"));
            });
-    value("GetVariable", "Variables", "Get Variable", "The number remembered under a name; zero if there is none.", {string("name", "score")},
+    value("GetVariable", "Variables", "Get Variable", "The number remembered under a name; zero if there is none.", {string("name", "score", "variable")},
           {number("value")}, [](ExecContext& context, int) {
               if (!context.state) return Value::number(0);
               auto found = context.state->variables.find(context.string("name"));
               return found == context.state->variables.end() ? Value::number(0) : found->second;
+          });
+
+    // ---- animation: the entity's Animator, as code drives it (setFloat, setBool, setTrigger,
+    // crossFade, play). Its events come as messages: On Message hears them.
+    auto animatorOf = [](ExecContext& context) -> Animator* { return context.scene ? context.scene->get<Animator>(context.self) : nullptr; };
+    action("SetAnimatorFloat", "Animation", "Set Animator Float", "Sets a number parameter of the entity's Animator Controller: speed, direction.",
+           {string("parameter", "speed", "parameter"), number("value")}, [animatorOf](ExecContext& context) {
+               if (Animator* animator = animatorOf(context)) animator->setFloat(context.string("parameter"), context.number("value"));
+           });
+    action("SetAnimatorBool", "Animation", "Set Animator Bool", "Sets a yes-or-no parameter of the entity's Animator Controller: grounded, open.",
+           {string("parameter", "grounded", "parameter"), flag("value", true)}, [animatorOf](ExecContext& context) {
+               if (Animator* animator = animatorOf(context)) animator->setBool(context.string("parameter"), context.flag("value"));
+           });
+    action("SetAnimatorTrigger", "Animation", "Set Animator Trigger",
+           "Fires a trigger of the entity's Animator Controller: jump, open. It stays set until a transition that waits for it is taken.",
+           {string("parameter", "jump", "parameter")}, [animatorOf](ExecContext& context) {
+               if (Animator* animator = animatorOf(context)) animator->setTrigger(context.string("parameter"));
+           });
+    action("CrossFade", "Animation", "Play State", "Goes to a state of the Animator Controller now, easing into it over some seconds (0: at once), whatever its transitions say.",
+           {string("state", "", "state"), number("seconds", 0.2f)}, [animatorOf](ExecContext& context) {
+               if (Animator* animator = animatorOf(context)) animator->crossFade(context.string("state"), context.number("seconds"));
+           });
+    action("PlayAnimation", "Animation", "Play Clip", "Plays a clip on an Animator without a controller: one of its model's animations, or a clip made in the editor.",
+           {string("clip", "", "animation")}, [animatorOf](ExecContext& context) {
+               if (Animator* animator = animatorOf(context)) animator->play(context.string("clip"));
+           });
+    action("SetAnimatorSpeed", "Animation", "Set Animator Speed", "How fast the Animator plays: 1 as made, 0 stopped, 2 twice as fast.", {number("speed", 1)},
+           [animatorOf](ExecContext& context) {
+               if (Animator* animator = animatorOf(context)) animator->speed = context.number("speed");
+           });
+    value("GetAnimatorFloat", "Animation", "Animator Parameter", "The value of a parameter of the entity's Animator Controller (a yes is 1).",
+          {string("parameter", "speed", "parameter")}, {number("value")}, [animatorOf](ExecContext& context, int) {
+              Animator* animator = animatorOf(context);
+              return Value::number(animator ? animator->parameter(context.string("parameter")) : 0.0f);
+          });
+    value("AnimatorState", "Animation", "Animator State", "The state the entity's Animator is in, and whether it is the one named; and whether a clip that does not loop has ended.",
+          {string("state", "", "state")}, {string("current"), flag("isIn"), flag("hasEnded")}, [animatorOf](ExecContext& context, int output) {
+              Animator* animator = animatorOf(context);
+              if (!animator) return output == 0 ? Value::string("") : Value::boolean(false);
+              if (output == 0) return Value::string(animator->currentState());
+              if (output == 1) return Value::boolean(animator->currentState() == context.string("state"));
+              return Value::boolean(animator->isFinished());
           });
 }
 
@@ -653,6 +696,6 @@ void VisualScript::onTriggerEnter(World&, Entity, Entity other) {
     state.triggeredBy.push_back(other);
 }
 
-MOLTEN_COMPONENT(VisualScript, MOLTEN_FIELD(graph).help("A .graph file from the project's Assets"))
+MOLTEN_COMPONENT(VisualScript, MOLTEN_FIELD(graph).picks("graph").help("A .graph file from the project's Assets"))
 
 }  // namespace molten

@@ -27,10 +27,14 @@ void registerInspectorPanel(EditorContext& editor);
 void registerBuiltinComponents(EditorContext& editor);
 void registerAssetBrowserPanel(EditorContext& editor);
 void registerAssetViewerPanel(EditorContext& editor);
+/// The viewer of the asset chosen in the Explorer: drawn by the Inspector, under the scene's things.
+void drawAssetViewer(EditorContext& editor);
 void registerRenderingPanel(EditorContext& editor);
 void registerConsolePanel(EditorContext& editor);
 void registerProfilerPanel(EditorContext& editor);
 void registerTimelinePanel(EditorContext& editor);
+void registerAnimationPanel(EditorContext& editor);
+void registerAnimatorPanel(EditorContext& editor);
 void registerSourceControlPanel(EditorContext& editor);
 void registerSceneWeightPanel(EditorContext& editor);
 void registerProjectPanel(EditorContext& editor);

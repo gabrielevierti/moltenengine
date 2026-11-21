@@ -1,4 +1,7 @@
 #include "Rendering/Renderer.hpp"
+#include "Water/Ocean.hpp"
+
+#include <cstring>
 #include "Rendering/LevelOfDetail.hpp"
 
 #include "Core/Log.hpp"
@@ -260,6 +263,9 @@ int Renderer::collectLights(Scene& scene, gpu::LightData* lights, gpu::FrameUnif
         lights[count++] = sun;                  // the shaders expect the sun first
         frame.sunDirection = sun.direction;
         frame.sunColor = sun.color;
+        // Low in the sky, the sun's light crosses more air: gold, then orange and red, then none.
+        if (settings.sky.sunsetColors) frame.sunColor = sun.color * sunlightThroughAir(-sun.direction.y);
+        lights[0].color = frame.sunColor;
     } else {
         frame.sunDirection = Vec3{0, -1, 0};
         frame.sunColor = Vec3{0, 0, 0};
@@ -471,6 +477,7 @@ void Renderer::render(Scene& scene, const Canvas& canvas, const RenderTarget& ta
     }
 
     MTL::CommandBuffer* commandBuffer = device_.queue()->commandBuffer();
+    prepareOcean(commandBuffer, time);
 
     if (views.empty()) {
         // The usual case: one picture, straight into the target.
@@ -586,6 +593,7 @@ void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const
     frame.cloudOffset = settings.sky.cloudSpeed * float(time);
     frame.sunAngularRadius = settings.sky.sunAngularRadius;
     frame.physicalSky = settings.sky.isPhysical ? 1u : 0u;
+    frame.sunsetColors = settings.sky.sunsetColors ? 1u : 0u;
     frame.skyHaze = std::clamp(settings.sky.haze, 0.0f, 1.0f);
     frame.starBrightness = std::max(settings.sky.stars, 0.0f);
     frame.starTime = float(std::fmod(time, 86400.0));
@@ -659,6 +667,91 @@ void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const
         renderBloom(commandBuffer);
         renderFinal(commandBuffer, canvas, target, withOverlay);
     }
+}
+
+}  // namespace molten
+
+namespace molten {
+
+namespace {
+
+/// A float as the 16 bits of a half float (no infinities expected: waves and foam).
+uint16_t halfBits(float value) {
+    uint32_t bits;
+    std::memcpy(&bits, &value, 4);
+    uint32_t sign = (bits >> 16) & 0x8000u;
+    int exponent = int((bits >> 23) & 0xFF) - 127 + 15;
+    uint32_t mantissa = bits & 0x7FFFFFu;
+    if (exponent <= 0) return uint16_t(sign);
+    if (exponent >= 31) return uint16_t(sign | 0x7BFFu);
+    return uint16_t(sign | uint32_t(exponent) << 10 | (mantissa + 0x1000u) >> 13);
+}
+
+}  // namespace
+
+void Renderer::showOcean(const Ocean& ocean, Vec2 origin) {
+    int size = ocean.resolution();
+    oceanTexels_.resize(size_t(size) * size_t(size) * 4);
+    for (int j = 0; j < size; j++) {
+        for (int i = 0; i < size; i++) {
+            Vec3 n = ocean.normal(i, j);
+            float up = std::max(n.y, 0.05f);
+            uint16_t* texel = &oceanTexels_[(size_t(j) * size_t(size) + size_t(i)) * 4];
+            texel[0] = halfBits(-n.x / up);
+            texel[1] = halfBits(-n.z / up);
+            texel[2] = halfBits(ocean.foam(i, j));
+            texel[3] = halfBits(ocean.displacement(i, j).y);
+        }
+    }
+    oceanSize_ = size;
+    oceanPatch_ = ocean.settings().patchSize;
+    oceanOrigin_ = origin;
+    oceanFed_ = true;
+}
+
+void Renderer::prepareOcean(MTL::CommandBuffer* commandBuffer, double time) {
+    // Water seen last frame and no Water component handing its sea: the renderer's own, from the wind.
+    if (waterSeen_ && !oceanFed_) {
+        Vec3 wind = settings.wind;
+        float speed = simd::length(Vec2{wind.x, wind.z});
+        if (!defaultOcean_ || simd::length(wind - defaultOceanWind_) > 0.01f) {
+            OceanSettings made;
+            made.resolution = 128;
+            made.patchSize = 60.0f;
+            made.windSpeed = speed > 0.5f ? speed : 7.0f;
+            made.windDirection = speed > 0.5f ? Vec2{wind.x, wind.z} : Vec2{1.0f, 0.3f};
+            defaultOcean_ = std::make_shared<Ocean>(made);
+            defaultOceanWind_ = wind;
+        }
+        defaultOcean_->update(float(std::fmod(time, 3600.0)));
+        showOcean(*defaultOcean_, Vec2{0, 0});
+    }
+    waterSeen_ = false;
+    oceanTexture_ = nullptr;
+    if (!oceanFed_ || oceanSize_ < 2) return;
+    oceanFed_ = false;
+    // One picture per frame in flight: the GPU may still read the one of a frame ago.
+    NS::SharedPtr<MTL::Texture>& texture = oceanTextures_[frameIndex_];
+    if (!texture || int(texture->width()) != oceanSize_) {
+        auto descriptor = NS::TransferPtr(MTL::TextureDescriptor::alloc()->init());
+        descriptor->setTextureType(MTL::TextureType2D);
+        descriptor->setPixelFormat(MTL::PixelFormatRGBA16Float);
+        descriptor->setWidth(NS::UInteger(oceanSize_));
+        descriptor->setHeight(NS::UInteger(oceanSize_));
+        int levels = 1;
+        while ((1 << levels) <= oceanSize_) levels++;
+        descriptor->setMipmapLevelCount(NS::UInteger(levels));
+        descriptor->setUsage(MTL::TextureUsageShaderRead);
+        descriptor->setStorageMode(MTL::StorageModeShared);
+        texture = NS::TransferPtr(device_.device()->newTexture(descriptor.get()));
+        if (!texture) return;
+    }
+    texture->replaceRegion(MTL::Region::Make2D(0, 0, NS::UInteger(oceanSize_), NS::UInteger(oceanSize_)), 0, oceanTexels_.data(),
+                           NS::UInteger(oceanSize_) * 8);
+    MTL::BlitCommandEncoder* blit = commandBuffer->blitCommandEncoder();
+    blit->generateMipmaps(texture.get());
+    blit->endEncoding();
+    oceanTexture_ = texture.get();
 }
 
 }  // namespace molten

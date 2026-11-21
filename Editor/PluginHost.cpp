@@ -62,6 +62,11 @@ void EditorContext::notify(const std::string& message, ConsoleMessage::Level lev
     }
 }
 
+void EditorContext::openPanel(const std::string& title) {
+    if (Panel* panel = registry.findPanel(title)) panel->isOpen = true;
+    panelToFocus = title;
+}
+
 void EditorContext::editGraph(const std::string& path) {
     graphToEdit = path;
     if (Panel* panel = registry.findPanel("Visual Script")) panel->isOpen = true;

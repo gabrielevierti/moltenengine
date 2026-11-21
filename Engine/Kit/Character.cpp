@@ -280,8 +280,8 @@ MOLTEN_COMPONENT(CharacterController, MOLTEN_FIELD(radius).range(0.05f, 3), MOLT
 MOLTEN_COMPONENT(CharacterMover, MOLTEN_FIELD(walkSpeed).range(0, 20), MOLTEN_FIELD(runSpeed).range(0, 30).help("With the action \"run\" or Shift held"),
                  MOLTEN_FIELD(alwaysRuns), MOLTEN_FIELD(acceleration).range(0, 100), MOLTEN_FIELD(airControl).range(0, 1),
                  MOLTEN_FIELD(jumpHeight).range(0, 10), MOLTEN_FIELD(gravity).range(0, 100), MOLTEN_FIELD(turnSpeed).range(0, 40),
-                 MOLTEN_FIELD(camera).help("The camera whose view sets forward; empty for the active one"))
-MOLTEN_COMPONENT(OrbitCamera, MOLTEN_FIELD(target), MOLTEN_FIELD(distance).range(0.5f, 50), MOLTEN_FIELD(height).range(-5, 10),
+                 MOLTEN_FIELD(camera).picks("entity").help("The camera whose view sets forward; empty for the active one"))
+MOLTEN_COMPONENT(OrbitCamera, MOLTEN_FIELD(target).picks("entity"), MOLTEN_FIELD(distance).range(0.5f, 50), MOLTEN_FIELD(height).range(-5, 10),
                  MOLTEN_FIELD(yaw).range(-360, 360), MOLTEN_FIELD(pitch).range(-89, 89), MOLTEN_FIELD(minPitch).range(-89, 89),
                  MOLTEN_FIELD(maxPitch).range(-89, 89), MOLTEN_FIELD(mouseSensitivity).range(0, 2), MOLTEN_FIELD(stickSpeed).range(0, 720),
                  MOLTEN_FIELD(avoidsWalls), MOLTEN_FIELD(smoothness).range(0, 40))

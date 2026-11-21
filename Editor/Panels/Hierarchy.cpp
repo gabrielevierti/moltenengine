@@ -324,7 +324,6 @@ private:
                 if (io.KeyCtrl || io.KeySuper) scene.toggleSelection(entity);
                 else if (io.KeyShift) selectRangeTo(editor, entity);
                 else scene.select(entity);
-                editor.selectedAsset.clear();
             }
         }
         if (isHovered && !onArrow && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) editor.frameSelectionRequested = true;
@@ -525,7 +524,6 @@ Entity createFromEntry(EditorContext& editor, const CreateEntry& entry, Entity p
         if (Transform* transform = editor.engine.scene.get<Transform>(created)) transform->position = Vec3{0, 0, 0};
     }
     editor.scene.select(created);
-    editor.selectedAsset.clear();
     editor.scene.markChanged();
     return created;
 }

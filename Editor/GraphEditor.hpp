@@ -35,6 +35,8 @@ public:
     /// Set by whoever shows the board, for a script that runs: values on the wires, the nodes that
     /// ran lit up, breakpoints (right-click a node, or F9).
     const GraphDebugView* debug = nullptr;
+    /// The control for a text input that names something (PinDef::pick): set by the editor, which knows the project.
+    std::function<bool(const script::PinDef& pin, std::string& value, float width)> pickText;
 
     /// Draws the script in a region of the current window and lets the user edit it.
     /// Returns true if the script changed (as opposed to the view of it).

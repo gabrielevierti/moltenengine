@@ -189,6 +189,9 @@ struct EditorContext {
 
     /// Opens a visual script (a .graph file, as a path relative to Assets) on the drawing board.
     void editGraph(const std::string& path);
+    /// Opens a panel (Window menu) and brings it to the front of its tabs: "Animator", "Animation".
+    void openPanel(const std::string& title);
+    std::string panelToFocus;           // asked for by openPanel; the editor clears it
     std::string graphToEdit;            // what the board has been asked to open; it clears this
 
     /// A panel that edits something of its own (the visual script board) sets this every

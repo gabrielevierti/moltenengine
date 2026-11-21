@@ -1065,15 +1065,15 @@ MOLTEN_COMPONENT(Wheel, MOLTEN_FIELD(radius).range(0.05f, 1.5f), MOLTEN_FIELD(gr
 MOLTEN_COMPONENT(Suspension, MOLTEN_FIELD(travel).range(0.01f, 1), MOLTEN_FIELD(springRate), MOLTEN_FIELD(damping),
                  MOLTEN_FIELD(antiRoll).help("How strongly it is tied to the wheel on the other side"))
 MOLTEN_COMPONENT(DeformableTire, MOLTEN_FIELD(pressure).range(0.5f, 3.5f).help("In bar. Softer tires flatten and grip more, and roll harder"), MOLTEN_FIELD(stiffness))
-MOLTEN_COMPONENT(Motor, MOLTEN_FIELD(engine).choices({"i4", "i5", "i6", "v8", "v12", "diesel", "electric"}), MOLTEN_FIELD(tractionControl), MOLTEN_FIELD(soundFolder))
+MOLTEN_COMPONENT(Motor, MOLTEN_FIELD(engine).choices({"i4", "i5", "i6", "v8", "v12", "diesel", "electric"}), MOLTEN_FIELD(tractionControl), MOLTEN_FIELD(soundFolder).picks("folder"))
 MOLTEN_COMPONENT(Wing, MOLTEN_FIELD(area).range(0.05f, 200).help("Square meters"), MOLTEN_FIELD(aspect).range(0.3f, 30).help("Span squared over area: long thin wings lift better"),
                  MOLTEN_FIELD(stallAngle).range(6, 30), MOLTEN_FIELD(drag))
 MOLTEN_COMPONENT(Hinge, MOLTEN_FIELD(input).choices({"pitch", "roll", "yaw", "flaps", "steer", "throttle", "brake", "none"}), MOLTEN_FIELD(maxAngle).range(0, 90),
                  MOLTEN_FIELD(isInverted), MOLTEN_FIELD(axis), MOLTEN_FIELD(effect).range(0, 1).help("Under a Wing: how much of its angle counts as the whole wing's"),
                  MOLTEN_FIELD(drag).help("Under a Wing: added at full angle"))
-MOLTEN_COMPONENT(Propeller, MOLTEN_FIELD(power).help("Kilowatts"), MOLTEN_FIELD(staticThrust), MOLTEN_FIELD(sound))
-MOLTEN_COMPONENT(DriveControls, MOLTEN_FIELD(switchesEngines).help("Keys 1 to 4"), MOLTEN_FIELD(skidSound), MOLTEN_FIELD(windSound))
+MOLTEN_COMPONENT(Propeller, MOLTEN_FIELD(power).help("Kilowatts"), MOLTEN_FIELD(staticThrust), MOLTEN_FIELD(sound).picks("sound"))
+MOLTEN_COMPONENT(DriveControls, MOLTEN_FIELD(switchesEngines).help("Keys 1 to 4"), MOLTEN_FIELD(skidSound).picks("sound"), MOLTEN_FIELD(windSound).picks("sound"))
 MOLTEN_COMPONENT(FlightControls, MOLTEN_FIELD(assist).help("Keys ask for a rate of roll and pitch; wings level themselves; no stall. Off: the keys are the stick"),
-                 MOLTEN_FIELD(startThrottle).range(0, 1), MOLTEN_FIELD(windSound), MOLTEN_FIELD(stallSound))
+                 MOLTEN_FIELD(startThrottle).range(0, 1), MOLTEN_FIELD(windSound).picks("sound"), MOLTEN_FIELD(stallSound).picks("sound"))
 
 }  // namespace molten::kit

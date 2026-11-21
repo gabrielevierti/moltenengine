@@ -144,6 +144,8 @@ typedef struct {
     float skyHaze;                   // 0 clear mountain air to 1 a hazy summer day
     float starBrightness;            // 0 none; 1 a clear night far from town
     float starTime;                  // seconds: the stars turn slowly, and twinkle
+    uint32_t sunsetColors;           // 1: the sky glows gold and red around a low sun, and darkens when it has set
+    float padding0, padding1, padding2;
 } FrameUniforms;
 
 // What a ray sees of the thing it hits: its color and its glow. One for each instance of
@@ -185,6 +187,8 @@ typedef struct {
     float customShader;              // above zero: which hand-written surface shader runs, counted from 1
     simd_float4 custom[8];           // its properties, in the order the shader declares them
     float sway;                      // above zero: the wind moves it, the more the higher above its base (grass, leaves)
+    float oceanScale;                // water: above zero, the sea's waves are in the normal map's place, 1 / their patch's size
+    simd_float2 oceanOffset;         // where the patch starts, in the world
 } MaterialUniforms;
 
 // ---------------------------------------------------------------- post-processing and capture

@@ -124,13 +124,16 @@ std::optional<AnimatorController> AnimatorController::parse(const std::string& t
                 } else if (w[i] == "loops") state->loops = w[i + 1] != "0" && w[i + 1] != "false";
                 else if (w[i] == "speed") state->speed = std::strtof(w[i + 1].c_str(), nullptr);
             }
-        } else if ((key == "motion" || key == "event" || key == "loops" || key == "speed" || key == "blend") && !state) {
+        } else if ((key == "motion" || key == "event" || key == "loops" || key == "speed" || key == "blend" || key == "place") && !state) {
             return fail("\"" + key + "\" before any state");
         } else if (key == "motion" && w.size() >= 2) {
             state->motions.push_back(Motion{w[1], w.size() > 2 ? std::strtof(w[2].c_str(), nullptr) : 0.0f,
                                             w.size() > 3 ? std::strtof(w[3].c_str(), nullptr) : 0.0f});
         } else if (key == "event" && w.size() >= 2) {
             state->events.push_back(Event{w[1], w.size() > 2 ? std::clamp(std::strtof(w[2].c_str(), nullptr), 0.0f, 1.0f) : 0.0f});
+        } else if (key == "place" && w.size() >= 3) {
+            state->x = std::strtof(w[1].c_str(), nullptr);
+            state->y = std::strtof(w[2].c_str(), nullptr);
         } else if (key == "loops" && w.size() >= 2) {
             state->loops = w[1] != "0" && w[1] != "false";
         } else if (key == "speed" && w.size() >= 2) {
@@ -226,6 +229,7 @@ std::string AnimatorController::toText() const {
         for (const Motion& motion : state.motions) out += indent + "  motion " + named(motion.clip) + (state.blendBy.empty() ? "" : " " + number(motion.at)) +
                                                     (state.blendByY.empty() ? "" : " " + number(motion.y)) + "\n";
         for (const Event& event : state.events) out += indent + "  event " + named(event.name) + " " + number(event.at) + "\n";
+        if (state.x != 0 || state.y != 0) out += indent + "  place " + number(state.x) + " " + number(state.y) + "\n";
     }
     };
     auto writeTransitions = [&](const std::vector<Transition>& transitions, const std::string& start, const std::string& indent) {

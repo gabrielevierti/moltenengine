@@ -56,7 +56,25 @@ struct SkySettings {
     bool isPhysical = false;
     float haze = 0.3f;                          // 0 clear mountain air, 1 a hazy summer day
     float stars = 0.0f;                         // at night: 0 none, 1 a clear night far from any town
+    /// The colors of sunrise and sunset by themselves: as the sun nears the horizon its light
+    /// goes gold, orange and red through the thicker air, the sky around it glows, the clouds
+    /// are lit from below, and when it has set the sky darkens into night.
+    bool sunsetColors = true;
 };
+
+/// What reaches the ground of sunlight that crosses the air, for a sun `height` (the sine of its
+/// elevation): white high up, gold, orange and red toward the horizon, none once it has set.
+/// Relative to the sun overhead.
+inline Vec3 sunlightThroughAir(float height) {
+    if (height < -0.08f) return Vec3{0, 0, 0};
+    float h = std::max(height, 0.0f);
+    float zenithDegrees = std::acos(std::min(h, 1.0f)) * (180.0f / kPi);
+    float air = std::max(1.0f / (h + 0.15f * std::pow(std::max(93.885f - zenithDegrees, 0.001f), -1.253f)), 1.0f);     // Kasten and Young
+    const Vec3 thinning{0.069f, 0.133f, 0.298f};    // Rayleigh's blue-first scattering, and a little haze, for one air's depth
+    Vec3 through{std::exp(-thinning.x * (air - 1)), std::exp(-thinning.y * (air - 1)), std::exp(-thinning.z * (air - 1))};
+    float t = std::clamp((height + 0.08f) / 0.09f, 0.0f, 1.0f);
+    return through * (t * t * (3 - 2 * t));          // once set, it is gone
+}
 
 struct RenderSettings {
     int sampleCount = 4;                        // multisampling: 1 (off), 2 or 4
@@ -202,6 +220,9 @@ public:
     Renderer(GraphicsDevice& device, const std::string& shaderDirectory);
     ~Renderer();
 
+    /// The waves of the sea, for every water material: a Water component hands its own each
+    /// frame; without one, the renderer makes a sea of its own from the scene's wind.
+    void showOcean(const class Ocean& ocean, Vec2 origin);
     /// Reads a picture of the project by its name: for decals and the color grading table. Set by the Engine.
     std::function<std::shared_ptr<Texture>(const std::string&, TextureFormat)> loadPicture;
     RenderSettings settings;
@@ -390,6 +411,17 @@ private:
     bool hasDecals_ = false;
     std::shared_ptr<Texture> lut_;
     std::string lutName_;
+    // The sea's waves, as a picture water materials read: slope across, slope along, foam, height.
+    void prepareOcean(MTL::CommandBuffer* commandBuffer, double time);
+    NS::SharedPtr<MTL::Texture> oceanTextures_[kFramesInFlight];
+    MTL::Texture* oceanTexture_ = nullptr;      // this frame's
+    std::vector<uint16_t> oceanTexels_;
+    int oceanSize_ = 0;
+    float oceanPatch_ = 0;
+    Vec2 oceanOrigin_{0, 0};
+    bool oceanFed_ = false, waterSeen_ = false;
+    std::shared_ptr<class Ocean> defaultOcean_;
+    Vec3 defaultOceanWind_{0, 0, 0};
     MTL::Texture* upscaleLUT_ = nullptr;            // what renderFinal hands to the tone mapping before MetalFX
     MTL::Texture* upscaleAdapted_ = nullptr;
     NS::SharedPtr<MTL::Texture> prepassDepth_, prepassNormal_, occlusionRaw_, occlusion_;

@@ -252,6 +252,7 @@ std::string writeScene(Scene& scene, const std::vector<NamedMaterial>& materials
         Line("clouds").number(settings.sky.cloudCoverage).number(settings.sky.cloudScale).to(out);
         Line("volumetrics").flag(settings.sky.cloudsHaveDepth).integer(settings.fogShaftSteps).to(out);
         Line("lens").number(settings.lensDistortion).number(settings.chromaticAberration).number(settings.filmGrain).to(out);
+        if (!settings.sky.sunsetColors) Line("sunsetColors").flag(false).to(out);
         if (settings.sky.isPhysical || settings.sky.stars > 0)
             Line("physicalSky").flag(settings.sky.isPhysical).number(settings.sky.haze).number(settings.sky.stars).to(out);
         if (!settings.colorGrading.empty()) Line("colorGrading").string(settings.colorGrading).number(settings.colorGradingAmount).to(out);
@@ -609,6 +610,8 @@ bool readScene(const std::string& text, Scene& scene, std::vector<NamedMaterial>
             } else if (key == "clouds") {
                 settings.sky.cloudCoverage = words.number();
                 settings.sky.cloudScale = words.number(1);
+            } else if (key == "sunsetColors") {
+                settings.sky.sunsetColors = words.flag(true);
             } else if (key == "physicalSky") {
                 settings.sky.isPhysical = words.flag(false);
                 settings.sky.haze = words.number(0.3f);

@@ -120,6 +120,58 @@ static float3 starsAt(float3 d, float time, float brightness) {
     return tint * glow * twinkle * strength * brightness;
 }
 
+// ---------------------------------------------------------------- sunrise and sunset
+
+// The color of sunlight that has crossed the air to a sun this high (the sine of its elevation):
+// white overhead, gold, orange and red toward the horizon, as bright as it can be (the dimming is
+// the CPU's, on the sun's light). Rayleigh scattering takes the blue first.
+static float3 sunsetHue(float height) {
+    float h = max(height, 0.0);
+    float zenithDegrees = acos(min(h, 1.0)) * 180.0 / kPi;
+    float air = max(1.0 / (h + 0.15 * pow(max(93.885 - zenithDegrees, 0.001), -1.253)), 1.0);
+    float3 through = exp(-float3(0.069, 0.133, 0.298) * (air - 1.0));
+    return through / max(max(through.r, through.g), 0.0001);
+}
+
+// A sky of three colors made to follow the sun down: the horizon glows gold and red round the
+// sun, the zenith deepens, the opposite side turns pink above a darker band, and once the sun
+// has set it all fades through the blue hour into night.
+static float3 sunsetSky(float3 color, float3 d, float3 toSun) {
+    float h = toSun.y;
+    float low = 1.0 - smoothstep(0.0, 0.4, h);              // 0 high up, 1 on the horizon
+    float after = smoothstep(-0.22, -0.01, h);              // the glow left after it has set
+    float3 hue = sunsetHue(h);
+    float daylight = mix(0.025, 1.0, smoothstep(-0.2, 0.08, h));
+    color = mix(float3(0.008, 0.013, 0.03), color, daylight);
+    color *= mix(float3(1.0), float3(0.72, 0.78, 1.0), low * after);
+    float2 flatSky = normalize(d.xz + float2(1e-5, 0.0));
+    float2 flatSun = normalize(toSun.xz + float2(1e-5, 0.0));
+    float toward = dot(flatSky, flatSun) * 0.5 + 0.5;
+    float band = exp(-max(d.y, 0.0) * mix(10.0, 3.0, toward * toward));
+    float glow = band * (0.12 + 0.88 * pow(toward, 3.0)) * low * after;
+    color += hue * glow * 1.4;
+    // Across the sky from the sun: the pink belt, a little above the horizon.
+    float away = 1.0 - toward;
+    float belt = exp(-abs(d.y - 0.1) * 18.0) * away * away * low * smoothstep(-0.12, 0.02, h);
+    color += float3(0.75, 0.4, 0.5) * belt * 0.18;
+    return color;
+}
+
+// The light the clouds get when the sun is low, or has just set: they are higher than the
+// ground and still see it, red, from below.
+static float3 cloudSunlight(constant FrameUniforms &frame, float3 d, float3 toSun) {
+    if (frame.sunsetColors == 0u) {
+        return frame.sunColor;
+    }
+    float h = toSun.y;
+    float low = 1.0 - smoothstep(0.0, 0.4, h);
+    float still = smoothstep(-0.14, 0.0, h);                // above the clouds' height the sun sets later
+    float2 flatSky = normalize(d.xz + float2(1e-5, 0.0));
+    float2 flatSun = normalize(toSun.xz + float2(1e-5, 0.0));
+    float toward = dot(flatSky, flatSun) * 0.5 + 0.5;
+    return frame.sunColor + sunsetHue(h) * (low * still * (0.5 + 1.5 * toward * toward) * 1.6);
+}
+
 static float3 skyRadiance(float3 direction, constant FrameUniforms &frame, bool withSunDisk) {
     float3 d = normalize(direction);
     float3 toSun = -frame.sunDirection;
@@ -130,14 +182,19 @@ static float3 skyRadiance(float3 direction, constant FrameUniforms &frame, bool 
     } else {
         // Horizon to zenith. The square root keeps the horizon band thin, as in a real sky.
         color = mix(frame.skyHorizonColor, frame.skyZenithColor, sqrt(saturate(d.y)));
+        if (frame.sunsetColors != 0u) color = sunsetSky(color, d, toSun);
     }
+    float3 cloudSun = cloudSunlight(frame, d, toSun);
+    // The clouds' shaded side at dusk: grey-violet, with a little of the glow.
+    float dusk = frame.sunsetColors != 0u ? (1.0 - smoothstep(0.0, 0.4, toSun.y)) * smoothstep(-0.25, 0.0, toSun.y) : 0.0;
+    float dark = frame.sunsetColors != 0u ? mix(0.05, 1.0, smoothstep(-0.2, 0.08, toSun.y)) : 1.0;
     // The stars, when the sun is down; dimmed toward the horizon, where the air is thick.
     if (frame.starBrightness > 0.0 && withSunDisk && d.y > 0.0) {
         float night = smoothstep(0.05, -0.12, toSun.y);
         if (night > 0.0) color += starsAt(d, frame.starTime, frame.starBrightness) * night * smoothstep(0.0, 0.25, d.y);
     }
     // Below the horizon, blend quickly into the ground color.
-    color = mix(frame.skyGroundColor, color, smoothstep(-0.12, 0.0, d.y));
+    color = mix(frame.skyGroundColor * dark, color, smoothstep(-0.12, 0.0, d.y));
 
     // A glow around the sun: a tight one and a wide one.
     float towardSun = saturate(dot(d, toSun));
@@ -174,7 +231,7 @@ static float3 skyRadiance(float3 direction, constant FrameUniforms &frame, bool 
                 float sunReaching = exp(-above * 130.0 * 0.012);
                 // Light scattered in a cloud mostly goes on forward: brightest looking toward the sun, through thin cloud.
                 float forward = 0.55 + 1.6 * pow(toward, 8.0);
-                float3 light = frame.sunColor * (sunReaching * forward * 0.32) + skyLight * 0.55;
+                float3 light = cloudSun * (sunReaching * forward * 0.32) + skyLight * 0.55 * dark;
                 float taken = 1.0 - exp(-amount * stride * 0.012);
                 gathered += light * taken * through;
                 through *= 1.0 - taken;
@@ -196,8 +253,9 @@ static float3 skyRadiance(float3 direction, constant FrameUniforms &frame, bool 
         // here, this side is lit; where it is thicker, this side is in its shade.
         float2 sunward = toSun.xz / max(length(toSun.xz), 0.001) * 0.3;
         float light = saturate(0.62 + (density - cloudNoise(p + sunward)) * 3.0);
-        float3 shade = frame.skyHorizonColor * 0.9 + frame.skyZenithColor * 0.35;
-        float3 lit = frame.sunColor * 0.3 + frame.skyHorizonColor * 0.5;
+        float3 shade = (frame.skyHorizonColor * 0.9 + frame.skyZenithColor * 0.35) * dark;
+        shade = mix(shade, shade * float3(0.62, 0.5, 0.66) + sunsetHue(toSun.y) * 0.18 * dark, dusk);
+        float3 lit = cloudSun * 0.3 + frame.skyHorizonColor * 0.5 * dark;
         color = mix(color, mix(shade, lit, light), cover);
     }
 

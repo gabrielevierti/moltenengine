@@ -249,7 +249,7 @@ void Ragdoll::lateUpdate(World& world, Entity self, float) {
 using namespace molten::kit;
 
 MOLTEN_COMPONENT(Ragdoll, MOLTEN_FIELD(isLimp).help("Limp: its bones follow bodies that fall, instead of the animation"),
-                 MOLTEN_FIELD(bones).help("The bones that get a body, by name, with commas. Empty: worked out from the skeleton"),
+                 MOLTEN_FIELD(bones).picks("bones").help("The bones that get a body, by name, with commas. Empty: worked out from the skeleton"),
                  MOLTEN_FIELD(mass).range(1, 500).help("Of the whole body, in kilograms"),
                  MOLTEN_FIELD(thickness).range(0.05f, 0.6f).help("Each body's radius, as part of its bone's length"),
                  MOLTEN_FIELD(bend).range(5, 180).help("Degrees each joint bends at most"), MOLTEN_FIELD(friction).range(0, 2))

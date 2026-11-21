@@ -6,6 +6,9 @@
 #include "Script/Convert.hpp"
 #include "GraphEditor.hpp"
 #include "Panels/Widgets.hpp"
+#include "Panels/Pickers.hpp"
+
+#include <set>
 
 #include "Core/TextFile.hpp"
 
@@ -50,6 +53,19 @@ public:
         }
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows)) editor.panelOwnsEditKeys = true;
         drawDebugging(editor);
+        board_.pickText = [this, &editor](const script::PinDef& pin, std::string& value, float width) {
+            if (pin.pick == "variable") {
+                // The variables are those of this graph: the names its Set and Get Variable nodes use.
+                std::set<std::string> names;
+                for (const script::Node& node : graph_.nodes) {
+                    if (node.type != "SetVariable" && node.type != "GetVariable") continue;
+                    auto name = node.values.find(pin.name);
+                    if (name != node.values.end() && !name->second.empty()) names.insert(name->second);
+                }
+                return pickFromList("variable", value, std::vector<std::string>(names.begin(), names.end()), true, width);
+            }
+            return pickValueInline(editor, Entity{}, pin.pick, value, width);
+        };
         if (board_.draw(graph_, ImGui::GetContentRegionAvail())) isUnsaved_ = true;
         // Saved once the drag or the typing is over, not sixty times a second during it.
         if (isUnsaved_ && !ImGui::IsAnyItemActive() && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) save(editor);

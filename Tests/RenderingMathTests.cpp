@@ -33,7 +33,7 @@ TEST(gpu_structs_have_the_sizes_the_shaders_expect) {
     CHECK(offsetof(gpu::PassUniforms, time) == 336);
     CHECK(offsetof(gpu::LightData, type) == 48);
     CHECK(offsetof(gpu::FrameUniforms, cascadeSplits) == 256);
-    CHECK(sizeof(gpu::FrameUniforms) == 560);
+    CHECK(sizeof(gpu::FrameUniforms) == 576);
     CHECK(offsetof(gpu::FrameUniforms, fogShaftSteps) == 528);
     CHECK(offsetof(gpu::FrameUniforms, volumetricClouds) == 532);
     CHECK(offsetof(gpu::FrameUniforms, fogHeightFalloff) == 508);

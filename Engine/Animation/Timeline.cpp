@@ -56,7 +56,7 @@ float number(const std::vector<std::string>& words, size_t i, float fallback = 0
 }
 
 const TimelineTrackKind kKinds[] = {TimelineTrackKind::Move, TimelineTrackKind::Camera, TimelineTrackKind::Sound,
-                                    TimelineTrackKind::Value, TimelineTrackKind::Show, TimelineTrackKind::Trigger};
+                                    TimelineTrackKind::Value, TimelineTrackKind::Show, TimelineTrackKind::Trigger, TimelineTrackKind::Clip};
 
 }  // namespace
 
@@ -68,6 +68,7 @@ const char* Timeline::kindName(TimelineTrackKind kind) {
     case TimelineTrackKind::Value: return "value";
     case TimelineTrackKind::Show: return "show";
     case TimelineTrackKind::Trigger: return "trigger";
+    case TimelineTrackKind::Clip: return "clip";
     }
     return "move";
 }
@@ -146,7 +147,7 @@ std::optional<Timeline> Timeline::parse(const std::string& text, std::string* er
             TimelineMark mark;
             mark.time = number(words, 1);
             TimelineTrackKind kind = timeline.tracks.back().kind;
-            bool hasText = kind == TimelineTrackKind::Camera || kind == TimelineTrackKind::Sound || kind == TimelineTrackKind::Trigger;
+            bool hasText = kind == TimelineTrackKind::Camera || kind == TimelineTrackKind::Sound || kind == TimelineTrackKind::Trigger || kind == TimelineTrackKind::Clip;
             if (hasText) {
                 mark.text = words.size() > 2 ? words[2] : std::string();
                 mark.number = number(words, 3, 1);
@@ -185,7 +186,7 @@ std::string Timeline::toText() const {
         for (const TimelineMark& mark : track.marks) {
             std::snprintf(buffer, sizeof(buffer), "  at %g", double(mark.time));
             out += buffer;
-            bool hasText = track.kind == TimelineTrackKind::Camera || track.kind == TimelineTrackKind::Sound || track.kind == TimelineTrackKind::Trigger;
+            bool hasText = track.kind == TimelineTrackKind::Camera || track.kind == TimelineTrackKind::Sound || track.kind == TimelineTrackKind::Trigger || track.kind == TimelineTrackKind::Clip;
             if (hasText) out += " " + quoted(mark.text);
             if (!hasText || track.kind == TimelineTrackKind::Sound) {
                 std::snprintf(buffer, sizeof(buffer), " %g", double(mark.number));
@@ -257,6 +258,27 @@ void TimelinePlayer::advanceTo(World& world, float to, bool fires) {
             }
             break;
         }
+        case TimelineTrackKind::Clip: {
+            // The clip begun last at or before now. A clip made in the editor is shown as it is at
+            // that many seconds into it, so dragging the time shows it too; a model's animation is
+            // started on the target's Animator as the time passes its mark.
+            Entity entity = world.find(track.target);
+            const TimelineMark* now = nullptr;
+            for (const TimelineMark& mark : track.marks) {
+                if (mark.time <= to + 1e-5f) now = &mark;
+            }
+            if (!now || !entity.isValid()) break;
+            if (isAnimationClipFile(now->text)) {
+                if (std::shared_ptr<const AnimationClip> clip = sharedAnimationClip(world.assetPath(now->text))) {
+                    float into = (to - now->time) * std::max(now->number, 0.0f);
+                    if (clip->loops && clip->length > 0) into -= clip->length * std::floor(into / clip->length);
+                    ClipPose::of(*clip, std::min(into, clip->length)).apply(scene, entity);
+                }
+            } else if (fires && now->time > from && now->time <= to) {
+                if (Animator* animator = scene.get<Animator>(entity)) animator->play(now->text);
+            }
+            break;
+        }
         default: {
             for (const TimelineMark& mark : track.marks) {
                 // What happens in (from, to], and at 0 when it begins there.
@@ -310,6 +332,6 @@ void TimelinePlayer::update(World& world, Entity, float dt) {
 
 using namespace molten;
 
-MOLTEN_COMPONENT(TimelinePlayer, MOLTEN_FIELD(timeline).help("The file in Assets: Timelines/Intro.timeline"), MOLTEN_FIELD(playsOnStart),
+MOLTEN_COMPONENT(TimelinePlayer, MOLTEN_FIELD(timeline).picks("timeline").help("The file in Assets: Timelines/Intro.timeline"), MOLTEN_FIELD(playsOnStart),
                  MOLTEN_FIELD(loops), MOLTEN_FIELD(speed).range(0, 4),
-                 MOLTEN_FIELD(doneValue).help("A shared value set to 1 when it ends: what a menu or a script waits for"))
+                 MOLTEN_FIELD(doneValue).picks("value").help("A shared value set to 1 when it ends: what a menu or a script waits for"))

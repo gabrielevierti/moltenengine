@@ -18,7 +18,7 @@
 
 namespace molten {
 
-enum class AssetType : uint8_t { Folder, Scene, Mesh, Texture, Audio, Font, Shader, Script, Text, Other, Graph, Prefab, Material, Effect };
+enum class AssetType : uint8_t { Folder, Scene, Mesh, Texture, Audio, Font, Shader, Script, Text, Other, Graph, Prefab, Material, Effect, Animation, Controller, Timeline };
 
 struct AssetInfo {
     std::string path;                   // relative to Assets, with '/': "Textures/wall.png"

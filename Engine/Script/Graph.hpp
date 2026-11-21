@@ -57,6 +57,7 @@ struct PinDef {
     std::string name;                   // as in files and code: "degrees"
     PinType type = PinType::Float;
     Value defaultValue;                 // of an input nothing is wired to
+    std::string pick;                   // a text input: what it holds, for the board to offer (see Field::pick); empty: free words
 };
 
 /// A kind of node: what it is called, its pins, and what it does.

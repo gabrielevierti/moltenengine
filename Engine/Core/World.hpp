@@ -339,6 +339,10 @@ protected:
     virtual void panSound(uint32_t, float) {}
     virtual void endSound(uint32_t) {}
     virtual void groupSound(uint32_t, const std::string&) {}
+public:
+    /// The sea's waves of a Water, for the water materials to draw them (Engine: the renderer).
+    virtual void showOcean(const class Ocean&, Vec2 /*origin*/) {}
+protected:
     virtual void mixGroup(const std::string&, float /*volume*/, bool /*isMuted*/) {}
     virtual void duckGroup(const std::string&, const std::string&, float) {}
     virtual void muffleSound(uint32_t, float) {}

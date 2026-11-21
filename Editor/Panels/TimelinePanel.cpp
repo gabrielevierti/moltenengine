@@ -7,6 +7,8 @@
 #include "Animation/Timeline.hpp"
 #include "Core/TextFile.hpp"
 #include "Panels/Widgets.hpp"
+#include "Panels/Pickers.hpp"
+#include "Animation/AnimationClip.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -24,6 +26,7 @@ ImU32 colorOf(TimelineTrackKind kind) {
     case TimelineTrackKind::Value: return IM_COL32(230, 210, 100, 255);
     case TimelineTrackKind::Show: return IM_COL32(200, 160, 255, 255);
     case TimelineTrackKind::Trigger: return IM_COL32(255, 120, 170, 255);
+    case TimelineTrackKind::Clip: return IM_COL32(255, 175, 90, 255);
     }
     return IM_COL32(255, 255, 255, 255);
 }
@@ -35,7 +38,8 @@ const char* labelOf(TimelineTrackKind kind) {
     case TimelineTrackKind::Sound: return "Sounds";
     case TimelineTrackKind::Value: return "Set value";
     case TimelineTrackKind::Show: return "Show";
-    case TimelineTrackKind::Trigger: return "Animation";
+    case TimelineTrackKind::Trigger: return "Animator trigger";
+    case TimelineTrackKind::Clip: return "Clip";
     }
     return "";
 }
@@ -120,6 +124,13 @@ private:
         bool hasCamera = false, isCameraActive = false;
     };
 
+    struct BeforeProperty {
+        Entity entity;
+        std::string component, field;
+        std::array<float, 4> value;
+    };
+    std::vector<BeforeProperty> savedProperties_;
+
     void remember(EditorContext& editor) {
         if (!saved_.empty()) return;
         Scene& scene = editor.engine.scene;
@@ -140,6 +151,16 @@ private:
             if (!track.target.empty()) keep(editor.engine.find(track.target));
             for (const TimelineMark& mark : track.marks) {
                 if (track.kind == TimelineTrackKind::Camera) keep(editor.engine.find(mark.text));
+                // A clip: every property it animates, on the entities it animates.
+                if (track.kind != TimelineTrackKind::Clip || !isAnimationClipFile(mark.text)) continue;
+                std::shared_ptr<const AnimationClip> clip = sharedAnimationClip(editor.engine.assetPath(mark.text));
+                Entity root = editor.engine.find(track.target);
+                if (!clip || !root.isValid()) continue;
+                for (const AnimationTrack& animated : clip->tracks) {
+                    Entity entity = entityAtPath(scene, root, animated.path);
+                    BeforeProperty was{entity, animated.component, animated.field, {}};
+                    if (entity.isValid() && readProperty(scene, entity, animated.component, animated.field, was.value)) savedProperties_.push_back(was);
+                }
             }
         }
     }
@@ -154,7 +175,10 @@ private:
             transform->isActive = was.isActive;
             if (Camera* camera = scene.get<Camera>(was.entity); camera && was.hasCamera) camera->isActive = was.isCameraActive;
         }
+        // Last first, so that a property kept twice ends as it was first.
+        for (auto it = savedProperties_.rbegin(); it != savedProperties_.rend(); ++it) writeProperty(scene, it->entity, it->component, it->field, it->value);
         saved_.clear();
+        savedProperties_.clear();
         isPreviewing_ = false;
     }
 
@@ -220,9 +244,14 @@ private:
             if (ImGui::MenuItem(("Show or hide " + (target.empty() ? std::string("(choose an entity first)") : target)).c_str(), nullptr, false, !target.empty())) {
                 add(TimelineTrackKind::Show, target);
             }
-            if (ImGui::MenuItem(("Animation of " + (target.empty() ? std::string("(choose an entity first)") : target)).c_str(), nullptr, false, !target.empty())) {
+            if (ImGui::MenuItem(("Clips on " + (target.empty() ? std::string("(choose an entity first)") : target)).c_str(), nullptr, false, !target.empty())) {
+                add(TimelineTrackKind::Clip, target);
+            }
+            ui::tooltip("Animation clips played on it from their marks: made in the Animation window, or its model's");
+            if (ImGui::MenuItem(("Animator triggers of " + (target.empty() ? std::string("(choose an entity first)") : target)).c_str(), nullptr, false, !target.empty())) {
                 add(TimelineTrackKind::Trigger, target);
             }
+            ui::tooltip("Triggers of its Animator Controller, set as the time passes them");
             if (ImGui::MenuItem("Camera cuts")) add(TimelineTrackKind::Camera, "");
             if (ImGui::MenuItem("Sounds")) add(TimelineTrackKind::Sound, "");
             if (ImGui::MenuItem("Set a shared value")) add(TimelineTrackKind::Value, "cutsceneStep");
@@ -365,7 +394,11 @@ private:
                     }
                 }
             } else if (track.kind == TimelineTrackKind::Trigger) {
-                mark.text = "jump";
+                std::vector<std::string> triggers = choicesFor(editor, editor.engine.find(track.target), "parameter");
+                mark.text = triggers.empty() ? std::string() : triggers.front();
+            } else if (track.kind == TimelineTrackKind::Clip) {
+                std::vector<std::string> clips = choicesFor(editor, editor.engine.find(track.target), "animation");
+                mark.text = isAnimationClipFile(editor.selectedAsset) ? editor.selectedAsset : clips.empty() ? std::string() : clips.front();
             } else if (track.kind == TimelineTrackKind::Show) {
                 mark.number = track.marks.empty() ? 1.0f : 1.0f - track.marks.back().number;      // shown, then hidden...
             }
@@ -396,18 +429,21 @@ private:
         } else {
             TimelineMark& mark = track.marks[i];
             ImGui::SetNextItemWidth(220);
-            if (track.kind == TimelineTrackKind::Camera || track.kind == TimelineTrackKind::Sound || track.kind == TimelineTrackKind::Trigger) {
-                char text[256];
-                std::snprintf(text, sizeof(text), "%s", mark.text.c_str());
-                const char* what = track.kind == TimelineTrackKind::Camera ? "Camera" : track.kind == TimelineTrackKind::Sound ? "Sound" : "Trigger";
-                if (ImGui::InputText(what, text, sizeof(text))) {
-                    mark.text = text;
-                    changed = true;
-                }
+            if (track.kind == TimelineTrackKind::Camera || track.kind == TimelineTrackKind::Sound || track.kind == TimelineTrackKind::Trigger ||
+                track.kind == TimelineTrackKind::Clip) {
+                // A camera of the scene, a sound of the project, a trigger of the track's Animator, a clip: from lists.
+                const char* what = track.kind == TimelineTrackKind::Camera ? "Camera" : track.kind == TimelineTrackKind::Sound ? "Sound" :
+                                   track.kind == TimelineTrackKind::Clip ? "Clip" : "Trigger";
+                const char* kind = track.kind == TimelineTrackKind::Camera ? "entity" : track.kind == TimelineTrackKind::Sound ? "sound" :
+                                   track.kind == TimelineTrackKind::Clip ? "animation" : "parameter";
+                ImGui::TextUnformatted(what);
+                ImGui::SameLine();
+                if (pickValueInline(editor, editor.engine.find(track.target), kind, mark.text, 220)) changed = true;
             }
             if (track.kind != TimelineTrackKind::Camera && track.kind != TimelineTrackKind::Trigger) {
                 ImGui::SetNextItemWidth(220);
-                const char* what = track.kind == TimelineTrackKind::Sound ? "Volume" : track.kind == TimelineTrackKind::Show ? "Shown (1) or hidden (0)" : "Value";
+                const char* what = track.kind == TimelineTrackKind::Sound ? "Volume" : track.kind == TimelineTrackKind::Show ? "Shown (1) or hidden (0)" :
+                                   track.kind == TimelineTrackKind::Clip ? "Speed" : "Value";
                 if (ImGui::DragFloat(what, &mark.number, 0.05f)) changed = true;
             }
             ImGui::SetNextItemWidth(220);

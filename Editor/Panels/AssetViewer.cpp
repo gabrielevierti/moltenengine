@@ -58,14 +58,19 @@ bool writeWav(const std::string& path, const AudioClip& clip) {
     return bool(file);
 }
 
-class AssetViewerPanel final : public Panel {
+/// The viewer of what is chosen in the Explorer: not a window of its own but the lower part of
+/// the Inspector, there only while something of the Explorer is chosen.
+class AssetViewer {
 public:
-    AssetViewerPanel() { title = "Viewer"; }
-
-    void draw(EditorContext& editor) override {
+    void draw(EditorContext& editor) {
         const AssetInfo* asset = editor.selectedAsset.empty() ? nullptr : editor.assets.find(editor.selectedAsset);
-        if (!asset || asset->isFolder()) {
-            ImGui::TextDisabled("Click an asset in the Explorer to see it here.");
+        if (!asset) return;
+        if (asset->isFolder()) {
+            ImGui::TextUnformatted(asset->name.c_str());
+            ImGui::SameLine();
+            ImGui::TextDisabled("Folder");
+            drawCloseButton(editor);
+            ImGui::Separator();
             drawUnused(editor);
             return;
         }
@@ -81,12 +86,28 @@ public:
         ImGui::TextUnformatted(asset->name.c_str());
         ImGui::SameLine();
         ImGui::TextDisabled("%s   %s", AssetDatabase::typeName(asset->type), ui::byteSize(asset->size).c_str());
-        ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - 150);
+        ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - 176);
         if (ImGui::SmallButton("Open Outside")) platform::openWithDefaultApplication(editor.assets.absolutePath(asset->path));
         ui::tooltip("In the program your Mac uses for this kind of file");
         ImGui::SameLine();
         if (ImGui::SmallButton("Finder")) platform::revealInFinder(editor.assets.absolutePath(asset->path));
+        drawCloseButton(editor);
         ImGui::Separator();
+        // What can be done with it, at the top, for the kinds that do something.
+        if (asset->type == AssetType::Scene) {
+            if (ImGui::Button("Open Scene")) editor.requestOpenScene(editor.assets.absolutePath(asset->path));
+            ImGui::Spacing();
+        } else if (asset->type == AssetType::Controller) {
+            if (ImGui::Button("Open in Animator")) editor.openPanel("Animator");
+            ImGui::Spacing();
+        } else if (asset->type == AssetType::Animation) {
+            if (ImGui::Button("Open in Animation")) editor.openPanel("Animation");
+            ui::tooltip("It shows the clips of the entity chosen in the scene: choose one that plays this clip");
+            ImGui::Spacing();
+        } else if (asset->type == AssetType::Timeline) {
+            if (ImGui::Button("Open in Timeline")) editor.openPanel("Timeline");
+            ImGui::Spacing();
+        }
         drawDependencies(editor, *asset);
         drawImportSettings(editor, *asset);
 
@@ -102,6 +123,13 @@ public:
     }
 
 private:
+    /// Closes the viewer: nothing of the Explorer chosen any more.
+    void drawCloseButton(EditorContext& editor) {
+        ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - ImGui::GetFrameHeight());
+        if (ImGui::SmallButton("x")) editor.selectedAsset.clear();
+        ui::tooltip("Close the viewer");
+    }
+
     // ---------------------------------------------------------------- what uses what
 
     /// Read again when the project's files have changed, at most every two seconds.
@@ -1003,7 +1031,11 @@ private:
 
 void registerAssetViewerPanel(EditorContext& editor) {
     setMaterialPreviewAssets(&editor.engine.assets());
-    editor.registry.addPanel(nullptr, std::make_unique<AssetViewerPanel>());
+}
+
+void drawAssetViewer(EditorContext& editor) {
+    static AssetViewer viewer;
+    viewer.draw(editor);
 }
 
 }  // namespace molten::editor

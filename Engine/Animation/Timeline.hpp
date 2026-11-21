@@ -19,6 +19,9 @@
 //     at 2 1
 //   track trigger "Hero"
 //     at 4 "wave"
+//   track clip "Door"                       a clip on the entity from its mark (the number: its speed)
+//     at 3 "Animations/Door Open.anim" 1
+//     at 8 "Wave"                           or one of its model's animations, started on its Animator
 #pragma once
 
 #include "Core/World.hpp"
@@ -38,11 +41,11 @@ struct TimelineKey {
 /// Something that happens at a moment: the camera cut to, the sound played, the value set...
 struct TimelineMark {
     float time = 0;
-    std::string text;                   // the camera, the sound, the trigger
+    std::string text;                   // the camera, the sound, the trigger, the clip
     float number = 1;                   // the volume, the value, shown (1) or hidden (0)
 };
 
-enum class TimelineTrackKind : uint8_t { Move, Camera, Sound, Value, Show, Trigger };
+enum class TimelineTrackKind : uint8_t { Move, Camera, Sound, Value, Show, Trigger, Clip };
 
 struct TimelineTrack {
     TimelineTrackKind kind = TimelineTrackKind::Move;

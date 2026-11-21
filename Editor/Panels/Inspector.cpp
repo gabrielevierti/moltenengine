@@ -6,6 +6,7 @@
 #include "Core/TextFile.hpp"
 #include "Rendering/Particles.hpp"
 #include "Panels/Widgets.hpp"
+#include "Panels/Pickers.hpp"
 #include "Platform.hpp"
 
 #include <algorithm>
@@ -35,6 +36,36 @@ public:
     InspectorPanel() { title = "Inspector"; }
 
     void draw(EditorContext& editor) override {
+        // The things of the scene above; under them, only while something of the Explorer is
+        // chosen, its viewer, as tall as the bar between them is dragged to.
+        const AssetInfo* asset = editor.selectedAsset.empty() ? nullptr : editor.assets.find(editor.selectedAsset);
+        if (!asset) {
+            drawScenePart(editor);
+            return;
+        }
+        float room = ImGui::GetContentRegionAvail().y;
+        float bar = 6.0f;
+        bool hasEntity = editor.engine.scene.isAlive(editor.scene.primary());
+        // With nothing of the scene chosen, the viewer has nearly all of it.
+        float viewer = hasEntity ? std::clamp(viewerShare_, 0.15f, 0.85f) * room : room - ImGui::GetFrameHeightWithSpacing() * 1.6f;
+        float top = std::max(room - viewer - bar, ImGui::GetFrameHeight());
+        if (ImGui::BeginChild("##scene-part", ImVec2(0, top))) drawScenePart(editor);
+        ImGui::EndChild();
+        // The bar: drag it to share the height between the two.
+        ImVec2 at = ImGui::GetCursorScreenPos();
+        float width = ImGui::GetContentRegionAvail().x;
+        ImGui::InvisibleButton("##viewer-bar", ImVec2(width, bar));
+        bool active = ImGui::IsItemActive(), hovered = ImGui::IsItemHovered();
+        if (hovered || active) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+        if (active && hasEntity) viewerShare_ = std::clamp(viewerShare_ - ImGui::GetIO().MouseDelta.y / std::max(room, 1.0f), 0.15f, 0.85f);
+        ImGui::GetWindowDrawList()->AddLine(ImVec2(at.x, at.y + bar * 0.5f), ImVec2(at.x + width, at.y + bar * 0.5f),
+                                            ImGui::GetColorU32(active ? ImGuiCol_SeparatorActive : hovered ? ImGuiCol_SeparatorHovered : ImGuiCol_Separator), active || hovered ? 2.0f : 1.0f);
+        if (ImGui::BeginChild("##viewer", ImVec2(0, 0))) drawAssetViewer(editor);
+        ImGui::EndChild();
+    }
+
+    /// What is chosen in the scene: the Inspector proper. Nothing of the Explorer is shown here.
+    void drawScenePart(EditorContext& editor) {
         SceneDocument& scene = editor.scene;
         Entity entity = scene.primary();
         if (editor.engine.scene.isAlive(entity)) {
@@ -55,11 +86,9 @@ public:
             } else {
                 drawEntity(editor, entity);
             }
-        } else if (!editor.selectedAsset.empty() && editor.assets.find(editor.selectedAsset)) {
-            drawAsset(editor, *editor.assets.find(editor.selectedAsset));
         } else {
-            ImGui::TextDisabled("Nothing selected.");
-            ImGui::TextDisabled("Click something in the view, the hierarchy or the assets.");
+            ImGui::TextDisabled("Nothing of the scene selected.");
+            if (editor.selectedAsset.empty()) ImGui::TextDisabled("Click something in the view or the hierarchy.");
         }
     }
 
@@ -349,7 +378,17 @@ private:
             } else if (isOpen) {
                 if (type.fields.empty()) ImGui::TextDisabled("No fields.");
                 for (const Field& field : type.fields) {
-                    if (drawField(field, component)) document.markChanged();
+                    if (drawField(editor, entity, type, field, component)) document.markChanged();
+                }
+                // Where an Animator's clips and states are made.
+                if (type.name == "Animator") {
+                    if (ImGui::Button("Open Animation")) editor.openPanel("Animation");
+                    ui::tooltip("Its clips: record and edit keys");
+                    ImGui::SameLine();
+                    if (ImGui::Button("Open Animator")) editor.openPanel("Animator");
+                    ui::tooltip("Its controller: states, transitions, parameters");
+                } else if (type.name == "TimelinePlayer") {
+                    if (ImGui::Button("Open Timeline")) editor.openPanel("Timeline");
                 }
             }
             ImGui::PopID();
@@ -485,7 +524,7 @@ private:
     }
 
     /// One field of a game component, with the control that suits its type.
-    static bool drawField(const Field& field, void* component) {
+    static bool drawField(EditorContext& editor, Entity entity, const ComponentType& type, const Field& field, void* component) {
         std::string label = field.label();
         void* at = field.address(component);
         bool hasRange = field.minimum < field.maximum;
@@ -522,7 +561,18 @@ private:
             case FieldType::String: {
                 std::string& value = *static_cast<std::string*>(at);
                 if (field.options.empty()) {
-                    changed = ui::text(label.c_str(), value);
+                    // What it names, offered as a list: a file, an entity, a bone, a value... Words only for words.
+                    std::string kind = field.pick;
+                    if (!field.pickBy.empty()) {
+                        if (const Field* by = type.findField(field.pickBy)) {
+                            std::string decides = by->valueText(component);
+                            for (const auto& [choice, picked] : field.pickFor) {
+                                if (choice == decides) kind = picked;
+                            }
+                        }
+                    }
+                    if (kind == "none") break;              // nothing for it to name: not shown
+                    changed = pickValue(editor, entity, kind, label.c_str(), value);
                 } else {
                     // One of a few words: a list, not a place to mistype them.
                     int index = -1;
@@ -541,59 +591,7 @@ private:
         return changed;
     }
 
-    void drawAsset(EditorContext& editor, const AssetInfo& asset) {
-        ImGui::TextUnformatted(asset.name.c_str());
-        ImGui::TextDisabled("%s", AssetDatabase::typeName(asset.type));
-        ImGui::Separator();
-        ui::info("Path", "Assets/" + asset.path);
-        if (!asset.isFolder()) {
-            ui::info("Size", ui::byteSize(asset.size));
-            ui::info("Identifier", asset.guid);
-        }
-        ImGui::Spacing();
-
-        if (asset.type == AssetType::Texture && isLoadableImage(asset.path)) {
-            if (std::shared_ptr<Texture> texture = editor.engine.assets().texture(asset.path)) {
-                float width = float(texture->handle()->width()), height = float(texture->handle()->height());
-                ui::info("Pixels", std::to_string(int(width)) + " x " + std::to_string(int(height)));
-                float shown = std::min(ImGui::GetContentRegionAvail().x, 512.0f);
-                ImGui::Image(ImGuiLayer::textureId(texture.get()), ImVec2(shown, shown * height / std::max(width, 1.0f)));
-            }
-        } else if (asset.type == AssetType::Mesh) {
-            bool canLoad = std::filesystem::path(asset.path).extension() == ".obj" || isGltfFile(asset.path);
-            if (!canLoad) ImGui::TextWrapped("This format cannot be imported yet: only Wavefront OBJ. glTF is next on the roadmap.");
-            ImGui::BeginDisabled(!canLoad);
-            if (ImGui::Button("Add to Scene")) {
-                Entity created = editor.scene.createFromMesh(asset.path, Vec3{0, 0, 0});
-                if (!created.isValid()) editor.notify("Cannot load " + asset.path, ConsoleMessage::Level::Error);
-            }
-            ImGui::EndDisabled();
-        } else if (asset.type == AssetType::Material) {
-            if (std::shared_ptr<Material> material = editor.engine.assets().material(asset.path)) {
-                ImVec2 at = ImGui::GetCursorScreenPos();
-                float size = std::min(ImGui::GetContentRegionAvail().x, 120.0f);
-                ImGui::Dummy(ImVec2(size, size + 6));
-                drawMaterialPreview(ImGui::GetWindowDrawList(), ImVec2(at.x + size * 0.5f, at.y + size * 0.5f), size * 0.46f, *material);
-                if (drawMaterialProperties(editor, *material)) saveMaterialAsset(editor, *material);
-                ImGui::Spacing();
-                ImGui::TextDisabled("Drag it onto something in the view, or into a mesh's Material.");
-            } else {
-                ImGui::TextWrapped("This file could not be read as a material.");
-            }
-        } else if (asset.type == AssetType::Scene) {
-            if (ImGui::Button("Open Scene")) editor.requestOpenScene(editor.assets.absolutePath(asset.path));
-        } else if (asset.type == AssetType::Graph) {
-            if (ImGui::Button("Edit Script")) editor.editGraph(asset.path);
-        }
-
-        ImGui::Spacing();
-        if (ImGui::Button("Reveal in Finder")) platform::revealInFinder(editor.assets.absolutePath(asset.path));
-        if (!asset.isFolder()) {
-            ImGui::SameLine();
-            if (ImGui::Button("Open")) platform::openWithDefaultApplication(editor.assets.absolutePath(asset.path));
-        }
-    }
-
+    float viewerShare_ = 0.42f;                                        // of the height, the viewer's
     Entity shownFor_;
     std::string newTag_;
     std::string addFilter_;                                             // what is typed in Add Component

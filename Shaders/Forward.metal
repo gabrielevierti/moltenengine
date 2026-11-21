@@ -19,6 +19,8 @@ struct MaterialSample {
     float occlusion;
     float water;            // above zero: water, and how fine its waves are
     float waveHeight;
+    float4 sea;             // water with the sea's waves: their slope (x, z), foam, height; w of the second scale below
+    float hasSea;           // 1 when `sea` was read
 #if MOLTEN_EXTRAS
     float mirror;           // the share of the mirrored light a traced ray found and brings: 0 when no ray was sent
     float3 mirrored;        // and the light of what it found
@@ -59,6 +61,18 @@ static MaterialSample sampleMaterial(MeshVertexOut in, bool isFrontFacing,
     result.emissive = material.emissive * emissiveTexture.sample(materialSampler, uv).rgb;
     result.water = material.water;
     result.waveHeight = material.waveHeight;
+    result.hasSea = 0.0;
+    result.sea = float4(0.0);
+    if (material.water > 0.0 && material.oceanScale > 0.0) {
+        // The sea's waves, a patch that repeats, read twice: as it is, and smaller and turned, so
+        // that the repeat does not show and the near water has ripples on its swell.
+        float2 at = (in.worldPosition.xz + material.oceanOffset) * material.oceanScale;
+        float4 large = normalTexture.sample(materialSampler, at);
+        float2 turned = float2(at.x * 0.8 - at.y * 0.6, at.x * 0.6 + at.y * 0.8) * 4.7 + float2(0.37, 0.71);
+        float4 small = normalTexture.sample(materialSampler, turned);
+        result.sea = float4(large.xy + small.xy * 0.45, saturate(large.z + small.z * 0.3), large.w + small.w * 0.2);
+        result.hasSea = 1.0;
+    }
 #if MOLTEN_EXTRAS
     result.mirror = 0.0;                // no traced reflection: the sky is what is mirrored
     result.mirrored = float3(0.0);
@@ -94,50 +108,77 @@ static float4 shadePixel(MeshVertexOut in, MaterialSample m,
 #endif
     // Water is part of every variant of the shaders: it needs nothing the plainest lacks.
     if (m.water > 0.0) {
-        // Water: a level surface whose slope is a handful of waves crossing one another,
-        // each moving at its own speed. Seen from above one looks into it; at a glancing
-        // angle it is a mirror of the sky.
-        float2 p = in.worldPosition.xz * m.water;
+        // Water: the slope of its waves (the sea's own, worked out by a Fourier transform, or a
+        // handful of crossing waves where there is none), then the sky it mirrors, the light
+        // that comes out of it from below, the sun's glitter, and foam where waves break.
         float t = pass.time;
-        float2 slope = float2(0.0);
-        slope += float2(0.80, 0.60) * (cos(dot(p, float2(0.80, 0.60)) * 0.9 + t * 0.9) * 0.050);
-        slope += float2(-0.50, 0.86) * (cos(dot(p, float2(-0.50, 0.86)) * 2.3 + t * 1.5) * 0.040);
-        slope += float2(0.30, -0.95) * (cos(dot(p, float2(0.30, -0.95)) * 5.7 + t * 2.4) * 0.028);
-        slope += float2(-0.90, -0.40) * (cos(dot(p, float2(-0.90, -0.40)) * 12.1 + t * 3.7) * 0.018);
-        slope += float2(0.10, 0.99) * (cos(dot(p, float2(0.10, 0.99)) * 27.0 + t * 5.9) * 0.010);
+        float2 p = in.worldPosition.xz * m.water;
+        float2 slope;
+        float crest = 0.0;
+        float seaFoam = 0.0;
+        if (m.hasSea > 0.5) {
+            slope = m.sea.xy;
+            seaFoam = m.sea.z;
+            crest = m.sea.w;
+        } else {
+            slope = float2(0.0);
+            slope += float2(0.80, 0.60) * (cos(dot(p, float2(0.80, 0.60)) * 0.9 + t * 0.9) * 0.050);
+            slope += float2(-0.50, 0.86) * (cos(dot(p, float2(-0.50, 0.86)) * 2.3 + t * 1.5) * 0.040);
+            slope += float2(0.30, -0.95) * (cos(dot(p, float2(0.30, -0.95)) * 5.7 + t * 2.4) * 0.028);
+            slope += float2(-0.90, -0.40) * (cos(dot(p, float2(-0.90, -0.40)) * 12.1 + t * 3.7) * 0.018);
+            slope += float2(0.10, 0.99) * (cos(dot(p, float2(0.10, 0.99)) * 27.0 + t * 5.9) * 0.010);
+        }
         slope *= m.waveHeight;
-        // The ripples are laid on the swell: a Water component moves the mesh itself, and its
-        // normals lean with the large waves; on a flat sheet they point straight up.
+        // Far away the small waves blur into a smoother sheet, as they do to the eye.
+        slope *= mix(1.0, 0.45, saturate(in.viewDepth / 600.0));
         float3 swell = normalize(in.normal);
-        m.normal = normalize(float3(swell.x - slope.x, max(swell.y, 0.05), swell.z - slope.y));
-        // Water is shaded here, by itself, from what the frame says of the sun and the sky:
-        // it does not go through the surface model below, which treats it as a dark
-        // surface and leaves it black where it mirrors nothing.
+        float3 N = normalize(float3(swell.x - slope.x, max(swell.y, 0.05), swell.z - slope.y));
+        m.normal = N;
         float3 toEye = normalize(pass.cameraPosition - in.worldPosition);
-        float facing = saturate(dot(m.normal, toEye));
-        float mirror = 0.02 + 0.98 * pow(saturate(1.0 - facing), 5.0);
-        // Where waves break, white: a moving sheet says how much in its texture coordinate, from 2 up.
-        float foam = saturate(in.uv.x - 2.0);
-        foam = saturate(foam * 1.4 - 0.15 + foam * 0.3 * sin(dot(p, float2(31.0, 17.0)) + t));
-
-        // The sky it mirrors: the horizon's color at a glancing angle, the zenith's from above.
-        float3 mirrored = reflect(-toEye, m.normal);
-        float height = saturate(abs(mirrored.y));
-        float3 sky = mix(frame.skyHorizonColor, frame.skyZenithColor, pow(height, 0.6)) * frame.skyIntensity;
-        // The light inside it: the sky's from all around and the sun's from above, in the water's own color.
-        float3 skyAround = (frame.skyZenithColor + frame.skyHorizonColor * 2.0) / 3.0 * frame.skyIntensity * frame.environmentIntensity;
         float3 toSun = normalize(-frame.sunDirection);
+        float facing = saturate(dot(N, toEye));
+        // Fresnel, for water (it reflects 2% straight down, all of it at a grazing angle).
+        float fresnel = 0.02 + 0.98 * pow(1.0 - facing, 5.0);
+
+        // The sky it mirrors: the environment the sky was captured into, clouds and sunset and
+        // all. A ray that would go into the water is bent back just above the horizon.
+        float3 mirrored = reflect(-toEye, N);
+        mirrored.y = max(mirrored.y, 0.015);
+        mirrored = normalize(mirrored);
+        float3 sky = prefilteredMap.sample(linearSampler, mirrored, level(0.5)).rgb * frame.environmentIntensity;
+
+        // The light that comes out of the water: the sky's from all around, the sun's from
+        // above, in the water's color; brighter green-blue through the crests the sun shines
+        // through (light scattered inside the wave).
+        float3 around = irradianceMap.sample(linearSampler, float3(0.0, 1.0, 0.0)).rgb * frame.environmentIntensity;
         float3 sun = frame.sunColor * sunLight;
-        float3 body = m.baseColor.rgb * (skyAround * 1.5 + sun * (0.25 + 0.35 * saturate(dot(m.normal, toSun))));
-        // The sun's glitter on the ripples.
-        float glint = pow(saturate(dot(mirrored, toSun)), 600.0) * 6.0 + pow(saturate(dot(mirrored, toSun)), 60.0) * 0.25;
-        float3 water = mix(body, sky * frame.environmentIntensity, mirror) + sun * glint;
-        float3 white = float3(0.86, 0.9, 0.92) * (skyAround + sun * 0.3);
+        float3 deep = m.baseColor.rgb;
+        float3 body = deep * (around * 1.2 + sun * (0.15 + 0.2 * saturate(dot(N, toSun))));
+        float through = pow(saturate(dot(toEye, -toSun) * 0.5 + 0.5), 4.0) * saturate(crest * 0.6 + 0.5) * saturate(1.0 - toEye.y * 1.5);
+        body += deep * float3(0.7, 1.9, 1.6) * sun * through * 0.6 * saturate(m.waveHeight);
+
+        // The sun's glitter: a sharp highlight on a nearly smooth surface (GGX, roughness 0.06),
+        // with a wider sheen around it.
+        float3 halfway = normalize(toSun + toEye);
+        float nh = saturate(dot(N, halfway));
+        const float a2 = 0.06 * 0.06 * 0.06 * 0.06;
+        float d = nh * nh * (a2 - 1.0) + 1.0;
+        float glitter = min(a2 / (kPi * d * d), 400.0) * (0.02 + 0.98 * pow(1.0 - saturate(dot(halfway, toEye)), 5.0)) * 0.25;
+        float sheen = pow(saturate(dot(mirrored, toSun)), 40.0) * 0.15;
+        float3 water = mix(body, sky, fresnel) + sun * (glitter + sheen) * saturate(dot(N, toSun) * 4.0);
+
+        // Foam where waves break: the sea's own, or what a Water's moving sheet says (its texture
+        // coordinate, from 2 up); patchy, as foam is.
+        float sheetFoam = saturate(in.uv.x - 2.0);
+        float foam = max(sheetFoam, saturate(seaFoam * 1.2 - 0.2) * saturate(m.waveHeight));
+        float breakup = 0.65 + 0.35 * sin(dot(in.worldPosition.xz, float2(3.1, 1.7)) + t * 0.7) * sin(dot(in.worldPosition.xz, float2(-1.3, 2.9)) - t * 0.4);
+        foam = saturate(foam * breakup * 1.3);
+        float3 white = float3(0.9, 0.93, 0.95) * (around + sun * (0.35 + 0.35 * saturate(dot(N, toSun))));
         water = mix(water, white, foam);
-        float opacity = saturate(mix(mix(m.baseColor.a, 1.0, mirror), 1.0, foam));
+        float opacity = saturate(mix(mix(m.baseColor.a, 1.0, fresnel), 1.0, foam));
         // Whatever went wrong on the way (a normal of no length, a number out of range), it is still water.
         if (any(isnan(water)) || any(isinf(water))) {
-            water = m.baseColor.rgb * (skyAround + frame.sunColor * 0.3);
+            water = m.baseColor.rgb * (around + frame.sunColor * 0.3);
             opacity = 1.0;
         }
         return float4(applyFog(water, in.viewDepth, frame), opacity);

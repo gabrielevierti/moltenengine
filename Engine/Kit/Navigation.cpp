@@ -381,14 +381,14 @@ void Guard::fixedUpdate(World& world, Entity self, float dt) {
 
 namespace molten::kit {
 
-MOLTEN_COMPONENT(Guard, MOLTEN_FIELD(round).help("Its round: entities named this and 1, 2, 3... in order"), MOLTEN_FIELD(player),
+MOLTEN_COMPONENT(Guard, MOLTEN_FIELD(round).picks("entityPrefix").help("Its round: entities named this and 1, 2, 3... in order"), MOLTEN_FIELD(player).picks("entity"),
                  MOLTEN_FIELD(sightDistance).range(0, 100), MOLTEN_FIELD(sightAngle).range(0, 360), MOLTEN_FIELD(hearingDistance).range(0, 30),
                  MOLTEN_FIELD(walkSpeed).range(0, 20), MOLTEN_FIELD(chaseSpeed).range(0, 30), MOLTEN_FIELD(giveUpAfter).range(0, 30),
                  MOLTEN_FIELD(waitAtPoints).range(0, 30))
 MOLTEN_COMPONENT(NavigationArea, MOLTEN_FIELD(size).help("Meters along x and z, centered on the entity"), MOLTEN_FIELD(cellSize).range(0.1f, 4),
                  MOLTEN_FIELD(agentRadius).range(0.05f, 4), MOLTEN_FIELD(agentHeight).range(0.2f, 10), MOLTEN_FIELD(stepHeight).range(0, 2),
                  MOLTEN_FIELD(maxSlope).range(0, 89), MOLTEN_FIELD(above).range(0, 500), MOLTEN_FIELD(below).range(0, 500))
-MOLTEN_COMPONENT(NavAgent, MOLTEN_FIELD(target).help("The name of an entity to go to and follow; empty: where code sends it with goTo"),
+MOLTEN_COMPONENT(NavAgent, MOLTEN_FIELD(target).picks("entity").help("The name of an entity to go to and follow; empty: where code sends it with goTo"),
                  MOLTEN_FIELD(speed).range(0, 30), MOLTEN_FIELD(turnSpeed).range(0, 40), MOLTEN_FIELD(stoppingDistance).range(0, 10),
                  MOLTEN_FIELD(repathEvery).range(0.05f, 5))
 

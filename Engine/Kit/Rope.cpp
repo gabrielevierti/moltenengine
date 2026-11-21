@@ -274,7 +274,7 @@ void Rope::lateUpdate(World& world, Entity, float) {
 
 using namespace molten::kit;
 
-MOLTEN_COMPONENT(Rope, MOLTEN_FIELD(to).help("The entity its end is tied to. Empty: it hangs free"),
+MOLTEN_COMPONENT(Rope, MOLTEN_FIELD(to).picks("entity").help("The entity its end is tied to. Empty: it hangs free"),
                  MOLTEN_FIELD(length).range(0, 100).help("Meters. 0: as far as what it is tied to (or 3 hanging free)"),
                  MOLTEN_FIELD(links).range(2, 100).help("More: smoother, more to work out"), MOLTEN_FIELD(thickness).range(0.005f, 0.5f),
                  MOLTEN_FIELD(isChain).help("Drawn as rings, a little stiffer"), MOLTEN_FIELD(mass).range(0.01f, 200).help("Of the whole rope, kilograms"),

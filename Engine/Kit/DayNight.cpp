@@ -91,7 +91,8 @@ void DayNight::update(World& world, Entity, float dt) {
         facingDown = simd::normalize(conjugate(parentRotation) * facingDown);
     }
     transform->rotation = facingDown;
-    light->color = look.lightColor;
+    // With the sky's own sunset colors on, the renderer warms the light as the sun sinks: here it stays white.
+    light->color = settings.sky.sunsetColors && look.towardSun.y > -0.05f && look.lightColor.z < 0.95f ? Vec3{1, 1, 1} : look.lightColor;
     light->intensity = sunIntensity * look.lightShare;
 }
 
@@ -101,6 +102,6 @@ using namespace molten::kit;
 
 MOLTEN_COMPONENT(DayNight, MOLTEN_FIELD(hour).range(0, 24).help("0 to 24: 6 dawn, 12 noon, 18 dusk"),
                  MOLTEN_FIELD(dayMinutes).range(0, 240).help("Real minutes for a whole day; 0 stops the clock"),
-                 MOLTEN_FIELD(sun).help("The entity with the Directional Light it moves"), MOLTEN_FIELD(sunIntensity).range(0, 20),
+                 MOLTEN_FIELD(sun).picks("entity").help("The entity with the Directional Light it moves"), MOLTEN_FIELD(sunIntensity).range(0, 20),
                  MOLTEN_FIELD(highest).range(5, 90).help("Degrees the sun is above the horizon at noon"),
                  MOLTEN_FIELD(facing).range(-180, 180).help("Degrees: turns the sun's path about the vertical"))

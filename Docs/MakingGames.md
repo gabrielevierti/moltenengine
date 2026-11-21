@@ -149,7 +149,11 @@ In the editor, Play runs the scene as it is open, saved or not, and starting ove
 
 **Project** shows the assets with pictures made from the files: a model as its shape, a material as a lit ball, a sound as its wave, a scene or a prefab as a plan from above, a visual script as its boxes, code as its first lines. **Add Component** in the inspector is sorted as Unity's is (Mesh, Rendering, Physics, Audio, Effects, UI, Vehicles, Gameplay, Scripts) and can be searched; each component's menu has Reset, Copy Values, Paste Values and Remove.
 
-**Layouts.** The default is Unity's: Hierarchy at the left, Inspector at the right with a small Viewer under it, Scene and Game as tabs in the middle, and Explorer, Console, Input and Visual Script as tabs along the bottom. Run, Hold and Frame are at the top right, beside the layout menu, which has four arrangements (Default, 2 by 3, Tall and Wide). Arrange the windows as you like and choose Save Layout: it joins the list, on this Mac, for every project. **Export Layout...** writes it to a file to keep or pass on; **Import Layout...** takes one back. The Scene and Game views never get smaller than 360 by 240.
+**Inspector and Viewer.** The Inspector is for the things of the scene: what is chosen in the view or the hierarchy, and nothing else. The Viewer is for the things of the Explorer, and it is part of the Inspector: choose an asset (or a folder) in the Explorer and it opens in the Inspector's lower part, under the scene's things; drag the bar between the two to share the height, and close it with its **x** or by clicking empty space in the Explorer. Choosing in one never unchooses the other, so a material can be looked at in the Viewer and dragged onto the entity in the Inspector above it.
+
+**Text fields name nothing.** Wherever a field names something (a sound, a scene, a prefab, a timeline, an entity, a tag, a bone, an animation, a state or parameter of the Animator, an input action, a key, a shared value, a message), the Inspector and the Visual Script boxes offer a list of what it can actually be, with a search box when the list is long; files can also be dropped on it from the Explorer. A name that is no longer there shows in orange as missing. Values and messages, which are new names a game invents, have **A new name** at the end of their list. Only words people read (a button's label, a text on screen, a win message) are typed.
+
+**Layouts.** The default is Unity's: Hierarchy at the left, Inspector at the right, Scene and Game as tabs in the middle, and Explorer, Console, Input and Visual Script as tabs along the bottom. Run, Hold and Frame are at the top right, beside the layout menu, which has four arrangements (Default, 2 by 3, Tall and Wide). Arrange the windows as you like and choose Save Layout: it joins the list, on this Mac, for every project. **Export Layout...** writes it to a file to keep or pass on; **Import Layout...** takes one back. The Scene and Game views never get smaller than 360 by 240.
 
 **Where the time goes.** Window > Profiler shows the last five seconds, a bar per frame for the CPU and a line for the GPU, and below them the parts of a frame (events, fixed update, physics, update and each kind of component in it, particles, interface, each pass the renderer prepares, and the time spent waiting for the GPU or the display) with their times: the average of the last second, or one frame's when its bar is clicked. When the CPU's bar is short and the GPU's line is high, the GPU is the limit; much time "Waiting for the GPU" says the same. In a running game, F1 shows the slowest parts of the last frame. Your own code can add parts: `Profiler::Scope timed(world.profiler, "Pathfinding");` times the rest of its block.
 
@@ -198,8 +202,10 @@ first); **New Timeline** makes its file.
   press **Key**; again at another time. It goes smoothly through its keys.
 - **Camera cuts**: at each mark, that camera is the one seen (its Camera made active, the others
   the track names made inactive). **Add** puts the camera chosen in the Hierarchy.
-- **Sounds**, **Set a shared value** (what a menu or a script waits for), **Show or hide**, and
-  **Animation** (a trigger of its Animator: "wave").
+- **Sounds**, **Set a shared value** (what a menu or a script waits for), **Show or hide**,
+  **Clips on** an entity (a clip made in the Animation window, played on it from its mark and seen
+  as the time is dragged, or one of its model's animations, started on its Animator), and
+  **Animator triggers** (a trigger of its controller, chosen from its list).
 
 Drag the time along the top to see the scene as it is then; **Preview** plays it here, without
 its sounds and values; **Stop** puts everything back where it was. Drag a diamond to move it in
@@ -506,6 +512,12 @@ save the table alone in the project's Assets. **Grading Amount** blends it in.
 smear into the blur behind it. **Motion Blur** streaks what moves across the picture as the
 camera turns or speeds along (the camera's own movement; **Shutter** is how long).
 
+**Sunrise and sunset** come by themselves (Sky > Sunset Colors, on to begin with): as the sun
+nears the horizon its light goes gold, orange and red through the thicker air, the sky glows
+round it with a pink belt across from it, the clouds are lit from below in the same colors
+(and stay lit a little after it has set, being higher), and then the sky fades through the blue
+hour into night. Just turn the Sun, or let a Day / Night move it.
+
 **The sky from the air.** Under Sky, **From the Air** works the sky's colors out from how
 sunlight scatters in the air, from the sun's height alone: blue at noon, gold and red as the
 sun sets, dark at night (with a Day / Night, it goes round by itself). **Haze** whitens it.
@@ -555,6 +567,40 @@ heavy the load. One mesh is drawn along it, of the entity's own material: a tube
 **Is Chain**. If the entity it starts at has a RigidBody, the rope moves with it and pulls it.
 **Bend** makes it stiffer: the most each link turns from the next.
 
+## Animation, as in Unity
+
+The same system for everything that moves by itself, made or imported:
+
+- **Clips.** A model's animations (a `.gltf` or `.glb`) are clips as they are. A clip made in the
+  editor is a `.anim` file: tracks, each a property of the entity or of one under it (position,
+  rotation, scale, active; a light's color and intensity; a camera's field of view; a mesh's tint;
+  any number, switch, vector or color of any component, a script's included) with keys along time,
+  and events (a sound played, or a message sent to the entity) at moments of it.
+- **The Animation window** (Window > Animation, or **Open Animation** on an Animator) shows the
+  clips of the chosen entity's Animator. **Create New Clip...** makes one (and the Animator, and
+  a controller to hold it once there are two). Press **Record** and change things in the
+  Inspector or move them in the view: each change is a key at the playhead. Drag the playhead to
+  see the clip at that moment, drag keys along their track, double-click a track for a key there;
+  a right click on a key chooses how the curve comes into it (smooth, linear, step), on the ruler
+  adds an event. **Stop** puts everything back as it was.
+- **The Animator Controller** (a `.animator` file, Create > Animator Controller in the Explorer, or
+  **Create Controller** in the Animator window) holds states, each a clip or a blend tree of
+  clips by a parameter, the **parameters** the game sets (float, bool, trigger), the
+  **transitions** between states when their conditions hold (with an exit time and a blend), and
+  **layers** that play over the base on some bones. **The Animator window** draws it as a graph:
+  right-click for a new state (empty, from a clip, a blend tree) or a transition, drag the boxes,
+  and edit what is chosen on the right. While the game runs, the state each Animator is in is
+  lit with how far through it is, and the parameters can be changed there to try them.
+- **The Animator** component plays a controller (or one clip by itself), on a model or on any
+  entity at all.
+- **From code**: `animator->setFloat("speed", v)`, `setBool`, `setTrigger("jump")`,
+  `crossFade("Jump", 0.1f)`, `playState("Idle")`, `play("Animations/Door Open.anim")`,
+  `currentState()`, `isFinished()`. **From a visual script**: the Animation boxes (Set Animator
+  Float, Bool and Trigger, Play State, Play Clip, Set Animator Speed, Animator Parameter, Animator
+  State). The events of clips and states come to the entity's scripts as messages: On Message in a
+  visual script, `onMessage` in code.
+- **Timelines** stay what a cutscene is made of, with the same clips on their Clip tracks.
+
 ## glTF models and animation
 
 A `.gltf` or `.glb` file is a model like an `.obj`: choose it as an entity's mesh. If it has animations, add an **Animator**: `clip` names
@@ -570,6 +616,14 @@ a pond, 9 is a fresh breeze with waves of two meters, 20 a gale); `choppiness` s
 `resolution` is how fine the sheet is and `patchSize` how far before the pattern repeats. A body with **Buoyancy** over a Water rides
 its waves. From code: `waterHeightAt(world, position, height)`. For water you can see through, set the material's blending to Blend
 and lower its alpha; it does not bend what is behind it yet.
+
+**Every water material has the sea's waves**, worked out by the same Fourier transform: on a
+plain plane with the Water material too, from the scene's Wind (or a fresh breeze without one),
+moving in the editor as well. Each pixel is shaded with the slope of the waves there, read
+twice at two sizes so that the repeat does not show; it mirrors the sky as it was captured
+(clouds and sunset included), glows green-blue through the crests the sun shines through,
+glitters where the sun catches it, and foams where waves break. With a **Water** component the
+sheet also rises and falls with the same waves.
 
 **Floating things and boats.** Give a Buoyancy a **Hull** (half its size each way) and a
 RigidBody that rotates: it is held up at its four lower corners, each as deep as the water is

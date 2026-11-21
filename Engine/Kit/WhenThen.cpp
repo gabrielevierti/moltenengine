@@ -136,15 +136,21 @@ namespace {
 const std::vector<std::string> kActions = {"Nothing", "Show", "Hide", "Switch", "Destroy", "Play sound", "Start timeline", "Load scene", "Load scene in background",
                                            "Add scene", "Remove scene", "Restart scene",
                                            "Set value", "Add to value", "Send message", "Spawn prefab", "Move here", "Save game", "Load game"};
+// What each action's target is, for the editor to offer the right things.
+const std::vector<std::pair<std::string, std::string>> kTargetKinds = {
+    {"Nothing", "none"}, {"Show", "target"}, {"Hide", "target"}, {"Switch", "target"}, {"Destroy", "target"}, {"Play sound", "sound"},
+    {"Start timeline", "target"}, {"Load scene", "scene"}, {"Load scene in background", "scene"}, {"Add scene", "scene"},
+    {"Remove scene", "scene"}, {"Restart scene", "none"}, {"Set value", "value"}, {"Add to value", "value"}, {"Send message", "message"},
+    {"Spawn prefab", "prefab"}, {"Move here", "target"}, {"Save game", ""}, {"Load game", ""}};
 const char* kTargetHelp = "What it acts on: an entity's name (or tag), \"self\", \"other\" (who entered), a sound, a scene, a value's name";
 }  // namespace
 
 MOLTEN_COMPONENT(WhenThen,
                  MOLTEN_FIELD(when).choices({"Something enters", "A message", "It starts", "A value reaches", "It is clicked", "Every few seconds"}),
-                 MOLTEN_FIELD(who).help("For Something enters: a name or a tag; empty: anything"),
-                 MOLTEN_FIELD(message).help("For A message: its name"), MOLTEN_FIELD(value).help("For A value reaches: the shared value"),
+                 MOLTEN_FIELD(who).picks("entityOrTag").help("For Something enters: a name or a tag; empty: anything"),
+                 MOLTEN_FIELD(message).picks("message").help("For A message: its name"), MOLTEN_FIELD(value).picks("value").help("For A value reaches: the shared value"),
                  MOLTEN_FIELD(atLeast), MOLTEN_FIELD(seconds).range(0, 600).help("Wait this long before doing it; for Every few seconds, how often"),
-                 MOLTEN_FIELD(once).help("Only the first time"), MOLTEN_FIELD(action1).choices(kActions), MOLTEN_FIELD(target1).help(kTargetHelp),
-                 MOLTEN_FIELD(amount1).help("A number: the value, the volume"), MOLTEN_FIELD(action2).choices(kActions), MOLTEN_FIELD(target2).help(kTargetHelp),
-                 MOLTEN_FIELD(amount2), MOLTEN_FIELD(action3).choices(kActions), MOLTEN_FIELD(target3).help(kTargetHelp), MOLTEN_FIELD(amount3),
-                 MOLTEN_FIELD(action4).choices(kActions), MOLTEN_FIELD(target4).help(kTargetHelp), MOLTEN_FIELD(amount4))
+                 MOLTEN_FIELD(once).help("Only the first time"), MOLTEN_FIELD(action1).choices(kActions), MOLTEN_FIELD(target1).picksBy("action1", kTargetKinds).help(kTargetHelp),
+                 MOLTEN_FIELD(amount1).help("A number: the value, the volume"), MOLTEN_FIELD(action2).choices(kActions), MOLTEN_FIELD(target2).picksBy("action2", kTargetKinds).help(kTargetHelp),
+                 MOLTEN_FIELD(amount2), MOLTEN_FIELD(action3).choices(kActions), MOLTEN_FIELD(target3).picksBy("action3", kTargetKinds).help(kTargetHelp), MOLTEN_FIELD(amount3),
+                 MOLTEN_FIELD(action4).choices(kActions), MOLTEN_FIELD(target4).picksBy("action4", kTargetKinds).help(kTargetHelp), MOLTEN_FIELD(amount4))

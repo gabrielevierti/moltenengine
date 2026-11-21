@@ -3,6 +3,11 @@
 // number), the parameters the game sets (speed, grounded, jump), and the transitions between
 // states when those parameters say so. An Animator with `controller` set follows one.
 //
+// A motion is a clip: one of the animations of the entity's model, by its name ("Walk"), or a
+// clip made in the editor, by its file (Animations/DoorOpen.anim; see AnimationClip.hpp). The
+// Animator window draws the states as boxes and the transitions as arrows, and keeps where each
+// box is ("place 120 40" inside its state).
+//
 // A .animator file, as text:
 //
 //   molten-animator 1
@@ -82,6 +87,7 @@ struct AnimatorController {
         bool loops = true;
         float speed = 1;
         std::vector<Event> events;
+        float x = 0, y = 0;                         // where the Animator window draws it ("place x y")
     };
     struct Condition {
         enum class Test { IsTrue, IsFalse, Greater, Less, Triggered } test = Test::IsTrue;

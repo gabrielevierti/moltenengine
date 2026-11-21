@@ -35,6 +35,13 @@ void Renderer::bindMaterial(MTL::RenderCommandEncoder* encoder, const Material& 
     uniforms.water = material.isWater ? std::max(material.waveScale, 0.01f) : 0.0f;
     uniforms.waveHeight = material.waveHeight;
     uniforms.sway = std::max(material.sway, 0.0f);
+    // Water reads the sea's waves where other materials read their normal map.
+    bool readsOcean = material.isWater && oceanTexture_ && oceanPatch_ > 0;
+    if (material.isWater) waterSeen_ = true;
+    if (readsOcean) {
+        uniforms.oceanScale = 1.0f / oceanPatch_;
+        uniforms.oceanOffset = -oceanOrigin_;
+    }
     if (!material.shader.empty()) {
         // Its own shader: which one, and its properties in the order the shader declares them.
         int place = surfaceShaders_.use(material.shader);
@@ -56,7 +63,7 @@ void Renderer::bindMaterial(MTL::RenderCommandEncoder* encoder, const Material& 
         return (texture ? texture : fallback)->handle();
     };
     encoder->setFragmentTexture(textureOr(material.baseColorTexture, white_), gpu::MMTextureBaseColor);
-    encoder->setFragmentTexture(textureOr(material.normalTexture, flatNormal_), gpu::MMTextureNormal);
+    encoder->setFragmentTexture(readsOcean ? oceanTexture_ : textureOr(material.normalTexture, flatNormal_), gpu::MMTextureNormal);
     encoder->setFragmentTexture(textureOr(material.metallicRoughnessTexture, white_), gpu::MMTextureMetallicRoughness);
     encoder->setFragmentTexture(textureOr(material.occlusionTexture, white_), gpu::MMTextureOcclusion);
     encoder->setFragmentTexture(textureOr(material.emissiveTexture, white_), gpu::MMTextureEmissive);

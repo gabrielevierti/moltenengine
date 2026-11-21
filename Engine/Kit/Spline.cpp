@@ -276,7 +276,7 @@ using namespace molten::kit;
 
 MOLTEN_COMPONENT(Spline, MOLTEN_FIELD(closed).help("The end joins the start, as on a circuit"),
                  MOLTEN_FIELD(smoothness).range(1, 64).help("Points made between two of its points"))
-MOLTEN_COMPONENT(SplineFollower, MOLTEN_FIELD(spline).help("The name of the entity with the Spline"), MOLTEN_FIELD(speed).range(-50, 50),
+MOLTEN_COMPONENT(SplineFollower, MOLTEN_FIELD(spline).picks("entity").help("The name of the entity with the Spline"), MOLTEN_FIELD(speed).range(-50, 50),
                  MOLTEN_FIELD(distance).help("Meters along the curve: where it starts"),
                  MOLTEN_FIELD(ending).range(0, 2).help("At the end: 0 round again, 1 back the other way, 2 stop"), MOLTEN_FIELD(facesForward),
                  MOLTEN_FIELD(offset).help("From the curve, turned with it: x to its right, y up"))

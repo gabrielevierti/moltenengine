@@ -4,6 +4,8 @@
 #include "Rendering/Particles.hpp"
 #include "Rendering/SurfaceShader.hpp"
 #include "Panels/Widgets.hpp"
+#include "Animation/AnimationClip.hpp"
+#include "Animation/AnimatorController.hpp"
 #include "Platform.hpp"
 
 #include "Core/TextFile.hpp"
@@ -49,6 +51,9 @@ TileLook lookOf(AssetType type) {
         case AssetType::Prefab: return {IM_COL32(86, 156, 255, 255), "PRE"};
         case AssetType::Effect: return {IM_COL32(255, 170, 60, 255), "FX"};
         case AssetType::Material: return {IM_COL32(230, 120, 160, 255), "MAT"};
+        case AssetType::Animation: return {IM_COL32(255, 175, 90, 255), "ANI"};
+        case AssetType::Controller: return {IM_COL32(120, 170, 255, 255), "CTL"};
+        case AssetType::Timeline: return {IM_COL32(200, 160, 255, 255), "TL"};
     }
     return {IM_COL32(110, 118, 130, 255), "?"};
 }
@@ -204,6 +209,26 @@ private:
                 startRenaming(editor, path);
             }
         }
+        if (ImGui::MenuItem("Animation Clip")) {
+            // Keys to set in the Animation window, on whatever entity plays it.
+            AnimationClip clip;
+            std::string path = editor.assets.uniquePath(folder, "New Animation", ".anim");
+            if (text::writeFile(editor.assets.absolutePath(path), clip.toText())) {
+                editor.assets.refresh();
+                editor.currentFolder = folder;
+                startRenaming(editor, path);
+            }
+        }
+        if (ImGui::MenuItem("Animator Controller")) {
+            // States and transitions to draw in the Animator window; put it in an Animator's Controller.
+            AnimatorController controller;
+            std::string path = editor.assets.uniquePath(folder, "New Controller", ".animator");
+            if (text::writeFile(editor.assets.absolutePath(path), controller.toText())) {
+                editor.assets.refresh();
+                editor.currentFolder = folder;
+                startRenaming(editor, path);
+            }
+        }
         if (ImGui::MenuItem("Scene")) {
             // A new file with what every new scene starts with. The scene that is open is left alone.
             std::string path = editor.assets.uniquePath(folder, "New Scene", ".scene");
@@ -354,7 +379,6 @@ private:
         bool isSelected = editor.selectedAsset == path;
         if (ImGui::Selectable("##tile", isSelected, ImGuiSelectableFlags_AllowDoubleClick, size)) {
             editor.selectedAsset = path;
-            editor.scene.clearSelection();
             if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
                 if (isFolder) {
                     editor.currentFolder = path;
@@ -363,6 +387,12 @@ private:
                     editor.requestOpenScene(editor.assets.absolutePath(path));
                 } else if (type == AssetType::Graph) {
                     editor.editGraph(path);
+                } else if (type == AssetType::Controller) {
+                    editor.openPanel("Animator");
+                } else if (type == AssetType::Animation) {
+                    editor.openPanel("Animation");
+                } else if (type == AssetType::Timeline) {
+                    editor.openPanel("Timeline");
                 } else {
                     platform::openWithDefaultApplication(editor.assets.absolutePath(path));
                 }

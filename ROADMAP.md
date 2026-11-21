@@ -102,6 +102,11 @@ The next game after Driving: someone who walks, runs and jumps.
       kept in step), and transitions on conditions, after an exit time, eased over a time of their own; the character mover
       sets `speed`, `grounded`, `verticalSpeed` and `jump` by itself
 - [x] **Animation events**: named moments of a state, sounds played, the rest for the game. [x] Root motion
+- [x] **Clips made in the editor** (`.anim`): keys on any property of an entity and those under it, recorded in the
+      Animation window; played by the Animator alone or as states of a controller, blended like a model's clips; on Timelines
+- [x] **Animator window**: the controller as a graph of states and transitions, parameters and layers, lit while the game runs
+- [x] **Animation from scripts**: Set Animator Float/Bool/Trigger, Play State, Play Clip; events as messages
+- [x] **No typed names**: every field and visual-script box that names something offers a list of what it can be
 - [ ] **GPU skinning**, and **blend shapes** (faces)
 - [x] **Two-bone IK**: a foot or a hand on a target, the knee or elbow toward a pole
 - [x] **Navigation**: a Navigation Area finds the walkable ground (slope, steps, room for the agents' size); paths by A*,

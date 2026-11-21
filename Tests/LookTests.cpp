@@ -51,6 +51,24 @@ TEST(the_look_of_a_scene_is_saved_with_it) {
     CHECK(sizeof(gpu::EffectUniforms) == 176 && sizeof(gpu::DecalUniforms) == 160 && sizeof(gpu::PostUniforms) == 72);
 }
 
+TEST(sunlight_goes_gold_and_red_as_the_sun_sinks) {
+    Vec3 noon = sunlightThroughAir(1.0f), afternoon = sunlightThroughAir(0.5f);
+    CHECK(std::abs(noon.x - 1) < 1e-4f && std::abs(noon.z - 1) < 1e-4f);
+    CHECK(afternoon.z > 0.7f && afternoon.x > afternoon.z);                  // a little warm
+    Vec3 low = sunlightThroughAir(0.08f);                                   // about five degrees up: orange
+    CHECK(low.x > 0.4f && low.y < low.x * 0.7f && low.z < low.y * 0.5f);
+    Vec3 setting = sunlightThroughAir(0.0f);                                // on the horizon: dim red
+    CHECK(setting.x < low.x && setting.y < setting.x * 0.2f && setting.z < 0.01f);
+    CHECK(simd::length(sunlightThroughAir(-0.1f)) == 0);                    // set: none
+    // Saved only when turned off.
+    RenderSettings settings;
+    settings.sky.sunsetColors = false;
+    Scene scene;
+    std::vector<NamedMaterial> read;
+    RenderSettings back;
+    CHECK(readScene(writeScene(scene, {}, settings), scene, read, back, SceneAssets{}) && !back.sky.sunsetColors);
+}
+
 TEST(a_decal_is_a_component_and_the_neutral_table_changes_nothing) {
     kit::registerKit();
     const ComponentType* type = ComponentRegistry::instance().find("Decal");

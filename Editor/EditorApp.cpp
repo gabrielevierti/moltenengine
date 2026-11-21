@@ -102,6 +102,8 @@ void EditorApp::start(Engine& engine) {
     registerConsolePanel(editor);
     registerProfilerPanel(editor);
     registerTimelinePanel(editor);
+    registerAnimationPanel(editor);
+    registerAnimatorPanel(editor);
     registerSourceControlPanel(editor);
     registerSceneWeightPanel(editor);
     registerRenderingPanel(editor);
@@ -596,6 +598,13 @@ void EditorApp::handleShortcuts() {
         scene.stepFrame();
     } else if (isPressed("play")) {
         scene.setPlaying(!scene.isPlaying());
+    }
+    // While the game has the keys, the arrows and Space are the game's: the editor's own keyboard
+    // navigation (moving between buttons and lists, showing their tips) is off until it lets go.
+    {
+        ImGuiIO& io = ImGui::GetIO();
+        if (scene.isPlaying() && editor.gameViewHasFocus) io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
+        else io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     }
     if (scene.isPlaying() && editor.gameViewHasFocus) {
         // The keyboard is the game's, but for the way out.
@@ -1641,7 +1650,7 @@ void EditorApp::buildDefaultLayout(ImGuiID dockSpace) {
     ImGui::DockBuilderAddNode(dockSpace, ImGuiDockNodeFlags_DockSpace);
     ImGui::DockBuilderSetNodeSize(dockSpace, viewport->WorkSize);
     ImGuiID center = dockSpace;
-    ImGuiID scene = 0, game = 0, hierarchy = 0, inspector = 0, bottom = 0, console = 0, viewer = 0;
+    ImGuiID scene = 0, game = 0, hierarchy = 0, inspector = 0, bottom = 0, console = 0;
     if (layoutName_ == "2 by 3") {
         // Scene above Game on the left, then the hierarchy, the assets and the inspector as columns.
         inspector = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.24f, nullptr, &center);
@@ -1662,11 +1671,10 @@ void EditorApp::buildDefaultLayout(ImGuiID dockSpace) {
         inspector = ImGui::DockBuilderSplitNode(strip, ImGuiDir_Right, 0.36f, nullptr, &bottom);
     } else {
         // Default, as few places as there can be: the inspector down the right (Lighting and
-        // Rendering as its tabs) with a small viewer of the chosen asset under it; the explorer
+        // Rendering as its tabs; the viewer of a chosen asset is its lower part); the explorer
         // and the console as tabs along the bottom; the hierarchy on the left; the scene and the
         // game as tabs of one big view in the middle. Input and Visual Script open when wanted.
         inspector = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.22f, nullptr, &center);
-        viewer = ImGui::DockBuilderSplitNode(inspector, ImGuiDir_Down, 0.27f, nullptr, &inspector);
         bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.27f, nullptr, &center);
         hierarchy = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.18f, nullptr, &center);
         scene = game = center;
@@ -1677,11 +1685,13 @@ void EditorApp::buildDefaultLayout(ImGuiID dockSpace) {
     ImGui::DockBuilderDockWindow("Inspector", inspector);
     ImGui::DockBuilderDockWindow("Lighting", inspector);
     ImGui::DockBuilderDockWindow("Rendering", inspector);
-    ImGui::DockBuilderDockWindow("Viewer", viewer ? viewer : inspector);
     ImGui::DockBuilderDockWindow("Explorer", bottom);
     ImGui::DockBuilderDockWindow("Console", console ? console : bottom);
     ImGui::DockBuilderDockWindow("Input", bottom);
     ImGui::DockBuilderDockWindow("Visual Script", bottom);
+    ImGui::DockBuilderDockWindow("Timeline", bottom);
+    ImGui::DockBuilderDockWindow("Animation", bottom);
+    ImGui::DockBuilderDockWindow("Animator", bottom);
     ImGui::DockBuilderFinish(dockSpace);
 }
 
@@ -1728,8 +1738,13 @@ void EditorApp::drawPanels() {
         if (ImGui::Begin(panel->title.c_str(), &panel->isOpen, panel->windowFlags())) panel->draw(editor);
         ImGui::End();
     }
-    // Clicking an asset brings the Viewer to the front of its tabs, and selecting something
-    // in the scene brings the Inspector back, without taking the keyboard from where it is.
+    // A panel asked for (Open Animator...): in front, once it has been drawn.
+    if (!editor.panelToFocus.empty()) {
+        if (ImGui::FindWindowByName(editor.panelToFocus.c_str())) ImGui::SetWindowFocus(editor.panelToFocus.c_str());
+        editor.panelToFocus.clear();
+    }
+    // Clicking an asset or selecting something in the scene brings the Inspector (where both are
+    // shown) to the front of its tabs, without taking the keyboard from where it is.
     static std::string shownAsset;
     static size_t shownSelection = 0;
     auto bringForward = [](const char* name) {
@@ -1739,7 +1754,7 @@ void EditorApp::drawPanels() {
     const AssetInfo* asset = editor.selectedAsset.empty() ? nullptr : editor.assets.find(editor.selectedAsset);
     if (editor.selectedAsset != shownAsset) {
         shownAsset = editor.selectedAsset;
-        if (asset && !asset->isFolder()) bringForward("Viewer");
+        if (asset) bringForward("Inspector");
     }
     size_t selection = editor.scene.selection().size();
     if (selection != shownSelection) {

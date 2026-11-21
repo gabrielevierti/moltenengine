@@ -80,6 +80,9 @@ AssetType AssetDatabase::typeOfExtension(const std::string& extension) {
     if (e == ".ttf" || e == ".otf") return AssetType::Font;
     if (e == ".metal" || e == ".shader") return AssetType::Shader;
     if (e == ".effect") return AssetType::Effect;
+    if (e == ".anim") return AssetType::Animation;
+    if (e == ".animator") return AssetType::Controller;
+    if (e == ".timeline") return AssetType::Timeline;
     if (e == ".cpp" || e == ".hpp" || e == ".h" || e == ".mm") return AssetType::Script;
     if (e == ".txt" || e == ".md" || e == ".json") return AssetType::Text;
     return AssetType::Other;
@@ -100,6 +103,9 @@ const char* AssetDatabase::typeName(AssetType type) {
         case AssetType::Graph: return "Visual Script";
         case AssetType::Prefab: return "Prefab";
         case AssetType::Effect: return "Effect";
+        case AssetType::Animation: return "Animation Clip";
+        case AssetType::Controller: return "Animator Controller";
+        case AssetType::Timeline: return "Timeline";
         case AssetType::Material: return "Material";
     }
     return "File";
