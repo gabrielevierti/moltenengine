@@ -1,0 +1,4 @@
+molten-project 1
+name "Third Person Game"
+startScene "Scenes/Main.scene"
+version "0.1.0"

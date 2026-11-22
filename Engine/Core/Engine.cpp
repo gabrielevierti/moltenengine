@@ -1,5 +1,6 @@
 #include "Water/Ocean.hpp"
 #include "Core/Engine.hpp"
+#include "Core/TextFile.hpp"
 #include "Platform/DeviceState.hpp"
 
 #include "Core/Log.hpp"
@@ -205,47 +206,22 @@ int Engine::end() {
     return window_ || captureSaved_ ? 0 : 1;
 }
 
-void Engine::simulate(Game& game, double realDelta) {
-    // Physics and the game's fixedUpdate advance in steps of constant length.
-    // What was created or moved since the last frame (by an editor, by code between frames)
-    // has its place in the world before any component asks for it.
-    scene.updateTransforms();
-    int steps = time.beginFrame(realDelta);
-    for (int i = 0; i < steps; i++) {
-        {
-            Profiler::Scope timed(profiler, "Fixed update");
-            game.fixedUpdate(*this, time.fixedDelta);
-            runBehaviors(true, time.fixedDelta);
-            runComponents(true, time.fixedDelta);
-        }
-        if (!isSimulationPaused) {
-            Profiler::Scope timed(profiler, "Physics");
-            prepareMeshColliders();
-            physics.step(scene, time.fixedDelta);
-            dispatchPhysicsEvents();        // components hear about collisions and triggers
-        }
-        scene.flushDestroyed();
-    }
-    // Show bodies where they are between the last two steps, for smooth motion at any frame rate.
-    if (!isSimulationPaused) physics.writeTransforms(scene, time.alpha);
+void Engine::onFixedUpdate(float dt) {
+    if (game_) game_->fixedUpdate(*this, dt);
+    runBehaviors(true, dt);
+}
 
-    {
-        Profiler::Scope timed(profiler, "Update");
-        game.update(*this, time.delta);
-        runBehaviors(false, time.delta);
-        runComponents(false, time.delta);
-    }
-    scene.flushDestroyed();
-    scene.updateTransforms();
-    {
-        Profiler::Scope timed(profiler, "Late update");
-        runComponents(false, time.delta, true);     // lateUpdate: cameras that follow, with everything where it will be drawn
-    }
-    scene.updateTransforms();
-    {
-        Profiler::Scope timed(profiler, "Particles");
-        updateParticles(scene, time.delta, renderer_->settings.wind, renderer_->settings.windGustiness, time.elapsed);
-    }
+void Engine::onUpdate(float dt) {
+    if (game_) game_->update(*this, dt);
+    runBehaviors(false, dt);
+}
+
+const RenderSettings& Engine::effectSettings() { return renderer_->settings; }
+
+void Engine::simulate(Game& game, double realDelta) {
+    // The frame is the World's own (World::simulateFrame): the Game and the Behaviors are called
+    // from it, through onFixedUpdate and onUpdate above. What is added here is the picture.
+    simulateFrame(realDelta);
 
     // The canvas covers the screen, or, in an editor that shows the game in a view of its
     // own, that view: the game's interface is part of the picture of the game.
@@ -394,6 +370,22 @@ void Engine::preloadMesh(const std::string& name, MeshData data) {
     assets_->preload(name, std::move(data));
 }
 
+void Engine::preloadPicture(const std::string& name, std::vector<uint8_t> pixels, int width, int height) {
+    assets_->preloadPicture(name, std::move(pixels), width, height);
+}
+
+std::function<std::string(const std::string&)> Engine::assetPathFinder() const {
+    // As Assets::path: the project's file if it has one by that name, the engine's own otherwise.
+    return [project = assets_->projectDirectory(), engine = assets_->engineDirectory()](const std::string& name) {
+        if (!project.empty()) {
+            std::string inProject = project + "/" + name;
+            std::error_code ignored;
+            if (std::filesystem::exists(inProject, ignored) || !std::filesystem::exists(engine + "/" + name, ignored)) return inProject;
+        }
+        return engine + "/" + name;
+    };
+}
+
 std::shared_ptr<Font> Engine::loadFont(const std::string& name) {
     return assets_->font(name);
 }
@@ -446,6 +438,19 @@ SoundHandle Engine::playSoundAt(const std::shared_ptr<const AudioClip>& clip, Ve
     return audio_->play(clip, options);
 }
 
+void Engine::loadQuality(const std::string& settingsDirectory) {
+    quality.reset();
+    if (std::optional<std::string> text = text::readFile(settingsDirectory + "/Quality.settings")) quality = GameQuality::parse(*text);
+    // A project that never chose is at High.
+    if (!quality) quality = GameQuality::preset(GameQuality::Level::High);
+    if (renderer_) renderer_->quality = &*quality;
+}
+
+void Engine::setQuality(const GameQuality& wanted) {
+    quality = wanted;
+    if (renderer_) renderer_->quality = &*quality;
+}
+
 bool Engine::writeImage(const std::string& path, int width, int height) {
     std::vector<uint8_t> pixels = renderer_->renderToImage(scene, canvas_, width, height, time.elapsed);
     if (!stbi_write_png(path.c_str(), width, height, 4, pixels.data(), width * 4)) {
@@ -470,10 +475,11 @@ void Engine::handleDeveloperKeys() {
 
 void Engine::drawStatistics() {
     const RenderStats& stats = renderer_->stats;        // of the previous frame
-    char text[256];
-    std::snprintf(text, sizeof(text), "%.0f fps   %.1f ms\n%d draw calls   %d triangles\n%d objects drawn   %d culled\n%d lights   %zu entities",
-                  double(time.framesPerSecond), double(time.unscaledDelta) * 1000.0, stats.drawCalls, stats.triangles,
-                  stats.visibleObjects, stats.culledObjects, stats.lights, scene.entityCount());
+    char text[320];
+    std::snprintf(text, sizeof(text),
+                  "%.0f fps   %.1f ms\n%d draw calls   %d triangles\n%d shadow draws   %d depth draws   %d passes\n%d objects drawn   %d culled\n%d lights   %zu entities",
+                  double(time.framesPerSecond), double(time.unscaledDelta) * 1000.0, stats.drawCalls, stats.triangles, stats.shadowDraws, stats.depthDraws,
+                  stats.passes, stats.visibleObjects, stats.culledObjects, stats.lights, scene.entityCount());
     // The parts of the last frame that took longest, from the profiler.
     std::string all = text;
     if (const Profiler::Frame* last = profiler.lastFrame()) {

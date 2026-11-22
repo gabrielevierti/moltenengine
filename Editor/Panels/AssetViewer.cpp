@@ -58,8 +58,8 @@ bool writeWav(const std::string& path, const AudioClip& clip) {
     return bool(file);
 }
 
-/// The viewer of what is chosen in the Explorer: not a window of its own but the lower part of
-/// the Inspector, there only while something of the Explorer is chosen.
+/// The viewer of what is chosen in the Explorer: not a window of its own but the right part of
+/// the Explorer, there only while something in it is chosen.
 class AssetViewer {
 public:
     void draw(EditorContext& editor) {
@@ -101,8 +101,8 @@ public:
             if (ImGui::Button("Open in Animator")) editor.openPanel("Animator");
             ImGui::Spacing();
         } else if (asset->type == AssetType::Animation) {
-            if (ImGui::Button("Open in Animation")) editor.openPanel("Animation");
-            ui::tooltip("It shows the clips of the entity chosen in the scene: choose one that plays this clip");
+            if (ImGui::Button("Open in Timeline")) editor.openPanel("Timeline");
+            ui::tooltip("It shows the animations of the entity chosen in the scene: choose the one it was made for");
             ImGui::Spacing();
         } else if (asset->type == AssetType::Timeline) {
             if (ImGui::Button("Open in Timeline")) editor.openPanel("Timeline");
@@ -117,7 +117,6 @@ public:
         else if (asset->type == AssetType::Mesh && mesh_) drawModel(editor, *asset);
         else if (asset->type == AssetType::Material) drawMaterial(editor, *asset);
         else if (asset->type == AssetType::Audio && clip_) drawSound(editor, *asset);
-        else if (asset->type == AssetType::Effect) drawEffect(editor, *asset);
         else if (asset->type == AssetType::Graph) drawGraph(editor, *asset);
         else drawText(editor, *asset);
     }
@@ -278,16 +277,6 @@ private:
                 for (const GltfSkin& skin : model->skins) parts_.push_back({"Skeleton: bones", int(skin.joints.size())});
                 for (const GltfAnimation& animation : model->animations) parts_.push_back({"Animation: " + animation.name, int(animation.duration * 100)});
             }
-        } else if (asset.type == AssetType::Effect) {
-            // The effect on an emitter in a little world of its own, where it runs to be looked at.
-            effectWorld_ = std::make_unique<Scene>();
-            effectEntity_ = effectWorld_->create("Effect");
-            effectWorld_->add(effectEntity_, Transform{});
-            ParticleEmitter emitter;
-            if (std::optional<std::string> contents = text::readFile(path)) readEffect(*contents, emitter);
-            effectWorld_->add(effectEntity_, emitter);
-            effectWorld_->updateTransforms();
-            effectSpan_ = 2.0f;
         } else if (asset.type == AssetType::Audio) {
             if (std::shared_ptr<AudioClip> clip = Audio::loadClip(path)) {
                 clip_ = std::make_shared<AudioClip>(*clip);       // its own copy: the tools below change it
@@ -308,79 +297,6 @@ private:
     void stop(EditorContext& editor) {
         if (voice_ != 0) editor.engine.audio().stop(voice_);
         voice_ = 0;
-    }
-
-    // ---------------------------------------------------------------- effects
-
-    /// A particle effect: running, seen from the side, above its settings. A change is saved to the file as it is made.
-    void drawEffect(EditorContext& editor, const AssetInfo& asset) {
-        ParticleEmitter* emitter = effectWorld_ ? effectWorld_->get<ParticleEmitter>(effectEntity_) : nullptr;
-        if (!emitter) {
-            ImGui::TextWrapped("This file could not be read as an effect.");
-            return;
-        }
-        updateParticles(*effectWorld_, std::min(ImGui::GetIO().DeltaTime, 0.05f), Vec3{0, 0, 0}, 0, ImGui::GetTime());
-
-        ImVec2 at = ImGui::GetCursorScreenPos();
-        ImVec2 room(ImGui::GetContentRegionAvail().x, std::clamp(ImGui::GetContentRegionAvail().y * 0.4f, 140.0f, 360.0f));
-        ImGui::InvisibleButton("##effect", room);
-        ImDrawList* drawList = ImGui::GetWindowDrawList();
-        drawList->AddRectFilled(at, ImVec2(at.x + room.x, at.y + room.y), IM_COL32(16, 17, 21, 255), 4.0f);
-        drawList->PushClipRect(at, ImVec2(at.x + room.x, at.y + room.y), true);
-        // The picture is as wide as the effect has grown: found from the particles, and eased so that it does not jump.
-        float reach = 0.5f;
-        for (const Particle& particle : emitter->particles) {
-            reach = std::max({reach, std::abs(particle.position.x), std::abs(particle.position.y) * 0.6f, std::abs(particle.position.z)});
-        }
-        effectSpan_ += (std::min(reach * 1.25f, 60.0f) - effectSpan_) * std::min(ImGui::GetIO().DeltaTime * 2.0f, 1.0f);
-        float scale = std::min(room.x, room.y * 1.6f) * 0.5f / std::max(effectSpan_, 0.1f);
-        ImVec2 origin(at.x + room.x * 0.5f, at.y + room.y * 0.72f);
-        // The ground, and a meter for scale.
-        drawList->AddLine(ImVec2(at.x, origin.y), ImVec2(at.x + room.x, origin.y), IM_COL32(255, 255, 255, 26));
-        drawList->AddLine(ImVec2(origin.x - scale * 0.5f, origin.y + 8), ImVec2(origin.x + scale * 0.5f, origin.y + 8), IM_COL32(255, 255, 255, 90), 2.0f);
-        drawList->AddText(ImVec2(origin.x + scale * 0.5f + 6, origin.y + 1), IM_COL32(255, 255, 255, 110), "1 m");
-        for (const Particle& particle : emitter->particles) {
-            float t = saturate(particle.age / particle.lifetime);
-            Vec4 color = particleColor(*emitter, t);
-            float size = std::max(particleSize(*emitter, t) * 0.5f * scale, 0.75f);
-            // Colors brighter than the screen's white are light: shown as white-hot, a little more solid.
-            float brightest = std::max({color.x, color.y, color.z, 1.0f});
-            auto channel = [&](float value) { return int(std::pow(saturate(value / brightest), 1.0f / 2.2f) * 255.0f); };
-            int alpha = int(saturate(color.w * (emitter->isAdditive ? 0.55f + 0.1f * brightest : 0.8f)) * 255.0f);
-            drawList->AddCircleFilled(ImVec2(origin.x + particle.position.x * scale, origin.y - particle.position.y * scale), size,
-                                      IM_COL32(channel(color.x), channel(color.y), channel(color.z), alpha), size > 6 ? 16 : 8);
-        }
-        drawList->PopClipRect();
-        ImGui::TextDisabled("%d particles", int(emitter->particles.size()));
-        ImGui::SameLine(0, 16);
-        if (ImGui::SmallButton("Play Again")) {
-            emitter->particles.clear();
-            emitter->isSeeded = false;
-        }
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Add to Scene")) {
-            // An entity with this effect on it, where the scene's own origin is.
-            Scene& scene = editor.engine.scene;
-            Entity entity = scene.create(std::filesystem::path(asset.path).stem().string());
-            Transform transform;
-            transform.position = Vec3{0, 0.5f, 0};
-            scene.add(entity, transform);
-            ParticleEmitter copy = *emitter;
-            copy.particles.clear();
-            copy.isSeeded = false;
-            scene.add(entity, copy);
-            editor.scene.markChanged();
-            editor.scene.select(entity);
-        }
-        ImGui::Separator();
-        ImGui::BeginChild("##effect-settings", ImVec2(0, 0));
-        if (drawEmitterProperties(editor, *emitter, false)) {
-            if (!text::writeFile(editor.assets.absolutePath(asset.path), writeEffect(*emitter))) editor.notify("Cannot write " + asset.path, ConsoleMessage::Level::Error);
-            // What was just written is what is shown: no need to read it back.
-            std::error_code ignored;
-            shownTime_ = std::filesystem::last_write_time(editor.assets.absolutePath(asset.path), ignored);
-        }
-        ImGui::EndChild();
     }
 
     // ---------------------------------------------------------------- import settings
@@ -1008,9 +924,6 @@ private:
     std::future<SoftImage> job_;
     Look jobLook_, shownLook_;
     // sounds
-    std::unique_ptr<Scene> effectWorld_;    // an effect file runs in a world of its own
-    Entity effectEntity_{};
-    float effectSpan_ = 2.0f;               // how many meters the picture of it is wide, eased
     ImportSettings settings_;               // of the file shown
     std::string settingsFor_;
     bool isWaitingToApply_ = false;

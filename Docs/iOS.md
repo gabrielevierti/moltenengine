@@ -4,7 +4,7 @@ The engine runs on iOS and iPadOS 16 and later. What follows is how to put a pro
 
 ## Putting a project on a device
 
-From the editor: **Game > Build and Export...**, step 5, **iPhone and iPad**. Fill in your team once; **Build and Put on the Device** makes the Xcode project (in the project's `Build/iOS`), builds it, installs it on the device that is plugged in and starts it. **Open in Xcode** stops after making the project and opens it. What follows is the same by hand.
+From the editor: **File > Build Settings...**, step 5, **iPhone and iPad**. Fill in your team once; **Build and Put on the Device** makes the Xcode project (in the project's `Build/iOS`), builds it, installs it on the device that is plugged in and starts it. **Open in Xcode** stops after making the project and opens it. What follows is the same by hand.
 
 You need Xcode, an Apple developer account (a free one is enough for your own device), and the project you made in the editor.
 

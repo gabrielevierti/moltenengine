@@ -50,6 +50,16 @@ public:
     /// A model already read (on another thread, while a scene loads in the background): the
     /// next mesh(name) makes it from this instead of reading the file.
     void preload(const std::string& name, MeshData data) { preloaded_[name] = std::move(data); }
+    /// A picture already decoded, the same way: four bytes a pixel, rows from the top. The next
+    /// texture(name) is made from these pixels instead of reading the file.
+    void preloadPicture(const std::string& name, std::vector<uint8_t> pixels, int width, int height) {
+        preloadedPictures_[name] = Pixels{std::move(pixels), width, height};
+    }
+    /// What was read ahead and not asked for after all is let go.
+    void forgetPreloaded() {
+        preloaded_.clear();
+        preloadedPictures_.clear();
+    }
 
     // ---- from files, by name relative to the Assets folder
 
@@ -95,6 +105,11 @@ private:
     std::unordered_map<std::string, std::shared_ptr<Texture>> textures_;
     std::unordered_map<std::string, std::shared_ptr<Mesh>> meshes_;
     std::unordered_map<std::string, MeshData> preloaded_;
+    struct Pixels {
+        std::vector<uint8_t> pixels;
+        int width = 0, height = 0;
+    };
+    std::unordered_map<std::string, Pixels> preloadedPictures_;
     std::unordered_map<std::string, std::shared_ptr<struct GltfModel>> models_;     // glTF files read, for their parts
     std::unordered_map<std::string, std::shared_ptr<Material>> materials_;
     std::unordered_map<std::string, std::shared_ptr<Font>> fonts_;

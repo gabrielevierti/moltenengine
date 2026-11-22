@@ -631,6 +631,18 @@ void World::stopSounds() {
     soundPlaces_.clear();
 }
 
+void World::applySettings(const GameSettings& wanted) {
+    settings = wanted;
+    physics.gravity = settings.gravity;
+    physics.layerMeets = settings.meets;
+    time.fixedDelta = 1.0f / float(std::clamp(settings.stepsPerSecond, 20, 240));
+}
+
+void World::loadSettings(const std::string& settingsDirectory) {
+    std::optional<std::string> contents = text::readFile(settingsDirectory + "/Game.settings");
+    applySettings(contents ? GameSettings::parse(*contents) : GameSettings{});
+}
+
 void World::loadInputMap() {
     std::optional<std::string> contents = text::readFile(assetPath("Input.actions"));
     input.apply(contents ? InputMap::fromText(*contents) : InputMap::standard());
@@ -663,11 +675,7 @@ bool World::loadSceneText(const std::string& name, const std::string& sceneText)
     assets.material = [this](const std::string& materialName) { return loadMaterial(materialName); };
     assets.prefabText = [this](const std::string& prefabName) { return text::readFile(assetPath(prefabName)); };
     std::string contents = sceneText;       // a copy: the text may be the one this world holds
-    stopSounds();                           // what was sounding belonged to the scene that is leaving
-    tasks.clear();                          // and so did what was waiting to happen in it
-    pools_.clear();
-    listeners_.erase(std::remove_if(listeners_.begin(), listeners_.end(), [](const Listener& listener) { return listener.hasOwner; }),
-                     listeners_.end());
+    endScene();                             // its components hear they are going; its sounds, tasks and pools go with it
     scene.clear();
     physics.reset();
     materials_->settings = RenderSettings{};
@@ -690,76 +698,25 @@ void World::loadSceneInBackground(const std::string& name, bool isAdded) {
     }
     loadingName_ = name;
     loadingIsAdded_ = isAdded;
-    loadingDone_ = std::make_shared<std::atomic<int>>(0);
-    loadingTotal_ = std::make_shared<std::atomic<int>>(1);
+    loadingProgress_ = std::make_shared<SceneAheadProgress>();
     setValue("isLoading", 1);
     setValue("loading", 0);
-    std::string path = assetPath(name), root = assetRoot;
-    auto done = loadingDone_, total = loadingTotal_;
-    // Only files are read there, and models made into triangles: nothing of the scene open.
-    loading_ = std::async(std::launch::async, [name, path, root, done, total]() {
-        LoadedInBackground loaded;
-        loaded.name = name;
-        std::optional<std::string> text = text::readFile(path);
-        if (!text) return loaded;
-        loaded.text = *text;
-        loaded.isRead = true;
-        // The models it names: "mesh \"Models/car.glb#3\" ...".
-        std::vector<std::string> wanted;
-        std::istringstream lines(*text);
-        std::string line;
-        while (std::getline(lines, line)) {
-            size_t start = line.find_first_not_of(" \t");
-            if (start == std::string::npos || line.compare(start, 6, "mesh \"") != 0) continue;
-            size_t open = start + 5, close = line.find('"', open + 1);
-            if (close == std::string::npos) continue;
-            std::string mesh = line.substr(open + 1, close - open - 1);
-            bool isBuiltIn = mesh.empty() || mesh == "cube" || mesh == "sphere" || mesh == "plane" || mesh == "cylinder";
-            if (!isBuiltIn && std::find(wanted.begin(), wanted.end(), mesh) == wanted.end()) wanted.push_back(mesh);
-        }
-        total->store(int(wanted.size()) + 1);
-        done->store(1);
-        auto fullPath = [&root](const std::string& file) { return root.empty() ? file : root + "/" + file; };
-        std::unordered_map<std::string, std::shared_ptr<GltfModel>> models;      // each file read once, however many parts
-        for (const std::string& mesh : wanted) {
-            MeshData data;
-            if (isGltfFile(mesh)) {
-                int part = -1;
-                std::string file = gltfFileOf(mesh, &part);
-                std::shared_ptr<GltfModel>& model = models[file];
-                if (!model) {
-                    if (std::optional<GltfModel> read = GltfModel::load(fullPath(file))) model = std::make_shared<GltfModel>(std::move(*read));
-                }
-                if (model) {
-                    if (part < 0) {
-                        data = model->assembled(model->restPose());
-                    } else {
-                        std::vector<GltfModel::Part> parts = model->parts();
-                        if (size_t(part) < parts.size()) data = model->part(parts[size_t(part)]);
-                    }
-                    ImportSettings::load(fullPath(file)).apply(data);
-                }
-            } else if (std::optional<std::string> obj = text::readFile(fullPath(mesh))) {
-                if (std::optional<MeshData> parsed = MeshData::parseOBJ(*obj)) {
-                    data = std::move(*parsed);
-                    ImportSettings::load(fullPath(mesh)).apply(data);
-                }
-            }
-            if (!data.positions.empty()) loaded.meshes.push_back({mesh, std::move(data)});
-            done->fetch_add(1);
-        }
-        return loaded;
+    // Only files are read there, models made into triangles and pictures into pixels (see
+    // SceneAhead.hpp): nothing of the scene that is open.
+    loading_ = std::async(std::launch::async, [name, path = assetPath(name), pathOf = assetPathFinder(), progress = loadingProgress_]() {
+        return readSceneAhead(name, path, pathOf, progress.get());
     });
 }
 
 float World::sceneLoadProgress() const {
-    if (!loading_.valid() || !loadingTotal_) return 1.0f;
-    return std::clamp(float(loadingDone_->load()) / float(std::max(loadingTotal_->load(), 1)), 0.0f, 0.99f);
+    if (!loading_.valid() || !loadingProgress_) return 1.0f;
+    return std::clamp(loadingProgress_->fraction(), 0.0f, 0.99f);
 }
 
 void World::finishBackgroundLoad() {
-    LoadedInBackground loaded = loading_.get();
-    for (auto& [mesh, data] : loaded.meshes) preloadMesh(mesh, std::move(data));
+    SceneAhead loaded = loading_.get();
+    for (SceneAhead::Model& model : loaded.models) preloadMesh(model.name, std::move(model.data));
+    for (SceneAhead::Picture& picture : loaded.pictures) preloadPicture(picture.name, std::move(picture.pixels), picture.width, picture.height);
     if (!loaded.isRead) {
         logError("there is no scene %s", loaded.name.c_str());
     } else if (loadingIsAdded_) {
@@ -869,13 +826,14 @@ struct TypeCalls {
     void (*update)(void*, World&, Entity, float) = nullptr;
     void (*fixedUpdate)(void*, World&, Entity, float) = nullptr;
     void (*lateUpdate)(void*, World&, Entity, float) = nullptr;
+    void (*onDestroy)(void*, World&, Entity) = nullptr;
     void (*onCollision)(void*, World&, Entity, Entity) = nullptr;
     void (*onTriggerEnter)(void*, World&, Entity, Entity) = nullptr;
     void (*draw)(void*, World&, Entity, Canvas&) = nullptr;
 };
 TypeCalls callsOf(const ComponentType& type) {
     return TypeCalls{type.name, type.category, type.get, type.collect, type.start, type.update, type.fixedUpdate, type.lateUpdate,
-                     type.onCollision, type.onTriggerEnter, type.draw};
+                     type.onDestroy, type.onCollision, type.onTriggerEnter, type.draw};
 }
 }  // namespace
 
@@ -971,48 +929,112 @@ void World::drawComponents(Canvas& canvas) {
     }
 }
 
-void World::advance(double realDelta) {
-    // What was created or moved since the last frame (by an editor, by code between frames)
-    // has its place in the world before any component asks for it.
-    profiler.beginFrame();
+void World::endScene() {
+    // The last word, to everything that started: a looping sound to stop, a record to keep.
+    if (runsComponents) {
+        std::vector<Entity> all;
+        scene.each<Transform>([&](Entity entity, Transform&) { all.push_back(entity); });
+        tellDestroyed(all);
+    }
+    stopSounds();                           // what was sounding belonged to the scene that is leaving
+    tasks.clear();                          // and so did what was waiting to happen in it
+    pools_.clear();
+    listeners_.erase(std::remove_if(listeners_.begin(), listeners_.end(), [](const Listener& listener) { return listener.hasOwner; }),
+                     listeners_.end());
+}
+
+void World::tellDestroyed(const std::vector<Entity>& entities) {
+    if (entities.empty()) return;
+    for (size_t i = 0; i < ComponentRegistry::instance().types().size(); i++) {
+        const ComponentType& declared = ComponentRegistry::instance().types()[i];
+        if (!declared.onDestroy) continue;
+        TypeCalls type = callsOf(declared);
+        std::unordered_set<uint64_t>& started = startedComponents_[type.name];
+        for (Entity entity : entities) {
+            if (!scene.isAlive(entity)) continue;
+            // Only what started is told it ends: a component that never ran has nothing to undo.
+            uint64_t key = (uint64_t(entity.index) << 32) | entity.generation;
+            if (!started.erase(key) && type.start) continue;
+            if (void* component = type.get(scene, entity)) type.onDestroy(component, *this, entity);
+        }
+    }
+}
+
+void World::removeDestroyed() {
+    if (runsComponents) {
+        // What onDestroy itself destroys is told too, each once: the list only grows at its end.
+        size_t told = 0;
+        for (int round = 0; round < 8; round++) {
+            std::vector<Entity> going = scene.doomedEntities();
+            if (going.size() <= told) break;
+            std::vector<Entity> fresh(going.begin() + std::ptrdiff_t(told), going.end());
+            told = going.size();
+            tellDestroyed(fresh);
+        }
+    }
+    scene.flushDestroyed();
+}
+
+const RenderSettings& World::effectSettings() { return materials_->settings; }
+
+void World::simulateFrame(double realDelta) {
     input.isTakingText = wantsTextInput;        // as the last frame left it
     wantsTextInput = false;                     // until a text field that is typed in says so again
+    // What was created or moved since the last frame (by an editor, by code between frames)
+    // has its place in the world before any component asks for it.
     scene.updateTransforms();
+
+    // 1. Physics and every fixedUpdate advance in steps of constant length.
     int steps = time.beginFrame(realDelta);
     for (int i = 0; i < steps; i++) {
         {
             Profiler::Scope timed(profiler, "Fixed update");
+            onFixedUpdate(time.fixedDelta);
             runComponents(true, time.fixedDelta);
         }
         if (!isSimulationPaused) {
             Profiler::Scope timed(profiler, "Physics");
             prepareMeshColliders();
             physics.step(scene, time.fixedDelta);
-            dispatchPhysicsEvents();
+            dispatchPhysicsEvents();        // components hear about collisions and triggers
         }
-        scene.flushDestroyed();
+        removeDestroyed();
     }
+    // 2. Bodies are shown where they are between the last two steps, for smooth motion at any frame rate.
     if (!isSimulationPaused) physics.writeTransforms(scene, time.alpha);
+
+    // 3. The frame's own update.
     {
         Profiler::Scope timed(profiler, "Update");
+        onUpdate(time.delta);
         runComponents(false, time.delta);
     }
     if (runsComponents) {
         Profiler::Scope timed(profiler, "Waiting tasks");
         tasks.run(time.delta, [this](Entity entity) { return scene.isAlive(entity); });
     }
-    scene.flushDestroyed();
+    removeDestroyed();
     scene.updateTransforms();
+
+    // 4. lateUpdate: cameras that follow, with everything where it will be drawn.
     {
         Profiler::Scope timed(profiler, "Late update");
-        runComponents(false, time.delta, true);     // lateUpdate: cameras that follow, with everything where it will be drawn
+        runComponents(false, time.delta, true);
     }
     scene.updateTransforms();
+
+    // 5. What only follows: particles, and the sound of the room.
     {
         Profiler::Scope timed(profiler, "Particles");
-        updateParticles(scene, time.delta, materials_->settings.wind, materials_->settings.windGustiness, time.elapsed);
+        const RenderSettings& settings = effectSettings();
+        updateParticles(scene, time.delta, settings.wind, settings.windGustiness, time.elapsed);
     }
     hearRoom();
+}
+
+void World::advance(double realDelta) {
+    profiler.beginFrame();
+    simulateFrame(realDelta);
     applyPendingScene();
     input.endFrame();
     profiler.endFrame();

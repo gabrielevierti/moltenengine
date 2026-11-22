@@ -3,6 +3,7 @@
 #include "Animation/Animator.hpp"
 #include "Game/Component.hpp"
 #include "Kit/Character.hpp"
+#include "Kit/Shooting.hpp"
 #include "Physics/Collision.hpp"
 #include "Scene/Components.hpp"
 
@@ -53,6 +54,21 @@ void NavigationArea::update(World& world, Entity self, float) {
     if (!isBaked) bake(world, self);
 }
 
+namespace {
+
+/// True for what moves by itself, or is part of something that does: a character, an agent, a machine that hunts.
+bool goesAbout(Scene& scene, Entity entity) {
+    for (int up = 0; up < 16 && scene.isAlive(entity); up++) {
+        if (scene.get<CharacterController>(entity) || scene.get<NavAgent>(entity) || scene.get<Hunter>(entity)) return true;
+        const Transform* place = scene.get<Transform>(entity);
+        if (!place) break;
+        entity = place->parent;
+    }
+    return false;
+}
+
+}  // namespace
+
 void NavigationArea::bake(World& world, Entity self) {
     const Transform* place = world.scene.get<Transform>(self);
     Vec3 center = place ? place->worldPosition() : Vec3{0, 0, 0};
@@ -75,7 +91,13 @@ void NavigationArea::bake(World& world, Entity self) {
         for (int column = 0; column < columns; column++) {
             size_t index = size_t(row * columns + column);
             Vec3 top{origin.x + (float(column) + 0.5f) * cell, center.y + above, origin.z + (float(row) + 0.5f) * cell};
+            // What walks or flies about is not ground, nor in the way: it will not stay where it is. The ground is what is under it.
             auto ground = world.physics.raycast(world.scene, Ray{top, Vec3{0, -1, 0}}, above + below);
+            for (int through = 0; ground && through < 4 && goesAbout(world.scene, ground->entity); through++) {
+                float used = ground->distance + 0.02f + (top.y - ground->point.y - ground->distance);
+                Vec3 from = ground->point - Vec3{0, 0.02f, 0};
+                ground = world.physics.raycast(world.scene, Ray{from, Vec3{0, -1, 0}}, std::max(above + below - used, 0.1f), 0xFFFFFFFFu, ground->entity);
+            }
             if (!ground || ground->normal.y < walkableNormal) continue;
             // A body that moves is not ground to plan on.
             if (const RigidBody* rigid = world.scene.get<RigidBody>(ground->entity); rigid && rigid->type == BodyType::Dynamic) continue;
@@ -86,6 +108,7 @@ void NavigationArea::bake(World& world, Entity self) {
             world.physics.forEachShapeNear(world.scene, box, Entity{}, [&](Entity other, const ShapeInstance& shape) {
                 if (blocked) return;
                 if (const RigidBody* rigid = world.scene.get<RigidBody>(other); rigid && rigid->type == BodyType::Dynamic) return;
+                if (goesAbout(world.scene, other)) return;
                 ContactInfo contact;
                 if (collide(body, shape, contact) && contact.depth > 0.005f) blocked = true;
             });

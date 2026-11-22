@@ -33,12 +33,19 @@ struct Material {
     AlphaMode alphaMode = AlphaMode::Opaque;
     bool isDoubleSided = false;         // do not cull back faces
     bool isUnlit = false;               // base color and emissive only, no lighting
-    bool isWater = false;               // a surface of water: moving waves, a mirror at a glancing angle, clear from above
+    /// A surface of water: moving waves, the sky mirrored at a glancing angle, the bottom seen
+    /// through it from above. Its base color is the color water this deep ends up; its opacity
+    /// how murky it is (0.3 a clear sea that shows its bottom ten meters down, 1 a pond).
+    bool isWater = false;
     float waveScale = 1.0f;             // water: larger numbers make smaller waves
     float waveHeight = 1.0f;            // water: how steep they are
     /// Moved by the scene's wind (Rendering > Wind), the more the higher above the model's base:
     /// grass, reeds, leaves, a flag. 0 still; 1 grass; 0.1 a tree.
     float sway = 0.0f;
+
+    /// True for what the things behind it are seen through: drawn after everything opaque, from
+    /// far to near, and casting no shadow. Water always is, whatever its blending says.
+    bool isSeenThrough() const { return alphaMode == AlphaMode::Blend || isWater; }
 
     /// A shader written by hand: the name of a `.shader` file in Assets (see
     /// Rendering/SurfaceShader.hpp), or empty for the engine's own. It is given the surface
@@ -86,6 +93,10 @@ struct MeshRenderer {
     bool castsShadows = true;
     bool isVisible = true;
     bool isBeyondItsDetail = false;     // set each view by a LOD Group above it: not drawn in this one
+    /// The mesh's name where the mesh itself is not there: its file is missing, or the program
+    /// has no GPU to hold it (a test, a tool that writes scenes). Written to a scene file as it
+    /// was read, so that saving a scene does not forget what it could not load.
+    std::string meshName;
 };
 
 /// Many copies of an entity's mesh, drawn together in few draw calls: grass, trees, rocks,

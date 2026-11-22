@@ -1,0 +1,11 @@
+molten-material 1
+shader lit
+baseColor 0.1 0.78 0.72 1
+metallic 0
+roughness 0.2
+emissive 0.1 1.5 1.3
+normalScale 1
+occlusionStrength 1
+alpha opaque 0.5
+uvScale 1 1
+doubleSided 0

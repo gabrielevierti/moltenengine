@@ -21,6 +21,7 @@ struct MaterialSample {
     float waveHeight;
     float4 sea;             // water with the sea's waves: their slope (x, z), foam, height; w of the second scale below
     float hasSea;           // 1 when `sea` was read
+    float waterDepth;       // meters of water under this pixel, along the view (what is under it seen through); large if unknown
 #if MOLTEN_EXTRAS
     float mirror;           // the share of the mirrored light a traced ray found and brings: 0 when no ray was sent
     float3 mirrored;        // and the light of what it found
@@ -32,6 +33,19 @@ struct MaterialSample {
     float4 customValues[8]; // and its properties
 #endif
 };
+
+// How deep the water is under a pixel: from the opaque depth drawn before it (the prepass) to the
+// water's own surface, along the view. Large where nothing is known.
+static float waterDepthAt(MeshVertexOut in, constant PassUniforms &pass, constant FrameUniforms &frame, depth2d<float> sceneDepth) {
+    if (frame.sceneDepthReady < 0.5 || is_null_texture(sceneDepth)) return 1000.0;
+    uint2 pixel = uint2(in.position.xy);
+    if (pixel.x >= sceneDepth.get_width() || pixel.y >= sceneDepth.get_height()) return 1000.0;
+    float stored = sceneDepth.read(pixel);
+    if (stored >= 1.0) return 1000.0;
+    // The distance in front of the camera, from the depth: the perspective undone.
+    float behind = pass.projection[3][2] / (stored + pass.projection[2][2]);
+    return max(behind - in.viewDepth, 0.0);
+}
 
 static MaterialSample sampleMaterial(MeshVertexOut in, bool isFrontFacing,
                                      constant MaterialUniforms &material,
@@ -62,6 +76,7 @@ static MaterialSample sampleMaterial(MeshVertexOut in, bool isFrontFacing,
     result.water = material.water;
     result.waveHeight = material.waveHeight;
     result.hasSea = 0.0;
+    result.waterDepth = 1000.0;
     result.sea = float4(0.0);
     if (material.water > 0.0 && material.oceanScale > 0.0) {
         // The sea's waves, a patch that repeats, read twice: as it is, and smaller and turned, so
@@ -153,7 +168,11 @@ static float4 shadePixel(MeshVertexOut in, MaterialSample m,
         float3 around = irradianceMap.sample(linearSampler, float3(0.0, 1.0, 0.0)).rgb * frame.environmentIntensity;
         float3 sun = frame.sunColor * sunLight;
         float3 deep = m.baseColor.rgb;
+        // Shallow water is clear and takes the color of what is under it; deep water its own.
+        float depthIn = m.waterDepth;
+        float shallow = exp(-depthIn * 0.6);
         float3 body = deep * (around * 1.2 + sun * (0.15 + 0.2 * saturate(dot(N, toSun))));
+        body = mix(body, body * 0.6 + float3(0.12, 0.2, 0.18) * (around + sun * 0.2) * 0.5, shallow * 0.5);
         float through = pow(saturate(dot(toEye, -toSun) * 0.5 + 0.5), 4.0) * saturate(crest * 0.6 + 0.5) * saturate(1.0 - toEye.y * 1.5);
         body += deep * float3(0.7, 1.9, 1.6) * sun * through * 0.6 * saturate(m.waveHeight);
 
@@ -171,11 +190,21 @@ static float4 shadePixel(MeshVertexOut in, MaterialSample m,
         // coordinate, from 2 up); patchy, as foam is.
         float sheetFoam = saturate(in.uv.x - 2.0);
         float foam = max(sheetFoam, saturate(seaFoam * 1.2 - 0.2) * saturate(m.waveHeight));
+        // Where the water meets something that stands in it (a rock, a pier, a hull, the shore):
+        // a ring of foam that the waves push and pull, thicker the rougher the sea.
+        float wash = 0.35 + 0.25 * saturate(m.waveHeight);
+        float lap = 0.5 + 0.5 * sin(t * 1.6 + dot(in.worldPosition.xz, float2(0.9, 0.7)) * 2.0);
+        float shore = (1.0 - smoothstep(0.0, wash * (0.7 + 0.6 * lap), depthIn)) * step(0.0, depthIn);
+        float shoreRipples = 0.55 + 0.45 * sin(depthIn * 28.0 - t * 3.0);
+        foam = max(foam, shore * shoreRipples);
         float breakup = 0.65 + 0.35 * sin(dot(in.worldPosition.xz, float2(3.1, 1.7)) + t * 0.7) * sin(dot(in.worldPosition.xz, float2(-1.3, 2.9)) - t * 0.4);
         foam = saturate(foam * breakup * 1.3);
         float3 white = float3(0.9, 0.93, 0.95) * (around + sun * (0.35 + 0.35 * saturate(dot(N, toSun))));
         water = mix(water, white, foam);
-        float opacity = saturate(mix(mix(m.baseColor.a, 1.0, fresnel), 1.0, foam));
+        // The shallower, the more of what is under it shows; how soon it hides it is the material's opacity.
+        float murk = m.baseColor.a;
+        float hides = 1.0 - exp(-depthIn * mix(0.25, 2.5, murk * murk));
+        float opacity = saturate(mix(mix(hides, 1.0, fresnel), 1.0, foam));
         // Whatever went wrong on the way (a normal of no length, a number out of range), it is still water.
         if (any(isnan(water)) || any(isinf(water))) {
             water = m.baseColor.rgb * (around + frame.sunColor * 0.3);
@@ -246,6 +275,7 @@ fragment float4 fragment_pbr(MeshVertexOut in [[stage_in]],
                              texturecube<float> prefilteredMap [[texture(MMTexturePrefiltered)]],
                              texture2d<float> brdfLUT [[texture(MMTextureBRDF)]],
                              texture2d<float> ambientOcclusion [[texture(MMTextureAmbientOcclusion)]],
+                             depth2d<float> sceneDepth [[texture(MMTextureSceneDepth)]],
                              sampler materialSampler [[sampler(MMSamplerMaterial)]],
                              sampler shadowSampler [[sampler(MMSamplerShadow)]],
                              sampler linearSampler [[sampler(MMSamplerLinearClamp)]]) {
@@ -255,6 +285,7 @@ fragment float4 fragment_pbr(MeshVertexOut in [[stage_in]],
 #if MOLTEN_EXTRAS
     m.fogSun = fogInSunlight(in.worldPosition, pass.cameraPosition, in.viewDepth, in.position.xy, frame, shadowMap, shadowSampler);
 #endif
+    if (m.water > 0.0) m.waterDepth = waterDepthAt(in, pass, frame, sceneDepth);
     return shadePixel(in, m, pass, frame, lights, sunLight, irradianceMap, prefilteredMap, brdfLUT,
                       ambientOcclusion, linearSampler);
 }
@@ -314,18 +345,29 @@ fragment float4 fragment_pbr_traced(MeshVertexOut in [[stage_in]],
                              raytracing::instance_acceleration_structure tracedScene [[buffer(MMBufferAccelerationStructure)]],
 #if MOLTEN_EXTRAS
                              constant TracedSurface *tracedSurfaces [[buffer(MMBufferTracedSurfaces)]],
+                             texture2d<float> tracedLight [[texture(MMTextureTracedLight)]],
+                             texture2d<float> tracedSurface [[texture(MMTextureTracedSurface)]],
 #endif
                              texturecube<float> irradianceMap [[texture(MMTextureIrradiance)]],
                              texturecube<float> prefilteredMap [[texture(MMTexturePrefiltered)]],
                              texture2d<float> brdfLUT [[texture(MMTextureBRDF)]],
                              texture2d<float> ambientOcclusion [[texture(MMTextureAmbientOcclusion)]],
+                             depth2d<float> sceneDepth [[texture(MMTextureSceneDepth)]],
                              sampler materialSampler [[sampler(MMSamplerMaterial)]],
                              sampler linearSampler [[sampler(MMSamplerLinearClamp)]]) {
     MaterialSample m = sampleMaterial(in, isFrontFacing, material, baseColorTexture, normalTexture,
                                       metallicRoughnessTexture, occlusionTexture, emissiveTexture, materialSampler);
     float sunLight = sunVisibilityTraced(in.worldPosition, normalize(in.normal), -frame.sunDirection, in.viewDepth, in.position.xy, frame, tracedScene);
 #if MOLTEN_EXTRAS
-    float4 around = ambientTraced(in.worldPosition, normalize(in.normal), in.viewDepth, in.position.xy, frame, tracedScene, tracedSurfaces, irradianceMap, linearSampler);
+    // The light around the pixel: traced before this pass at half the size where that could
+    // be done (a quarter of the rays, and smoothed), and otherwise here, a pixel at a time.
+    float4 around;
+    if (frame.tracedAmbientReady != 0) {
+        float3 facing = isFrontFacing ? normalize(in.normal) : -normalize(in.normal);
+        around = tracedAmbientAt(in.position.xy, in.worldPosition, facing, in.viewDepth, pass, tracedLight, tracedSurface);
+    } else {
+        around = ambientTraced(in.worldPosition, normalize(in.normal), in.viewDepth, in.position.xy, frame, tracedScene, tracedSurfaces, irradianceMap, linearSampler);
+    }
     m.occlusion *= around.a;
     m.bounced = around.rgb;
     if (m.roughness < frame.reflectionMaxRoughness) {
@@ -337,6 +379,7 @@ fragment float4 fragment_pbr_traced(MeshVertexOut in [[stage_in]],
         m.mirrored = seen.rgb;
     }
 #endif
+    if (m.water > 0.0) m.waterDepth = waterDepthAt(in, pass, frame, sceneDepth);
     return shadePixel(in, m, pass, frame, lights, sunLight, irradianceMap, prefilteredMap, brdfLUT,
                       ambientOcclusion, linearSampler);
 }
@@ -355,7 +398,9 @@ fragment float4 fragment_pbr_masked_traced(MeshVertexOut in [[stage_in]],
                                     texture2d<float> emissiveTexture [[texture(MMTextureEmissive)]],
                                     raytracing::instance_acceleration_structure tracedScene [[buffer(MMBufferAccelerationStructure)]],
 #if MOLTEN_EXTRAS
-                             constant TracedSurface *tracedSurfaces [[buffer(MMBufferTracedSurfaces)]],
+                                    constant TracedSurface *tracedSurfaces [[buffer(MMBufferTracedSurfaces)]],
+                                    texture2d<float> tracedLight [[texture(MMTextureTracedLight)]],
+                                    texture2d<float> tracedSurface [[texture(MMTextureTracedSurface)]],
 #endif
                                     texturecube<float> irradianceMap [[texture(MMTextureIrradiance)]],
                                     texturecube<float> prefilteredMap [[texture(MMTexturePrefiltered)]],
@@ -371,7 +416,15 @@ fragment float4 fragment_pbr_masked_traced(MeshVertexOut in [[stage_in]],
     m.baseColor.a = 1.0;
     float sunLight = sunVisibilityTraced(in.worldPosition, normalize(in.normal), -frame.sunDirection, in.viewDepth, in.position.xy, frame, tracedScene);
 #if MOLTEN_EXTRAS
-    float4 around = ambientTraced(in.worldPosition, normalize(in.normal), in.viewDepth, in.position.xy, frame, tracedScene, tracedSurfaces, irradianceMap, linearSampler);
+    // The light around the pixel: traced before this pass at half the size where that could
+    // be done (a quarter of the rays, and smoothed), and otherwise here, a pixel at a time.
+    float4 around;
+    if (frame.tracedAmbientReady != 0) {
+        float3 facing = isFrontFacing ? normalize(in.normal) : -normalize(in.normal);
+        around = tracedAmbientAt(in.position.xy, in.worldPosition, facing, in.viewDepth, pass, tracedLight, tracedSurface);
+    } else {
+        around = ambientTraced(in.worldPosition, normalize(in.normal), in.viewDepth, in.position.xy, frame, tracedScene, tracedSurfaces, irradianceMap, linearSampler);
+    }
     m.occlusion *= around.a;
     m.bounced = around.rgb;
     if (m.roughness < frame.reflectionMaxRoughness) {
@@ -452,3 +505,16 @@ fragment void fragment_depth_masked(MeshVertexOut in [[stage_in]],
         discard_fragment();
     }
 }
+
+#ifdef MOLTEN_EXTRAS
+// The same for the pass that draws every cascade at once (vertex_shadow_detailed).
+fragment void fragment_shadow_masked(ShadowDetailVertexOut in [[stage_in]],
+                                     constant MaterialUniforms &material [[buffer(MMBufferMaterial)]],
+                                     texture2d<float> baseColorTexture [[texture(MMTextureBaseColor)]],
+                                     sampler materialSampler [[sampler(MMSamplerMaterial)]]) {
+    float alpha = material.baseColor.a * in.alpha * baseColorTexture.sample(materialSampler, in.uv * material.uvScale).a;
+    if (alpha < material.alphaCutoff) {
+        discard_fragment();
+    }
+}
+#endif

@@ -2,12 +2,15 @@
 // What is drawn is saved as soon as the hand is off, and a game that is playing picks
 // the change up at once: scripts can be rewired while they run.
 #include "Editor.hpp"
+#include "Script/CppToGraph.hpp"
 #include "Platform.hpp"
 #include "Script/Convert.hpp"
 #include "GraphEditor.hpp"
 #include "Panels/Widgets.hpp"
 #include "Panels/Pickers.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <set>
 
 #include "Core/TextFile.hpp"
@@ -37,6 +40,17 @@ public:
             editor.graphToEdit.clear();
             ImGui::SetWindowFocus();
         }
+        // Following the selection: choose an entity with a Visual Script, and its script is shown,
+        // and while the game runs, what that entity's own copy of it is doing (several entities
+        // can run the same script; each has its own values).
+        Entity chosen = editor.scene.primary();
+        if (followsSelection_ && chosen != followed_) {
+            followed_ = chosen;
+            if (const VisualScript* component = editor.engine.scene.get<VisualScript>(chosen); component && !component->graph.empty()) {
+                if (editor.assets.find(component->graph)) open(editor, component->graph);
+                watchWanted_ = chosen;
+            }
+        }
         // The file may have been renamed, moved or thrown away.
         if (!path_.empty() && !editor.assets.find(path_)) {
             save(editor);               // nothing is lost: written where it was, it shows up again
@@ -53,6 +67,7 @@ public:
         }
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows)) editor.panelOwnsEditKeys = true;
         drawDebugging(editor);
+        drawWatchedEntity(editor);
         board_.pickText = [this, &editor](const script::PinDef& pin, std::string& value, float width) {
             if (pin.pick == "variable") {
                 // The variables are those of this graph: the names its Set and Get Variable nodes use.
@@ -151,6 +166,11 @@ private:
             if (!made.empty()) platform::openWithDefaultApplication(editor.assets.absolutePath(made));
         }
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("Writes the same behavior as a C++ component in Assets/Scripts, to go on from in code");
+        ImGui::SameLine();
+        ImGui::Checkbox("Follow Selection", &followsSelection_);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) {
+            ImGui::SetTooltip("Choosing an entity with a Visual Script shows its script, and while the game runs, what that entity's copy of it is doing");
+        }
         // The view of the board.
         ImGui::SameLine(0, 16);
         if (ImGui::SmallButton("-")) board_.zoomBy(1 / 1.25f);
@@ -179,6 +199,16 @@ private:
             debugger.values.clear();
             debugger.ran.clear();
             debugger.entity = Entity{};
+        }
+        // The entity chosen in the scene, if it runs this script: its values, not another's.
+        if (watchWanted_.isValid()) {
+            const VisualScript* component = editor.engine.scene.get<VisualScript>(watchWanted_);
+            if (component && component->graph == path_ && debugger.entity != watchWanted_) {
+                debugger.entity = watchWanted_;
+                debugger.values.clear();
+                debugger.ran.clear();
+            }
+            watchWanted_ = Entity{};
         }
         debugger.isOn = isPlaying;
         // Stopped at a breakpoint: the game is held, and the script shown is the one stopped in.
@@ -244,6 +274,50 @@ private:
         }
     }
 
+    /// Whose script this is, when it was opened by choosing an entity: its name, and while the game
+    /// runs, its own variables as they are now.
+    void drawWatchedEntity(EditorContext& editor) {
+        script::Debugger& debugger = script::Debugger::instance();
+        Scene& world = editor.engine.scene;
+        Entity shown = world.isAlive(debugger.entity) ? debugger.entity : world.isAlive(followed_) ? followed_ : Entity{};
+        const VisualScript* component = world.isAlive(shown) ? world.get<VisualScript>(shown) : nullptr;
+        if (!component || component->graph != path_) return;
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+        ImVec2 at = ImGui::GetCursorScreenPos();
+        std::string name = editor.scene.nameOf(shown);
+        ImVec2 nameSize = ImGui::CalcTextSize(name.c_str());
+        // A chip with the entity's name; the live dot says the values below are its own, now.
+        bool isLive = editor.scene.isPlaying();
+        ImVec2 chipMax(at.x + nameSize.x + (isLive ? 34 : 22), at.y + nameSize.y + 8);
+        drawList->AddRectFilled(at, chipMax, IM_COL32(255, 140, 60, 40), 10);
+        drawList->AddRect(at, chipMax, IM_COL32(255, 140, 60, 150), 10);
+        float textX = at.x + 11;
+        if (isLive) {
+            float pulse = 0.6f + 0.4f * float(std::sin(ImGui::GetTime() * 5.0));
+            drawList->AddCircleFilled(ImVec2(at.x + 13, (at.y + chipMax.y) * 0.5f), 3.5f, IM_COL32(120, 255, 160, int(255 * pulse)), 12);
+            textX += 12;
+        }
+        drawList->AddText(ImVec2(textX, at.y + 4), IM_COL32(255, 220, 190, 255), name.c_str());
+        ImGui::Dummy(ImVec2(chipMax.x - at.x, chipMax.y - at.y));
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip(isLive ? "The values on the wires and the variables are this entity's, as they are now"
+                                                             : "The script of the entity chosen in the scene");
+        if (isLive && !component->state.variables.empty()) {
+            // Its variables, as they are now, sorted by name.
+            std::vector<std::pair<std::string, std::string>> variables;
+            for (const auto& [variable, value] : component->state.variables) variables.push_back({variable, value.toText()});
+            std::sort(variables.begin(), variables.end());
+            for (const auto& [variable, value] : variables) {
+                ImGui::SameLine(0, 10);
+                ImGui::TextDisabled("%s", variable.c_str());
+                ImGui::SameLine(0, 4);
+                ImGui::Text("%s", value.size() > 18 ? (value.substr(0, 17) + "\xE2\x80\xA6").c_str() : value.c_str());
+            }
+        }
+    }
+
+    bool followsSelection_ = true;      // the script shown follows the entity chosen in the scene
+    Entity followed_{};                 // the entity last followed
+    Entity watchWanted_{};              // to watch once the script is open
     GraphDebugView debugView_;
     bool wasPlaying_ = false;
     std::string path_;                  // relative to Assets; empty for none
@@ -279,26 +353,30 @@ std::string convertGraphToCpp(EditorContext& editor, const std::string& graphPat
 
 std::string convertCppToGraph(EditorContext& editor, const std::string& cppPath) {
     std::optional<std::string> code = text::readFile(editor.assets.absolutePath(cppPath));
-    bool wasChanged = false;
-    std::string name;
-    std::optional<script::Graph> graph = code ? script::graphKeptIn(*code, &wasChanged, &name) : std::nullopt;
-    if (!graph) {
-        editor.notify("Assets/" + cppPath + " was not made from a visual script: code written by hand has no boxes to go back to",
-                      ConsoleMessage::Level::Warning);
+    if (!code) {
+        editor.notify("Cannot read Assets/" + cppPath, ConsoleMessage::Level::Error);
+        return {};
+    }
+    script::CppToGraphResult converted = script::graphFromCpp(*code);
+    if (!converted.graph) {
+        editor.notify("Assets/" + cppPath + ": " + converted.error, ConsoleMessage::Level::Warning);
         return {};
     }
     std::string folder = std::filesystem::path(cppPath).parent_path().string();
     std::string relative = editor.assets.uniquePath(folder, std::filesystem::path(cppPath).stem().string(), ".graph");
-    if (!text::writeFile(editor.assets.absolutePath(relative), graph->toText())) {
+    if (!text::writeFile(editor.assets.absolutePath(relative), converted.graph->toText())) {
         editor.notify("Cannot write Assets/" + relative, ConsoleMessage::Level::Error);
         return {};
     }
     editor.assets.refresh();
-    if (wasChanged) {
-        editor.notify("Wrote Assets/" + relative + " from the graph Assets/" + cppPath + " was made from. The code was changed since: those changes are not in it",
-                      ConsoleMessage::Level::Warning);
+    if (converted.notConverted.empty()) {
+        editor.notify("Wrote Assets/" + relative + ": " + converted.name + " as boxes and wires");
     } else {
-        editor.notify("Wrote Assets/" + relative + ": the same behavior as boxes and wires");
+        // What has no box is said line by line, so nothing goes missing without a word.
+        for (const std::string& line : converted.notConverted) editor.notify("Not in the graph, " + line, ConsoleMessage::Level::Warning);
+        editor.notify("Wrote Assets/" + relative + ". " + std::to_string(converted.notConverted.size()) +
+                          (converted.notConverted.size() == 1 ? " line has" : " lines have") + " no box: they are listed in the Console",
+                      ConsoleMessage::Level::Warning);
     }
     return relative;
 }

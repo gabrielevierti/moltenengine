@@ -38,25 +38,53 @@ std::string chordText(const KeyChord& chord) {
 }
 
 Shortcuts::Shortcuts() {
+    // Each is a command of Editor/EditorCommands.cpp, by its id; the title and the group are what
+    // Preferences > Shortcuts shows. Mostly Unity's keys, which most hands already know.
     const char* defaults[][4] = {
         {"newScene", "New Scene", "File", "Cmd+N"},
         {"openScene", "Open Scene", "File", "Cmd+O"},
-        {"save", "Save Scene", "File", "Cmd+S"},
-        {"saveAs", "Save Scene As New File", "File", "Shift+Cmd+S"},
+        {"save", "Save", "File", "Cmd+S"},
+        {"saveAs", "Save As", "File", "Shift+Cmd+S"},
         {"openProject", "Open Project", "File", "Shift+Cmd+O"},
+        {"export", "Build Settings", "File", "Shift+Cmd+B"},
         {"quit", "Quit", "File", "Cmd+Q"},
         {"undo", "Undo", "Edit", "Cmd+Z"},
         {"redo", "Redo", "Edit", "Shift+Cmd+Z"},
+        {"cut", "Cut", "Edit", "Cmd+X"},
+        {"copy", "Copy", "Edit", "Cmd+C"},
+        {"paste", "Paste", "Edit", "Cmd+V"},
         {"duplicate", "Duplicate", "Edit", "Cmd+D"},
+        {"rename", "Rename", "Edit", "F2"},
+        {"delete", "Delete", "Edit", "Cmd+Backspace"},
         {"selectAll", "Select All", "Edit", "Cmd+A"},
-        {"alignWithView", "Align with View", "Edit", "Shift+Cmd+F"},
-        {"findAnything", "Find Anything", "Edit", "Cmd+K"},
-        {"settings", "Editor Settings", "Edit", "Cmd+Comma"},
-        {"play", "Play and Stop", "Play", "Cmd+P"},
-        {"pause", "Pause and Resume", "Play", "Shift+Cmd+P"},
-        {"step", "Step One Frame", "Play", "Alt+Cmd+P"},
-        {"buildScripts", "Build Scripts Now", "Game", "Cmd+B"},
-        {"export", "Build and Export", "Game", "Shift+Cmd+B"},
+        {"deselectAll", "Deselect All", "Edit", "Shift+D"},
+        {"selectChildren", "Select Children", "Edit", "Shift+C"},
+        {"invertSelection", "Invert Selection", "Edit", "Cmd+I"},
+        {"find", "Find in Hierarchy", "Edit", "Cmd+F"},
+        {"findAnything", "Search Everything", "Edit", "Cmd+K"},
+        {"play", "Play and Stop", "Edit", "Cmd+P"},
+        {"pause", "Pause and Resume", "Edit", "Shift+Cmd+P"},
+        {"step", "Step One Frame", "Edit", "Alt+Cmd+P"},
+        {"settings", "Preferences", "Edit", "Cmd+Comma"},
+        {"refresh", "Refresh Assets", "Assets", "Cmd+R"},
+        {"buildScripts", "Compile Scripts", "Assets", "Cmd+B"},
+        {"createEmpty", "Create Empty", "Entity", "Shift+Cmd+N"},
+        {"createEmptyChild", "Create Empty Child", "Entity", "Alt+Shift+N"},
+        {"group", "Group Selection", "Entity", "Cmd+G"},
+        {"clearParent", "Clear Parent", "Entity", "Alt+Shift+P"},
+        {"firstSibling", "Move to Top", "Entity", "Cmd+Equal"},
+        {"lastSibling", "Move to Bottom", "Entity", "Cmd+Minus"},
+        {"moveToView", "Move to View", "Entity", "Alt+Cmd+F"},
+        {"alignWithView", "Align with View", "Entity", "Shift+Cmd+F"},
+        {"toggleActive", "Toggle Active", "Entity", "Alt+Shift+A"},
+        {"addComponent", "Add Component", "Component", "Shift+Cmd+A"},
+        {"windowScene", "Scene", "Window", "Cmd+1"},
+        {"windowGame", "Game", "Window", "Cmd+2"},
+        {"windowInspector", "Inspector", "Window", "Cmd+3"},
+        {"windowHierarchy", "Hierarchy", "Window", "Cmd+4"},
+        {"windowProject", "Project", "Window", "Cmd+5"},
+        {"windowConsole", "Console", "Window", "Shift+Cmd+C"},
+        {"windowProfiler", "Profiler", "Window", "Cmd+7"},
     };
     for (const auto& line : defaults) {
         Action action{line[0], line[1], line[2], parseChord(line[3]), parseChord(line[3])};
@@ -69,6 +97,13 @@ Shortcuts::Action* Shortcuts::find(const std::string& id) {
         if (action.id == id) return &action;
     }
     return nullptr;
+}
+
+bool Shortcuts::has(const std::string& id) const {
+    for (const Action& action : actions_) {
+        if (action.id == id) return true;
+    }
+    return false;
 }
 
 const KeyChord& Shortcuts::chord(const std::string& id) const {

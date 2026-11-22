@@ -41,8 +41,19 @@ public:
     /// from the A13 and the M1 on.
     bool supportsRayTracing() const { return supportsRayTracing_; }
 
+    /// True when one pass can draw into several slices of a texture array, each triangle
+    /// saying which: every Mac, and Apple GPUs from the A12 on. The sun's shadow cascades are
+    /// drawn that way where it is so.
+    bool supportsLayeredRendering() const { return supportsLayeredRendering_; }
+
+    /// True when a fragment function can read the color already drawn at its pixel: Apple
+    /// GPUs, which keep the picture in tile memory while they draw it. Water uses it to see
+    /// what is under it.
+    bool supportsFramebufferRead() const { return supportsFramebufferRead_; }
+
     MTL::SamplerState* materialSampler() const { return materialSampler_.get(); }      // trilinear, anisotropic, repeat
     MTL::SamplerState* pixelSampler() const { return pixelSampler_.get(); }            // nearest, repeat: pixel art
+    MTL::SamplerState* noiseSampler() const { return noiseSampler_.get(); }            // trilinear, repeat in all three directions: blocks of noise
     MTL::SamplerState* linearClampSampler() const { return linearClampSampler_.get(); }
     MTL::SamplerState* pointClampSampler() const { return pointClampSampler_.get(); }
     MTL::SamplerState* shadowSampler() const { return shadowSampler_.get(); }          // compares, then filters
@@ -61,7 +72,9 @@ private:
     NS::SharedPtr<MTL::CommandQueue> queue_;
     bool supportsMemoryless_ = false;
     bool supportsRayTracing_ = false;
-    NS::SharedPtr<MTL::SamplerState> materialSampler_, pixelSampler_, linearClampSampler_, pointClampSampler_, shadowSampler_;
+    bool supportsLayeredRendering_ = false;
+    bool supportsFramebufferRead_ = false;
+    NS::SharedPtr<MTL::SamplerState> materialSampler_, pixelSampler_, noiseSampler_, linearClampSampler_, pointClampSampler_, shadowSampler_;
     NS::SharedPtr<MTL::DepthStencilState> depthWrite_, depthReadOnly_, depthOff_;
 };
 

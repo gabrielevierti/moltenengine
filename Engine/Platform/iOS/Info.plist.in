@@ -25,6 +25,8 @@
     <true/>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.games</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>To play with others on the same network.</string>
     <key>UILaunchScreen</key>
     <dict/>
     <key>UIRequiredDeviceCapabilities</key>

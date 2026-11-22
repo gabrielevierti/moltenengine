@@ -36,66 +36,6 @@ static float cloudNoise(float2 p) {
     return sum;
 }
 
-#if MOLTEN_EXTRAS
-// The same noise in three dimensions: two slices of it, one above the other, blended.
-static float cloudNoise3(float3 p, int layers) {
-    float sum = 0.0, strength = 0.5;
-    for (int i = 0; i < layers; i++) {
-        float level = floor(p.y);
-        float lower = cloudValueNoise(p.xz + level * 37.0);
-        float upper = cloudValueNoise(p.xz + (level + 1.0) * 37.0);
-        sum += strength * mix(lower, upper, smoothstep(0.0, 1.0, p.y - level));
-        p = p * 2.03 + float3(11.3, 5.7, 3.1);
-        strength *= 0.5;
-    }
-    return sum / (1.0 - strength * 2.0);                        // as if all the layers were there: 0 to 1 whatever their number
-}
-
-// How much cloud there is at a place: none below the layer's base or above its top, most
-// in its lower middle, where clouds are flat underneath and heaped above.
-static float cloudAmount(float3 at, float base, float top, constant FrameUniforms &frame, int layers) {
-    float height = (at.y - base) / (top - base);
-    if (height <= 0.0 || height >= 1.0) {
-        return 0.0;
-    }
-    float3 p = float3(at.x * 0.00042 * frame.cloudScale + frame.cloudOffset.x, at.y * 0.0011, at.z * 0.00042 * frame.cloudScale + frame.cloudOffset.y);
-    float shape = cloudNoise3(p, layers);
-    float profile = smoothstep(0.0, 0.12, height) * smoothstep(1.0, 0.45, height);
-    float threshold = 0.74 - 0.47 * frame.cloudCoverage;
-    return saturate((shape - threshold) * 4.0) * profile;
-}
-#endif
-
-// ---------------------------------------------------------------- the sky from the air itself
-
-// Sunlight scattered by the air (Rayleigh: blue, all round) and by haze (Mie: white, toward
-// the sun), along the line of sight, after Preetham, Shirley and Smits, "A Practical Analytic
-// Model for Daylight". The sun's height decides everything: blue at noon, gold and red as it
-// sets, dark when it has gone.
-static float3 physicalSkyColor(float3 d, float3 toSun, float haze) {
-    const float3 up = float3(0.0, 1.0, 0.0);
-    float sunHeight = dot(toSun, up);
-    // How much sunlight there is at all: less as the sun nears the horizon, none well below it.
-    float sunLight = 1000.0 * max(0.0, 1.0 - exp(-((kPi / 1.95 - acos(clamp(sunHeight, -1.0, 1.0))) / 1.5)));
-    float sunFade = 1.0 - saturate(1.0 - exp(sunHeight));
-    float3 rayleigh = float3(5.804542996e-6, 1.356291141e-5, 3.026590246e-5) * (1.0 - (1.0 - sunFade));
-    float turbidity = 2.0 + haze * 8.0;
-    float3 mie = 0.434 * (0.2 * turbidity * 10e-18) * float3(1.839991851e14, 2.779802391e14, 4.079047954e14) * 0.005;
-    // How much air the eye looks through: more toward the horizon.
-    float zenith = acos(max(0.0, dot(up, d)));
-    float air = 1.0 / (cos(zenith) + 0.15 * pow(max(93.885 - zenith * 180.0 / kPi, 0.001), -1.253));
-    float3 through = exp(-(rayleigh * 8.4e3 * air + mie * 1.25e3 * air));
-    float cosine = dot(d, toSun);
-    float rayleighPhase = 3.0 / (16.0 * kPi) * (1.0 + pow(cosine * 0.5 + 0.5, 2.0));
-    const float g = 0.8;
-    float miePhase = 1.0 / (4.0 * kPi) * (1.0 - g * g) / pow(max(1.0 - 2.0 * g * cosine + g * g, 0.0001), 1.5);
-    float3 scattered = (rayleigh * rayleighPhase + mie * miePhase) / max(rayleigh + mie, float3(1e-12));
-    float3 light = pow(sunLight * scattered * (1.0 - through), float3(1.5));
-    light *= mix(float3(1.0), pow(max(sunLight * scattered * through, float3(0.0)), float3(0.5)), saturate(pow(1.0 - sunHeight, 5.0)));
-    float3 color = (light + 0.1 * through) * 0.04 + float3(0.0, 0.0003, 0.00075);
-    return color * 0.35;
-}
-
 // A field of stars, fixed to the sky and turning with it, each twinkling.
 static float3 starsAt(float3 d, float time, float brightness) {
     // The sky turns about the pole, once a day.
@@ -135,14 +75,16 @@ static float3 sunsetHue(float height) {
 
 // A sky of three colors made to follow the sun down: the horizon glows gold and red round the
 // sun, the zenith deepens, the opposite side turns pink above a darker band, and once the sun
-// has set it all fades through the blue hour into night.
-static float3 sunsetSky(float3 color, float3 d, float3 toSun) {
+// has set it all fades through the blue hour into a night lit by the moon: dark blue, not black.
+static float3 sunsetSky(float3 color, float3 d, float3 toSun, float moon) {
     float h = toSun.y;
     float low = 1.0 - smoothstep(0.0, 0.4, h);              // 0 high up, 1 on the horizon
     float after = smoothstep(-0.22, -0.01, h);              // the glow left after it has set
     float3 hue = sunsetHue(h);
-    float daylight = mix(0.025, 1.0, smoothstep(-0.2, 0.08, h));
-    color = mix(float3(0.008, 0.013, 0.03), color, daylight);
+    float daylight = smoothstep(-0.2, 0.08, h);
+    // The night sky: deep blue overhead, paler toward the horizon, brighter under a full moon.
+    float3 night = mix(float3(0.024, 0.036, 0.075), float3(0.012, 0.02, 0.05), sqrt(saturate(d.y))) * (0.45 + 0.55 * moon);
+    color = mix(night, color, daylight);
     color *= mix(float3(1.0), float3(0.72, 0.78, 1.0), low * after);
     float2 flatSky = normalize(d.xz + float2(1e-5, 0.0));
     float2 flatSun = normalize(toSun.xz + float2(1e-5, 0.0));
@@ -157,8 +99,8 @@ static float3 sunsetSky(float3 color, float3 d, float3 toSun) {
     return color;
 }
 
-// The light the clouds get when the sun is low, or has just set: they are higher than the
-// ground and still see it, red, from below.
+// The light the clouds get: the sun's (or the moon's at night) and, when the sun is low or has
+// just set, its glow from below, red: they are higher than the ground and still see it.
 static float3 cloudSunlight(constant FrameUniforms &frame, float3 d, float3 toSun) {
     if (frame.sunsetColors == 0u) {
         return frame.sunColor;
@@ -172,86 +114,74 @@ static float3 cloudSunlight(constant FrameUniforms &frame, float3 d, float3 toSu
     return frame.sunColor + sunsetHue(h) * (low * still * (0.5 + 1.5 * toward * toward) * 1.6);
 }
 
-static float3 skyRadiance(float3 direction, constant FrameUniforms &frame, bool withSunDisk) {
-    float3 d = normalize(direction);
-    float3 toSun = -frame.sunDirection;
-
-    float3 color;
-    if (frame.physicalSky != 0u) {
-        color = physicalSkyColor(d, toSun, frame.skyHaze);
-    } else {
-        // Horizon to zenith. The square root keeps the horizon band thin, as in a real sky.
-        color = mix(frame.skyHorizonColor, frame.skyZenithColor, sqrt(saturate(d.y)));
-        if (frame.sunsetColors != 0u) color = sunsetSky(color, d, toSun);
+// The moon: opposite the sun, grey with its darker seas, and a halo in the air round it.
+static float3 moonAt(float3 d, float3 toMoon, float size, float brightness) {
+    float c = dot(d, toMoon);
+    float halo = pow(saturate(c), 900.0) * 0.06 + pow(saturate(c), 40.0) * 0.012;
+    float disk = smoothstep(size, size + 0.00006, c);
+    if (disk <= 0.0) {
+        return float3(0.75, 0.82, 1.0) * halo * brightness;
     }
+    // Where on its face: the seas are a few large blotches.
+    float3 side = normalize(cross(toMoon, float3(0.0, 1.0, 0.0001)));
+    float3 upOnIt = cross(side, toMoon);
+    float radius = sqrt(max(1.0 - size * size, 1e-8));
+    float2 face = float2(dot(d - toMoon * c, side), dot(d - toMoon * c, upOnIt)) / radius;
+    float seas = cloudNoise(face * 3.0 + float2(7.0, 3.0));
+    float shade = mix(1.0, 0.62, smoothstep(0.45, 0.65, seas));
+    return float3(0.92, 0.94, 1.0) * (disk * shade * 6.0 + halo) * brightness;
+}
+
+// `clouds`, with `hasVolume`: the clouds with depth along this direction, walked through
+// elsewhere (Clouds.metal, at a lower resolution): the light they send toward the eye, and in
+// `a` how much of the sky behind them still shows. Without it the clouds are a flat layer.
+static float3 skyRadianceWithClouds(float3 direction, constant FrameUniforms &frame, bool withSunDisk, float4 clouds, bool hasVolume) {
+    float3 d = normalize(direction);
+    // The sky follows the sun; the clouds are lit by what lights the scene: the sun, or the moon at night.
+    float3 toSun = -frame.skySunDirection;
+    float3 toLight = -frame.sunDirection;
+    float moon = frame.moonBrightness;
+
+    // Horizon to zenith. The square root keeps the horizon band thin, as in a real sky.
+    float3 color = mix(frame.skyHorizonColor, frame.skyZenithColor, sqrt(saturate(d.y)));
+    if (frame.sunsetColors != 0u) color = sunsetSky(color, d, toSun, moon);
     float3 cloudSun = cloudSunlight(frame, d, toSun);
     // The clouds' shaded side at dusk: grey-violet, with a little of the glow.
     float dusk = frame.sunsetColors != 0u ? (1.0 - smoothstep(0.0, 0.4, toSun.y)) * smoothstep(-0.25, 0.0, toSun.y) : 0.0;
-    float dark = frame.sunsetColors != 0u ? mix(0.05, 1.0, smoothstep(-0.2, 0.08, toSun.y)) : 1.0;
+    float dark = frame.sunsetColors != 0u ? mix(0.12 + 0.1 * moon, 1.0, smoothstep(-0.2, 0.08, toSun.y)) : 1.0;
+    float night = frame.sunsetColors != 0u ? smoothstep(0.05, -0.12, toSun.y) : 0.0;
     // The stars, when the sun is down; dimmed toward the horizon, where the air is thick.
-    if (frame.starBrightness > 0.0 && withSunDisk && d.y > 0.0) {
-        float night = smoothstep(0.05, -0.12, toSun.y);
-        if (night > 0.0) color += starsAt(d, frame.starTime, frame.starBrightness) * night * smoothstep(0.0, 0.25, d.y);
+    if (frame.starBrightness > 0.0 && withSunDisk && d.y > 0.0 && night > 0.0) {
+        color += starsAt(d, frame.starTime, frame.starBrightness) * night * smoothstep(0.0, 0.25, d.y);
+    }
+    // The moon, at night, across the sky from the sun.
+    if (moon > 0.0 && night > 0.0 && d.y > -0.02) {
+        color += moonAt(d, -toSun, frame.sunDiskSize, moon * night) * (withSunDisk ? 1.0 : 0.25);
     }
     // Below the horizon, blend quickly into the ground color.
     color = mix(frame.skyGroundColor * dark, color, smoothstep(-0.12, 0.0, d.y));
 
     // A glow around the sun: a tight one and a wide one.
     float towardSun = saturate(dot(d, toSun));
-    float glow = 0.35 * pow(towardSun, 64.0) + 0.08 * pow(towardSun, 6.0);
-    color += frame.sunColor * glow * smoothstep(-0.1, 0.05, d.y);
+    float sunGlow = 0.35 * pow(towardSun, 64.0) + 0.08 * pow(towardSun, 6.0);
+    color += frame.sunColor * sunGlow * smoothstep(-0.1, 0.05, d.y) * (1.0 - night);
 
-    // Clouds: a flat layer overhead. Dividing by the height of the direction is the
-    // perspective of looking along a ceiling: clouds get smaller and closer together
-    // toward the horizon.
     float cover = 0.0;
-#if MOLTEN_EXTRAS
-    if (frame.volumetricClouds != 0 && withSunDisk && frame.cloudCoverage > 0.0 && d.y > 0.015) {
-        // Clouds with depth: a layer a kilometer thick, walked through along the line of
-        // sight. At each step, how much cloud is there, and how much light reaches it from
-        // the sun through the cloud above it.
-        const float base = 1500.0, top = 2700.0;
-        float enter = base / d.y, leave = min(top / d.y, enter + 12000.0);
-        const int steps = 16;
-        float stride = (leave - enter) / float(steps);
-        float t = enter + stride * cloudHash(d.xz * 4096.0);
-        float through = 1.0;                                    // how much of what is behind still shows
-        float3 gathered = float3(0.0);
-        float3 skyLight = frame.skyHorizonColor * 0.7 + frame.skyZenithColor * 0.5;
-        float toward = max(dot(d, toSun), 0.0);
-        for (int i = 0; i < steps && through > 0.03; i++) {
-            float3 at = d * t;
-            float amount = cloudAmount(at, base, top, frame, 4);
-            if (amount > 0.001) {
-                // Toward the sun, three steps: the more cloud in the way, the darker here.
-                float above = 0.0;
-                for (int k = 1; k <= 3; k++) {
-                    above += cloudAmount(at + toSun * (float(k) * 130.0), base, top, frame, 2);
-                }
-                float sunReaching = exp(-above * 130.0 * 0.012);
-                // Light scattered in a cloud mostly goes on forward: brightest looking toward the sun, through thin cloud.
-                float forward = 0.55 + 1.6 * pow(toward, 8.0);
-                float3 light = cloudSun * (sunReaching * forward * 0.32) + skyLight * 0.55 * dark;
-                float taken = 1.0 - exp(-amount * stride * 0.012);
-                gathered += light * taken * through;
-                through *= 1.0 - taken;
-            }
-            t += stride;
-        }
-        // Far away they sink into the haze of the horizon.
-        float haze = exp(-enter * 0.00006);
-        cover = (1.0 - through) * haze;
-        color = color * (1.0 - cover) + gathered * haze;
+    if (hasVolume) {
+        cover = 1.0 - clouds.a;
+        color = color * clouds.a + clouds.rgb;
     } else
-#endif
     if (frame.cloudCoverage > 0.0 && d.y > 0.0) {
+        // Clouds as a flat layer overhead. Dividing by the height of the direction is the
+        // perspective of looking along a ceiling: clouds get smaller and closer together
+        // toward the horizon.
         float2 p = d.xz / (d.y + 0.1) * frame.cloudScale + frame.cloudOffset;
         float density = cloudNoise(p);
         float threshold = 0.78 - 0.5 * frame.cloudCoverage;
         cover = smoothstep(threshold, threshold + 0.2, density) * smoothstep(0.0, 0.1, d.y);
-        // A second look a little toward the sun: where the cloud is thinner there than
+        // A second look a little toward the light: where the cloud is thinner there than
         // here, this side is lit; where it is thicker, this side is in its shade.
-        float2 sunward = toSun.xz / max(length(toSun.xz), 0.001) * 0.3;
+        float2 sunward = toLight.xz / max(length(toLight.xz), 0.001) * 0.3;
         float light = saturate(0.62 + (density - cloudNoise(p + sunward)) * 3.0);
         float3 shade = (frame.skyHorizonColor * 0.9 + frame.skyZenithColor * 0.35) * dark;
         shade = mix(shade, shade * float3(0.62, 0.5, 0.66) + sunsetHue(toSun.y) * 0.18 * dark, dusk);
@@ -260,10 +190,19 @@ static float3 skyRadiance(float3 direction, constant FrameUniforms &frame, bool 
     }
 
     if (withSunDisk) {
-        float disk = smoothstep(frame.sunDiskSize, frame.sunDiskSize + 0.00008, dot(d, toSun));
-        color += frame.sunColor * frame.sunDiskIntensity * disk * (1.0 - cover);
+        float c = dot(d, toSun);
+        float disk = smoothstep(frame.sunDiskSize, frame.sunDiskSize + 0.00008, c);
+        // Darker toward its rim (limb darkening): a ball of gas seen edge on.
+        float across = saturate((1.0 - c) / max(1.0 - frame.sunDiskSize, 1e-6));
+        float limb = 1.0 - 0.55 * (1.0 - sqrt(max(1.0 - across, 0.0)));
+        float3 sunLight = frame.sunsetColors != 0u ? frame.sunColor * (1.0 - night) : frame.sunColor;
+        color += sunLight * frame.sunDiskIntensity * disk * limb * (1.0 - cover);
     }
     return color * frame.skyIntensity;
+}
+
+static float3 skyRadiance(float3 direction, constant FrameUniforms &frame, bool withSunDisk) {
+    return skyRadianceWithClouds(direction, frame, withSunDisk, float4(0.0, 0.0, 0.0, 1.0), false);
 }
 
 // ---------------------------------------------------------------- the visible sky
@@ -290,7 +229,23 @@ vertex SkyOut vertex_sky(uint vertexID [[vertex_id]],
 }
 
 fragment float4 fragment_sky(SkyOut in [[stage_in]],
-                             constant FrameUniforms &frame [[buffer(MMBufferFrame)]]) {
+                             constant PassUniforms &pass [[buffer(MMBufferPass)]],
+                             constant FrameUniforms &frame [[buffer(MMBufferFrame)]],
+                             texture2d<float> clouds [[texture(MMTextureClouds)]],
+                             sampler linearSampler [[sampler(MMSamplerLinearClamp)]]) {
+#if MOLTEN_EXTRAS
+    // Clouds with depth were walked through before this pass, into a smaller picture: read
+    // here, smoothed up to the size of this one, and put in front of the sky.
+    if (frame.volumetricClouds != 0 && !is_null_texture(clouds)) {
+        // Four looks round the pixel, each already smoothed between four of the smaller
+        // picture's: the grain its few steps leave is averaged away, and its edges are soft.
+        float2 uv = in.position.xy / pass.viewportSize;
+        float2 texel = 0.75 / float2(clouds.get_width(), clouds.get_height());
+        float4 seen = clouds.sample(linearSampler, uv + texel * float2(1.0, 1.0)) + clouds.sample(linearSampler, uv + texel * float2(-1.0, 1.0)) +
+                      clouds.sample(linearSampler, uv + texel * float2(1.0, -1.0)) + clouds.sample(linearSampler, uv + texel * float2(-1.0, -1.0));
+        return float4(skyRadianceWithClouds(in.direction, frame, true, seen * 0.25, true), 1.0);
+    }
+#endif
     return float4(skyRadiance(in.direction, frame, true), 1.0);
 }
 

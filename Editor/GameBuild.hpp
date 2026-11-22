@@ -17,6 +17,7 @@ struct BuildResult {
     std::string libraryPath;            // the library that was built
     std::string log;                    // what the compiler said
     double seconds = 0;
+    bool reused = false;                // nothing had changed since the last build: that library, not compiled again
 };
 
 /// The .cpp files in the project's Source folder, in every subfolder.
@@ -34,7 +35,16 @@ std::string createScriptFile(const Project& project, const std::string& name, st
 /// file each time: a library that is loaded cannot be replaced on disk) and copies it
 /// to Library/Game/Game.dylib, the one an exported game takes.
 /// `hostExecutable` is the program the library will be loaded into: the editor.
-BuildResult buildGameCode(const Project& project, const std::string& hostExecutable);
+///
+/// When neither the code nor the editor itself has changed since the last build that
+/// succeeded, nothing is compiled: the result names that library and says `reused`.
+/// Opening a project then costs no compiler at all. `mayReuse` false compiles regardless.
+/// It reads and writes files and runs the compiler, nothing else: safe on another thread.
+BuildResult buildGameCode(const Project& project, const std::string& hostExecutable, bool mayReuse = true);
+
+/// A copy of a built library under the next number, to load a second time what is loaded
+/// already. Returns its path, or "" if it could not be copied.
+std::string copyOfBuild(const std::string& libraryPath);
 
 /// Puts together `destination`/<Name>.app from the player, the engine's shaders and
 /// assets, the project and its built code. Returns "" or what went wrong.

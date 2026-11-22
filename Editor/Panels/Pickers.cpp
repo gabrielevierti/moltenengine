@@ -182,22 +182,24 @@ bool chooseSeveral(const char* id, std::string& value, const std::vector<std::st
     bool changed = false;
     ImGui::PushID(id);
     ImGui::SetNextItemWidth(width);
-    std::string shown = picked.empty() ? std::string("Worked out from the skeleton") : std::to_string(picked.size()) + " chosen";
+    bool isBones = std::string(id) == "bones";
+    std::string shown = picked.empty() ? std::string(isBones ? "Worked out from the skeleton" : "None") : picked.size() == 1 ? std::filesystem::path(picked[0]).stem().string()
+                                                                                                                              : std::to_string(picked.size()) + " chosen";
     if (ImGui::BeginCombo("##several", shown.c_str(), ImGuiComboFlags_HeightLarge)) {
-        if (ImGui::Selectable("None: worked out from the skeleton", picked.empty())) {
+        if (ImGui::Selectable(isBones ? "None: worked out from the skeleton" : "None", picked.empty())) {
             changed = !picked.empty();
             picked.clear();
         }
         ImGui::Separator();
         for (const std::string& choice : choices) {
             bool has = std::find(picked.begin(), picked.end(), choice) != picked.end();
-            if (ImGui::Checkbox(choice.c_str(), &has)) {
+            if (ImGui::Checkbox((isBones ? choice : std::filesystem::path(choice).stem().string() + "##" + choice).c_str(), &has)) {
                 if (has) picked.push_back(choice);
                 else picked.erase(std::remove(picked.begin(), picked.end(), choice), picked.end());
                 changed = true;
             }
         }
-        if (choices.empty()) ImGui::TextDisabled("The entity has no skeleton.");
+        if (choices.empty()) ImGui::TextDisabled(isBones ? "The entity has no skeleton." : "None made for it yet: Window > Animation > Timeline, Create Animation.");
         ImGui::EndCombo();
     }
     ImGui::PopID();
@@ -310,6 +312,34 @@ std::vector<std::string> choicesFor(EditorContext& editor, Entity owner, const s
         }
         return out;
     }
+    if (kind == "ownClips") {
+        // The clips made for this entity (their owner is its name), and those it already lists.
+        std::string name = editor.engine.scene.isAlive(owner) ? editor.scene.nameOf(owner) : std::string();
+        for (const AssetInfo& asset : editor.assets.assets()) {
+            if (asset.isFolder() || !isAnimationClipFile(asset.path)) continue;
+            std::shared_ptr<const AnimationClip> clip = sharedAnimationClip(editor.assets.absolutePath(asset.path));
+            if (clip && (clip->owner.empty() || clip->owner == name)) out.push_back(asset.path);
+        }
+        return out;
+    }
+    if (kind == "ownAnimation") {
+        // By name: its own animations, its model's, its controller's states. Not for one entity: every clip's.
+        auto add = [&](const std::string& name) {
+            if (!name.empty() && std::find(out.begin(), out.end(), name) == out.end()) out.push_back(name);
+        };
+        if (const Animator* animator = editor.engine.scene.get<Animator>(owner)) {
+            for (const std::string& name : animator->animationNames()) add(name);
+        } else {
+            for (const AssetInfo& asset : editor.assets.assets()) {
+                if (!asset.isFolder() && isAnimationClipFile(asset.path)) add(std::filesystem::path(asset.path).stem().string());
+            }
+        }
+        if (std::shared_ptr<const GltfModel> model = modelOf(editor, owner)) {
+            for (const GltfAnimation& animation : model->animations) add(animation.name);
+        }
+        for (const std::string& state : choicesFor(editor, owner, "state")) add(state);
+        return out;
+    }
     if (kind == "state" || kind == "parameter") {
         auto add = [&](const AnimatorController& controller) {
             std::vector<std::string> names;
@@ -386,7 +416,7 @@ bool pickValueInline(EditorContext& editor, Entity owner, const std::string& kin
     }
     const std::vector<std::string>& choices = cached.choices;
     bool changed = false;
-    if (kind == "bones") {
+    if (kind == "bones" || kind == "ownClips") {
         changed = chooseSeveral(kind.c_str(), value, choices, width);
     } else {
         bool allowsNew = kind == "value" || kind == "message" || kind == "variable" || kind == "tag";

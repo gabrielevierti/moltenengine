@@ -62,7 +62,7 @@ struct Line {
     void to(std::string& out) const { out += text + "\n"; }
 };
 
-const char* const kLightTypes[] = {"directional", "point", "spot"};
+const char* const kLightTypes[] = {"directional", "point", "spot", "area"};
 const char* const kBodyTypes[] = {"static", "kinematic", "dynamic"};
 const char* const kShapes[] = {"sphere", "box", "capsule", "mesh"};
 const char* const kAlphaModes[] = {"opaque", "mask", "blend"};
@@ -249,12 +249,11 @@ std::string writeScene(Scene& scene, const std::vector<NamedMaterial>& materials
             .number(settings.targetFrameRate).number(settings.lowestDynamicScale).to(out);
         Line("toneMapper").integer(settings.toneMapper).to(out);
         Line("vignette").number(settings.vignette).to(out);
-        Line("clouds").number(settings.sky.cloudCoverage).number(settings.sky.cloudScale).to(out);
+        Line("clouds").number(settings.sky.cloudCoverage).number(settings.sky.cloudScale).number(settings.sky.cloudHeight).number(settings.sky.cloudThickness).to(out);
         Line("volumetrics").flag(settings.sky.cloudsHaveDepth).integer(settings.fogShaftSteps).to(out);
         Line("lens").number(settings.lensDistortion).number(settings.chromaticAberration).number(settings.filmGrain).to(out);
         if (!settings.sky.sunsetColors) Line("sunsetColors").flag(false).to(out);
-        if (settings.sky.isPhysical || settings.sky.stars > 0)
-            Line("physicalSky").flag(settings.sky.isPhysical).number(settings.sky.haze).number(settings.sky.stars).to(out);
+        if (settings.sky.stars > 0 || settings.sky.moon != SkySettings{}.moon) Line("night").number(settings.sky.stars).number(settings.sky.moon).to(out);
         if (!settings.colorGrading.empty()) Line("colorGrading").string(settings.colorGrading).number(settings.colorGradingAmount).to(out);
         if (settings.autoExposure)
             Line("autoExposure").flag(true).number(settings.exposureCompensation).number(settings.exposureAdaptSpeed)
@@ -262,6 +261,11 @@ std::string writeScene(Scene& scene, const std::vector<NamedMaterial>& materials
         if (settings.depthOfField)
             Line("depthOfField").flag(true).number(settings.focusDistance).number(settings.focusRange).number(settings.focusBlur).to(out);
         if (settings.motionBlur) Line("motionBlur").flag(true).number(settings.motionBlurAmount).to(out);
+        if (settings.contrast != 1 || settings.saturation != 1 || settings.temperature != 0 || settings.tint != 0 || settings.sharpen != 0)
+            Line("color").number(settings.contrast).number(settings.saturation).number(settings.temperature).number(settings.tint).number(settings.sharpen).to(out);
+        Line("lensFlare").number(settings.lensFlare).to(out);
+        if (!settings.lensDirt.empty()) Line("lensDirt").string(settings.lensDirt).number(settings.lensDirtAmount).to(out);
+        if (settings.interference > 0) Line("interference").number(settings.interference).to(out);
     }
 
     // ---- materials: the named ones, then any other that an entity uses
@@ -336,12 +340,12 @@ std::string writeScene(Scene& scene, const std::vector<NamedMaterial>& materials
         }
         if (const Light* l = scene.get<Light>(entity)) {
             Line("light").word(kLightTypes[int(l->type)]).vec(l->color).number(l->intensity).number(l->range)
-                .number(l->innerConeAngle).number(l->outerConeAngle).flag(l->castsShadows).flag(l->isEnabled).to(out);
+                .number(l->innerConeAngle).number(l->outerConeAngle).flag(l->castsShadows).flag(l->isEnabled).number(l->areaSize.x).number(l->areaSize.y).to(out);
         }
         if (const MeshRenderer* r = scene.get<MeshRenderer>(entity)) {
             bool isAsset = r->material && !r->material->assetName.empty();
             int material = r->material && !isAsset ? materialIndex[r->material.get()] : -1;
-            Line("mesh").string(r->mesh ? r->mesh->name : std::string()).integer(material).vec(r->tint)
+            Line("mesh").string(r->mesh ? r->mesh->name : r->meshName).integer(material).vec(r->tint)
                 .flag(r->castsShadows).flag(r->isVisible).to(out);
             if (isAsset) Line("materialAsset").string(r->material->assetName).to(out);
         }
@@ -603,6 +607,19 @@ bool readScene(const std::string& text, Scene& scene, std::vector<NamedMaterial>
                 settings.lowestDynamicScale = words.number(0.6f);
             }
             else if (key == "toneMapper") settings.toneMapper = int(words.integer());
+            else if (key == "color") {
+                settings.contrast = words.number(1);
+                settings.saturation = words.number(1);
+                settings.temperature = words.number(0);
+                settings.tint = words.number(0);
+                settings.sharpen = words.number(0);
+            }
+            else if (key == "lensFlare") settings.lensFlare = words.number(0.6f);
+            else if (key == "lensDirt") {
+                settings.lensDirt = words.string();
+                settings.lensDirtAmount = words.number(1);
+            }
+            else if (key == "interference") settings.interference = words.number(0);
             else if (key == "vignette") settings.vignette = words.number();
             else if (key == "volumetrics") {
                 settings.sky.cloudsHaveDepth = words.flag(false);
@@ -610,11 +627,17 @@ bool readScene(const std::string& text, Scene& scene, std::vector<NamedMaterial>
             } else if (key == "clouds") {
                 settings.sky.cloudCoverage = words.number();
                 settings.sky.cloudScale = words.number(1);
+                settings.sky.cloudHeight = words.number(1500);
+                settings.sky.cloudThickness = words.number(1200);
             } else if (key == "sunsetColors") {
                 settings.sky.sunsetColors = words.flag(true);
+            } else if (key == "night") {
+                settings.sky.stars = words.number(0);
+                settings.sky.moon = words.number(1);
             } else if (key == "physicalSky") {
-                settings.sky.isPhysical = words.flag(false);
-                settings.sky.haze = words.number(0.3f);
+                // From before 1.1, when the sky could be simulated: only its stars are kept.
+                words.flag(false);
+                words.number(0.3f);
                 settings.sky.stars = words.number(0);
             } else if (key == "colorGrading") {
                 settings.colorGrading = words.string();
@@ -707,7 +730,7 @@ bool readScene(const std::string& text, Scene& scene, std::vector<NamedMaterial>
                 scene.add(entity, c);
             } else if (key == "light") {
                 Light l;
-                l.type = LightType(words.choice(kLightTypes, 3, 1));
+                l.type = LightType(words.choice(kLightTypes, 4, 1));
                 l.color = words.vec3(Vec3{1, 1, 1});
                 l.intensity = words.number(1);
                 l.range = words.number(l.range);
@@ -715,11 +738,14 @@ bool readScene(const std::string& text, Scene& scene, std::vector<NamedMaterial>
                 l.outerConeAngle = words.number(l.outerConeAngle);
                 l.castsShadows = words.flag();
                 l.isEnabled = words.flag(true);
+                l.areaSize.x = words.number(l.areaSize.x);
+                l.areaSize.y = words.number(l.areaSize.y);
                 scene.add(entity, l);
             } else if (key == "mesh") {
                 MeshRenderer r;
                 std::string name = words.string();
                 if (assets.mesh && !name.empty()) r.mesh = assets.mesh(name);
+                if (!r.mesh) r.meshName = name;         // not found, or nobody to ask: kept, to be written back
                 long index = words.integer(-1);
                 if (index >= 0 && size_t(index) < materials.size()) r.material = materials[size_t(index)].material;
                 r.tint = words.vec4(Vec4{1, 1, 1, 1});
@@ -781,6 +807,10 @@ bool readScene(const std::string& text, Scene& scene, std::vector<NamedMaterial>
             } else if (key == "particleSet") {
                 if (ParticleEmitter* e = scene.get<ParticleEmitter>(entity)) {
                     std::string name = words.string();
+                    if (name == "texture") {
+                        setEffectText(*e, name, words.string());
+                        continue;
+                    }
                     std::vector<float> values;
                     while (words.hasMore()) values.push_back(words.number(0));
                     setEffectValue(*e, name, values);
@@ -851,6 +881,8 @@ bool readScene(const std::string& text, Scene& scene, std::vector<NamedMaterial>
         *created = entities;
         created->insert(created->end(), nested.begin(), nested.end());
     }
+    // A level of ray tracing saved when the levels sent several times the rays: the same level, as it is now.
+    bringLightingQualityUpToDate(settings);
     return true;
 }
 

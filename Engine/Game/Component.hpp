@@ -78,6 +78,13 @@ struct Field {
     /// "Play sound", a scene for "Load scene"...  (that field's value, the pick for it)
     std::string pickBy;
     std::vector<std::pair<std::string, std::string>> pickFor;
+    /// Kept with the scene but not shown in the Inspector: data the editor manages (the file of a
+    /// terrain's heights, of foliage's copies).
+    bool isHidden = false;
+    Field& hidden() {
+        isHidden = true;
+        return *this;
+    }
     Field& range(float low, float high) {
         minimum = low;
         maximum = high;
@@ -158,12 +165,13 @@ struct ComponentType {
     void (*update)(void* component, World&, Entity, float dt) = nullptr;
     void (*fixedUpdate)(void* component, World&, Entity, float dt) = nullptr;
     void (*lateUpdate)(void* component, World&, Entity, float dt) = nullptr;     // after every update(), with everything where it will be drawn
+    void (*onDestroy)(void* component, World&, Entity) = nullptr;                // its entity is going (destroyed, or the scene is leaving): the last word
     void (*onCollision)(void* component, World&, Entity self, Entity other) = nullptr;
     void (*onTriggerEnter)(void* component, World&, Entity self, Entity other) = nullptr;
     void (*onMessage)(void* component, World&, Entity self, const Message& message) = nullptr;
     void (*draw)(void* component, World&, Entity, Canvas&) = nullptr;
 
-    bool hasCode() const { return start || update || fixedUpdate || lateUpdate || onCollision || onTriggerEnter || onMessage || draw; }
+    bool hasCode() const { return start || update || fixedUpdate || lateUpdate || onDestroy || onCollision || onTriggerEnter || onMessage || draw; }
     const Field* findField(const std::string& fieldName) const;
 };
 
@@ -247,6 +255,7 @@ template <class T> struct ComponentRegistration {
 #define MOLTEN_HOOK_PARAMS Entity self_
 #define MOLTEN_HOOK_ARGS self_
         MOLTEN_HOOK(start, start, self)
+        MOLTEN_HOOK(onDestroy, onDestroy, self)
 #undef MOLTEN_HOOK_PARAMS
 #undef MOLTEN_HOOK_ARGS
 #define MOLTEN_HOOK_PARAMS Entity self_, float dt_

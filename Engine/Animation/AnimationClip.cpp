@@ -175,6 +175,26 @@ std::optional<AnimationClip> AnimationClip::parse(const std::string& text, std::
             }
             track.width = std::max(track.width, std::max(values, 1));
             track.keys.push_back(key);
+        } else if (keyword == "owner") {
+            clip.owner = words.size() > 1 ? words[1] : std::string();
+        } else if (keyword == "timeBy") {
+            clip.timeBy = words.size() > 1 ? words[1] : std::string();
+        } else if (keyword == "procedural" && !clip.tracks.empty() && words.size() > 1) {
+            Procedural& procedural = clip.tracks.back().procedural;
+            const std::string& kind = words[1];
+            procedural.kind = kind == "wave" ? Procedural::Kind::Wave : kind == "noise" ? Procedural::Kind::Noise : kind == "parameter" ? Procedural::Kind::Parameter : Procedural::Kind::None;
+            procedural.amplitude = numberAt(words, 2, 1);
+            if (procedural.kind == Procedural::Kind::Parameter) {
+                procedural.parameter = words.size() > 3 ? words[3] : std::string();
+            } else {
+                procedural.frequency = numberAt(words, 3, 1);
+                procedural.phase = numberAt(words, 4, 0);
+            }
+            // "axes 0 1 0" after it: which numbers it moves.
+            for (size_t i = 2; i + 1 < words.size(); i++) {
+                if (words[i] != "axes") continue;
+                for (size_t a = 0; a < 4; a++) procedural.axes[a] = numberAt(words, i + 1 + a, 0);
+            }
         } else if (keyword == "event") {
             clip.events.push_back(Event{numberAt(words, 1), words.size() > 2 ? words[2] : std::string()});
         } else {
@@ -193,12 +213,25 @@ std::optional<AnimationClip> AnimationClip::parse(const std::string& text, std::
 
 std::string AnimationClip::toText() const {
     std::string out = "molten-clip 1\nlength " + numberText(length) + "\nloops " + (loops ? "1" : "0") + "\n";
+    if (!owner.empty()) out += "owner " + text::quote(owner) + "\n";
+    if (!timeBy.empty()) out += "timeBy " + text::quote(timeBy) + "\n";
     for (const AnimationTrack& track : tracks) {
         out += "track " + text::quote(track.path) + " " + track.component + " " + track.field + "\n";
         for (const AnimationKey& key : track.keys) {
             out += "  key " + numberText(key.time) + " ";
             for (int i = 0; i < track.width; i++) out += " " + numberText(key.value[size_t(i)]);
             if (key.ease != AnimationKey::Ease::Smooth) out += std::string(" ") + easeName(key.ease);
+            out += "\n";
+        }
+        const Procedural& p = track.procedural;
+        if (p.isOn()) {
+            out += "  procedural ";
+            if (p.kind == Procedural::Kind::Parameter) out += "parameter " + numberText(p.amplitude) + " " + text::quote(p.parameter);
+            else out += std::string(p.kind == Procedural::Kind::Wave ? "wave " : "noise ") + numberText(p.amplitude) + " " + numberText(p.frequency) + " " + numberText(p.phase);
+            if (p.axes != std::array<float, 4>{1, 1, 1, 1}) {
+                out += " axes";
+                for (int i = 0; i < track.width; i++) out += " " + numberText(p.axes[size_t(i)]);
+            }
             out += "\n";
         }
     }
@@ -208,17 +241,51 @@ std::string AnimationClip::toText() const {
 
 // ---------------------------------------------------------------- poses
 
-ClipPose ClipPose::of(const AnimationClip& clip, float time) {
+namespace {
+
+/// Smooth noise in one dimension, between -1 and 1.
+float wander(float x, float seed) {
+    auto hash = [](float n) {
+        float s = std::sin(n * 12.9898f) * 43758.5453f;
+        return (s - std::floor(s)) * 2.0f - 1.0f;
+    };
+    float i = std::floor(x), f = x - i;
+    float u = f * f * (3 - 2 * f);
+    return hash(i + seed * 17.0f) * (1 - u) + hash(i + 1 + seed * 17.0f) * u;
+}
+
+}  // namespace
+
+ClipPose ClipPose::of(const AnimationClip& clip, float time, const std::unordered_map<std::string, float>* parameters) {
     ClipPose pose;
+    auto parameter = [&](const std::string& name) {
+        if (!parameters) return 0.0f;
+        auto found = parameters->find(name);
+        return found == parameters->end() ? 0.0f : found->second;
+    };
+    // Where in the clip: by time, or as far as a parameter says.
+    if (!clip.timeBy.empty()) time = std::clamp(parameter(clip.timeBy), 0.0f, 1.0f) * clip.length;
+    int index = 0;
     for (const AnimationTrack& track : clip.tracks) {
-        if (track.keys.empty()) continue;
+        index++;
+        if (track.keys.empty() && !track.procedural.isOn()) continue;
         Value& value = pose.values[track.id()];
         value.track = &track;
         value.path = track.path;
         value.component = track.component;
         value.field = track.field;
         value.width = track.width;
-        value.value = track.sample(time);
+        value.value = track.keys.empty() ? std::array<float, 4>{0, 0, 0, 0} : track.sample(time);
+        const Procedural& p = track.procedural;
+        if (p.isOn()) {
+            float amount = 0;
+            if (p.kind == Procedural::Kind::Wave) amount = p.amplitude * std::sin((time * p.frequency + p.phase) * 6.2831853f);
+            else if (p.kind == Procedural::Kind::Parameter) amount = p.amplitude * parameter(p.parameter);
+            for (int i = 0; i < 4; i++) {
+                if (p.kind == Procedural::Kind::Noise) amount = p.amplitude * wander(time * p.frequency + p.phase, float(index * 4 + i));
+                value.value[size_t(i)] += amount * p.axes[size_t(i)];
+            }
+        }
     }
     return pose;
 }

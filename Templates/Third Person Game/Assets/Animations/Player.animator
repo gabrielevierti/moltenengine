@@ -1,0 +1,35 @@
+molten-animator 1
+parameter float speed 0
+parameter bool grounded 1
+parameter float verticalSpeed 0
+parameter trigger jump
+
+state Idle
+  motion Idle
+  place 60 60
+state Move blend speed
+  motion Walk 1.600000
+  motion Run 4.600000
+  event Audio/step.wav 0.03
+  event Audio/step.wav 0.53
+  place 300 60
+state Jump loops 0
+  motion Jump
+  event Audio/jump.wav 0
+  place 300 220
+state Fall
+  motion Fall
+  place 60 220
+
+start Idle
+transition Idle Move when speed > 0.3 blend 0.15
+transition Move Idle when speed < 0.2 blend 0.2
+transition Idle Jump when jump blend 0.08
+transition Move Jump when jump blend 0.08
+transition Idle Fall when grounded false blend 0.2
+transition Move Fall when grounded false blend 0.2
+transition Jump Fall exit 0.85 blend 0.2
+transition Jump Move when grounded true and speed > 0.3 blend 0.12
+transition Jump Idle when grounded true blend 0.12
+transition Fall Move when grounded true and speed > 0.3 blend 0.12
+transition Fall Idle when grounded true blend 0.15

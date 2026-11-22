@@ -7,6 +7,8 @@
 //                         the camera, jumps, falls, turns to face where it goes
 //   OrbitCamera           a camera behind it, turned with the mouse or the right stick, that
 //                         comes closer rather than go through a wall
+//   FirstPersonLook       the view from its own eyes: on a camera under it, the mouse turns the
+//                         body and tips the camera
 //
 // The entity's position is the character's feet. It needs no Collider of its own: the capsule
 // is the controller's. (Give it a trigger Collider to be seen by triggers.)
@@ -38,13 +40,14 @@ struct CharacterController {
 
 struct CharacterMover {
     float walkSpeed = 2.2f;             // meters per second
-    float runSpeed = 5.5f;              // with the action "run" held (Shift), or always with `alwaysRuns`
-    bool alwaysRuns = false;
+    float runSpeed = 5.5f;              // with the action "run" held (Shift)
+    bool alwaysRuns = false;            // the other way round: it runs, and walks with Shift held
     float acceleration = 18.0f;         // meters per second, per second: how quickly it gets going and stops
     float airControl = 0.35f;           // of that, while in the air
     float jumpHeight = 1.1f;            // meters; 0: cannot jump
     float gravity = 22.0f;              // meters per second, per second: a little more than the Earth's, as games feel right
     float turnSpeed = 12.0f;            // how quickly it turns to face where it goes
+    bool turnsToFace = true;            // off for a body seen from its own eyes, which its view turns (FirstPersonLook)
     std::string camera;                 // the camera whose view "forward" is; empty: the active one
 
     void update(World& world, Entity self, float dt);
@@ -70,11 +73,43 @@ struct OrbitCamera {
     float stickSpeed = 160.0f;          // degrees per second with the right stick pushed all the way
     bool avoidsWalls = true;            // closer to the target instead of behind a wall
     float smoothness = 14.0f;
+    /// The mouse turns it without a button held: the game takes the pointer as it starts, Esc
+    /// (the action "pause") gives it back for the buttons on the screen, a click takes it again.
+    bool capturesMouse = false;
 
     void lateUpdate(World& world, Entity self, float dt);
 
     float shownDistance = -1;           // what it is at now, after walls
+    bool askedForPointer = false;
 };
+
+/// The view of someone seen from their own eyes. On a camera under the body (the entity with
+/// the CharacterMover, whose `turnsToFace` is off): the mouse, or the right stick, turns the
+/// body left and right and tips the camera up and down. On a camera with nothing above it, it
+/// turns the camera both ways.
+struct FirstPersonLook {
+    float mouseSensitivity = 0.12f;     // degrees per point the mouse moves
+    float stickSpeed = 150.0f;          // degrees per second with the right stick pushed all the way
+    float minPitch = -85.0f, maxPitch = 85.0f;
+    /// The mouse turns it without a button held: the game takes the pointer as it starts, Esc
+    /// (the action "pause") gives it back, a click takes it again. Off: turned while a mouse button is held.
+    bool takesPointer = true;
+    float yaw = 0, pitch = 0;           // degrees: where it looks. It starts the way the body is turned.
+
+    /// A push on the view that comes back by itself: what a weapon does as it fires.
+    void kick(float up, float aside) { kickPitch += up, kickYaw += aside; }
+
+    void lateUpdate(World& world, Entity self, float dt);
+
+    // ---- state
+    float kickPitch = 0, kickYaw = 0;   // degrees
+    bool hasStarted = false, askedForPointer = false;
+};
+
+/// For a view the mouse turns without a button held. Takes the pointer the first time (`asked`
+/// is the caller's own, false at the start), gives it back when the action "pause" is pressed
+/// and takes it again at a click. True while the mouse turns the view.
+bool mouseTurnsView(World& world, bool& asked);
 
 /// Keeps this file's components in a program that links the kit statically.
 void linkCharacters();

@@ -17,8 +17,7 @@ TEST(the_look_of_a_scene_is_saved_with_it) {
     Scene scene;
     std::vector<NamedMaterial> materials;
     RenderSettings settings;
-    settings.sky.isPhysical = true;
-    settings.sky.haze = 0.6f;
+    settings.sky.moon = 0.4f;
     settings.sky.stars = 1.5f;
     settings.colorGrading = "Grading/Warm.png";
     settings.colorGradingAmount = 0.7f;
@@ -38,7 +37,7 @@ TEST(the_look_of_a_scene_is_saved_with_it) {
     std::vector<NamedMaterial> read;
     RenderSettings back;
     CHECK(readScene(text, again, read, back, SceneAssets{}));
-    CHECK(back.sky.isPhysical && std::abs(back.sky.haze - 0.6f) < 1e-5f && std::abs(back.sky.stars - 1.5f) < 1e-5f);
+    CHECK(std::abs(back.sky.moon - 0.4f) < 1e-5f && std::abs(back.sky.stars - 1.5f) < 1e-5f);
     CHECK(back.colorGrading == "Grading/Warm.png" && std::abs(back.colorGradingAmount - 0.7f) < 1e-5f);
     CHECK(back.autoExposure && std::abs(back.exposureCompensation + 0.5f) < 1e-5f);
     CHECK(back.depthOfField && back.focusDistance == 3 && back.focusRange == 1.5f && back.focusBlur == 12);
@@ -46,9 +45,9 @@ TEST(the_look_of_a_scene_is_saved_with_it) {
     CHECK(read.size() == 1 && std::abs(read[0].material->sway - 0.8f) < 1e-5f);
     // Off, they leave no lines.
     std::string plain = writeScene(scene, {}, RenderSettings{});
-    CHECK(plain.find("depthOfField") == std::string::npos && plain.find("physicalSky") == std::string::npos);
+    CHECK(plain.find("depthOfField") == std::string::npos && plain.find("night") == std::string::npos);
     // What the GPU is given for them.
-    CHECK(sizeof(gpu::EffectUniforms) == 176 && sizeof(gpu::DecalUniforms) == 160 && sizeof(gpu::PostUniforms) == 72);
+    CHECK(sizeof(gpu::EffectUniforms) == 176 && sizeof(gpu::DecalUniforms) == 160 && sizeof(gpu::PostUniforms) == 128);
 }
 
 TEST(sunlight_goes_gold_and_red_as_the_sun_sinks) {

@@ -1,0 +1,993 @@
+molten-scene 1
+settings
+  skyZenith 0.06 0.2 0.52
+  skyHorizon 0.5 0.66 0.84
+  skyGround 0.16 0.17 0.16
+  skyIntensity 1
+  environmentIntensity 1
+  fog 0.62 0.72 0.84 0.0009
+  shadows 1 120
+  rayTracedShadows 0 4
+  rayTracedLighting 0 1 0 0 1
+  rayTracedReflections 0.3 1
+  fogShape 0 0
+  wind 0 0 0 0.4
+  ambientOcclusion 1 0.6 1
+  bloom 1 0.06 1
+  exposure 1
+  resolution 1 1 0 60 0.6
+  toneMapper 2
+  vignette 0.25
+  clouds 0.3 1 1500 1200
+  volumetrics 1 0
+  lens 0 0 0
+  lensFlare 0.6
+entity "Sun"
+  transform 0 60 0 -0.31035575 0.4667902 0.17918397 0.80850434 1 1 1
+  light directional 1 0.95 0.86 4.2 10 0.34906584 0.5235988 1 1 2 1
+entity "Sea"
+  transform 0 0 0 0 0 0 1 1 1 1
+  mesh "plane" -1 1 1 1 1 0 1
+  materialAsset "Materials/Sea.material"
+  component "Water"
+    field size "1600"
+    field resolution "128"
+    field windSpeed "6.5"
+    field windDirection "1 0.3"
+    field patchSize "120"
+    field choppiness "1"
+    field waveHeight "0.7"
+    field foam "1"
+entity "Sea Bed"
+  transform 0 -14 0 0 0 0 1 2600 1 2600
+  mesh "plane" -1 1 1 1 1 0 1
+  materialAsset "Materials/Sea Bed.material"
+entity "Islands"
+  transform 0 0 0 0 0 0 1 1 1 1
+entity "Island 1"
+  transform -120 -6 -160 0 0 0 1 45 13.5 45
+  parent 3
+  mesh "Models/Island.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Sand.material"
+  collider capsule 38.698837 6 0 6 0 0
+entity "Tree 1"
+  transform -114.834526 6.8888855 -157.44756 0 0.9040403 0 -0.42744732 1.2704878 1.2704878 1.2704878
+  parent 3
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 5
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 5
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 2"
+  transform -112.632805 6.3797274 -148.70702 0 0.08403098 0 0.9964631 1.4502337 1.4502337 1.4502337
+  parent 3
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 8
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 8
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 3"
+  transform -128.1111 6.471899 -150.53737 0 0.65219146 0 -0.75805426 0.91853774 0.91853774 0.91853774
+  parent 3
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 11
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 11
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 4"
+  transform -124.10774 6.6769896 -151.11911 0 0.28318396 0 0.9590656 1.4671348 1.4671348 1.4671348
+  parent 3
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 14
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 14
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 5"
+  transform -106.59305 6.294902 -154.87563 0 0.9660638 0 0.25830352 1.4852428 1.4852428 1.4852428
+  parent 3
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 17
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 17
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 6"
+  transform -114.41425 6.839587 -164.07887 0 0.7772579 0 0.6291821 1.0234982 1.0234982 1.0234982
+  parent 3
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 20
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 20
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Island 2"
+  transform 130 -6 -300 0 0 0 1 60 15 60
+  parent 3
+  mesh "Models/Island.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Sand.material"
+  collider capsule 52.791267 6 0 6 0 0
+entity "Tree 1"
+  transform 128.37283 8.030962 -314.79764 0 0.26195028 0 0.9650814 0.8447884 0.8447884 0.8447884
+  parent 3
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 24
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 24
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 2"
+  transform 134.43982 8.068143 -313.58658 0 0.27534467 0 -0.96134555 1.0330857 1.0330857 1.0330857
+  parent 3
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 27
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 27
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 3"
+  transform 126.396324 8.470206 -298.8596 0 0.71747863 0 0.6965805 0.91757804 0.91757804 0.91757804
+  parent 3
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 30
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 30
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 4"
+  transform 130.03975 8.374064 -292.24152 0 0.21375403 0 0.9768875 0.80204713 0.80204713 0.80204713
+  parent 3
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 33
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 33
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 5"
+  transform 133.74854 8.436217 -304.0619 0 0.9379979 0 0.34664097 1.3310735 1.3310735 1.3310735
+  parent 3
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 36
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 36
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 6"
+  transform 134.95813 7.853615 -316.7032 0 0.88744634 0 -0.460911 0.9835801 0.9835801 0.9835801
+  parent 3
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 39
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 39
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Island 3"
+  transform -200 -6 -470 0 0 0 1 40 12 40
+  parent 3
+  mesh "Models/Island.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Sand.material"
+  collider capsule 33.25537 6 0 6 0 0
+entity "Tree 1"
+  transform -209.46776 5.0478115 -475.35477 0 0.9555269 0 0.29490393 1.2386549 1.2386549 1.2386549
+  parent 3
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 43
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 43
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 2"
+  transform -210.06464 5.070404 -473.34833 0 0.9981267 0 0.061181176 1.4976289 1.4976289 1.4976289
+  parent 3
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 46
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 46
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 3"
+  transform -203.71106 5.296378 -463.6702 0 0.3306234 0 -0.9437628 0.94552934 0.94552934 0.94552934
+  parent 3
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 49
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 49
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 4"
+  transform -193.73207 4.993273 -479.643 0 0.7652789 0 -0.64369893 0.921953 0.921953 0.921953
+  parent 3
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 52
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 52
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 5"
+  transform -196.18806 5.3773155 -465.75528 0 0.17219666 0 0.9850626 1.0137889 1.0137889 1.0137889
+  parent 3
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 55
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 55
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 6"
+  transform -193.44232 5.3359604 -470.6647 0 0.23189831 0 -0.97274005 1.0883099 1.0883099 1.0883099
+  parent 3
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 58
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 58
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Island 4"
+  transform 60 -6 -520 0 0 0 1 42 14 42
+  parent 3
+  mesh "Models/Island.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Sand.material"
+  collider capsule 36.429436 6 0 6 0 0
+entity "Tree 1"
+  transform 53.49994 7.3310776 -520.2468 0 0.021943761 0 0.9997592 1.1967429 1.1967429 1.1967429
+  parent 3
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 62
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 62
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 2"
+  transform 46.300587 6.7134075 -522.2313 0 0.41180363 0 -0.9112726 0.94601965 0.94601965 0.94601965
+  parent 3
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 65
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 65
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 3"
+  transform 55.29056 7.3916435 -517.7592 0 0.29810646 0 -0.9545326 1.4548948 1.4548948 1.4548948
+  parent 3
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 68
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 68
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 4"
+  transform 63.75236 6.9699116 -509.1846 0 0.9060898 0 -0.42308545 0.9908984 0.9908984 0.9908984
+  parent 3
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 71
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 71
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 5"
+  transform 61.967316 7.3852615 -515.00745 0 0.5074028 0 -0.861709 1.19887 1.19887 1.19887
+  parent 3
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 74
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 74
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 6"
+  transform 70.54288 6.650152 -510.1761 0 0.6301661 0 0.77646035 1.173502 1.173502 1.173502
+  parent 3
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 77
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 77
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Lighthouse"
+  transform 60 7.4 -520 0 0 0 1 1 1 1
+entity "Tower"
+  transform 0 9 0 0 0 0 1 4.4 18 4.4
+  parent 80
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Lighthouse.material"
+entity "Band"
+  transform 0 9 0 0 0 0 1 4.5 4 4.5
+  parent 80
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Lighthouse Red.material"
+entity "Lamp"
+  transform 0 19.3 0 0 0 0 1 2.6 2.4 2.6
+  parent 80
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Lighthouse Lamp.material"
+entity "Cap"
+  transform 0 21 0 0 0 0 1 3.6 2.2 3.6
+  parent 80
+  mesh "sphere" -1 1 1 1 1 1 1
+  materialAsset "Materials/Lighthouse Red.material"
+entity "Beam"
+  transform 0 19.3 0 0 0 0 1 1 1 1
+  parent 80
+  light point 1 0.9 0.6 30 60 0.34906584 0.5235988 0 1 2 1
+entity "Rocks"
+  transform 0 0 0 0 0 0 1 1 1 1
+entity "Rock 1"
+  transform -169.59773 -0.9 -161.88353 0 0 0 1 2.4189074 2.0963864 2.4189074
+  parent 86
+  mesh "Models/Rock.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Rocks.material"
+  collider sphere 1.7738655 0 0.2 0 0
+entity "Rock 2"
+  transform 105.40784 -0.9 -244.37332 0 0.47715876 0 0.87881714 3.1016417 2.6880894 3.1016417
+  parent 86
+  mesh "Models/Rock.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Rocks.material"
+  collider sphere 2.2745373 0 0.2 0 0
+entity "Rock 3"
+  transform -247.7796 -0.9 -477.7823 0 0.83867055 0 0.54463905 3.3200948 2.8774154 3.3200948
+  parent 86
+  mesh "Models/Rock.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Rocks.material"
+  collider sphere 2.4347363 0 0.2 0 0
+entity "Rock 4"
+  transform 100.96571 -0.9 -549.1453 0 0.9969173 0 0.078459084 4.7489367 4.115745 4.7489367
+  parent 86
+  mesh "Models/Rock.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Rocks.material"
+  collider sphere 3.4825537 0 0.2 0 0
+entity "Rock 5"
+  transform -166.83209 -0.9 -137.7168 0 0.9135455 0 -0.40673658 4.564532 3.9559274 4.564532
+  parent 86
+  mesh "Models/Rock.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Rocks.material"
+  collider sphere 3.3473234 0 0.2 0 0
+entity "Rock 6"
+  transform 145.27376 -0.9 -233.78732 0 0.6087614 0 -0.7933533 5.554764 4.814129 5.554764
+  parent 86
+  mesh "Models/Rock.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Rocks.material"
+  collider sphere 4.0734935 0 0.2 0 0
+entity "Rock 7"
+  transform -183.76909 -0.9 -423.2177 0 0.15643445 0 -0.98768836 5.2322044 4.534577 5.2322044
+  parent 86
+  mesh "Models/Rock.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Rocks.material"
+  collider sphere 3.83695 0 0.2 0 0
+entity "Rock 8"
+  transform 47.171814 -0.9 -568.1489 -0 -0.33380693 -0 -0.9426415 3.1983418 2.7718961 3.1983418
+  parent 86
+  mesh "Models/Rock.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Rocks.material"
+  collider sphere 2.3454506 0 0.2 0 0
+entity "Rock 9"
+  transform -102.74243 -0.9 -116.2047 -0 -0.74314475 -0 -0.6691307 4.8029523 4.1625586 4.8029523
+  parent 86
+  mesh "Models/Rock.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Rocks.material"
+  collider sphere 3.522165 0 0.2 0 0
+entity "Rock 10"
+  transform 139.85733 -0.9 -235.43658 -0 -0.9723699 -0 -0.23344545 3.2877126 2.849351 3.2877126
+  parent 86
+  mesh "Models/Rock.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Rocks.material"
+  collider sphere 2.4109893 0 0.2 0 0
+entity "Buoys"
+  transform 0 0 0 0 0 0 1 1 1 1
+entity "Buoy 1"
+  transform 0 0.3 -70 0 0 0 1 1 1 1
+  parent 97
+  mesh "Models/Buoy.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Buoy.material"
+  collider sphere 0.7 0 0 0 0
+  body dynamic 60 0.1 0.6 0.4 1 0 0.08
+  component "Buoyancy"
+    field waterLevel "0"
+    field lift "1.8"
+    field depth "0.9"
+    field drag "3"
+    field hull "0 0 0"
+    field turnDrag "1.5"
+    field current "0 0 0"
+    field lengthDrag "1"
+entity "Light"
+  transform 0 2.15 0 0 0 0 1 0.34 0.34 0.34
+  parent 98
+  mesh "sphere" -1 1 1 1 1 0 1
+  materialAsset "Materials/Buoy Light.material"
+entity "Gate 1"
+  transform 0 4.6 -70 0 -0.09853762 -0 0.99513334 1 1 1
+  parent 97
+  mesh "Models/Gate.obj" -1 1 1 1 1 0 1
+  materialAsset "Materials/Buoy Light.material"
+  collider sphere 7.5 0 0 0 1
+  component "Collectible"
+    field collector "Boat"
+    field counter "buoys"
+    field amount "1"
+    field sound ""
+    field effect ""
+entity "Buoy 2"
+  transform 30 0.3 -150 0 0 0 1 1 1 1
+  parent 97
+  mesh "Models/Buoy.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Buoy.material"
+  collider sphere 0.7 0 0 0 0
+  body dynamic 60 0.1 0.6 0.4 1 0 0.08
+  component "Buoyancy"
+    field waterLevel "0"
+    field lift "1.8"
+    field depth "0.9"
+    field drag "3"
+    field hull "0 0 0"
+    field turnDrag "1.5"
+    field current "0 0 0"
+    field lengthDrag "1"
+entity "Light"
+  transform 0 2.15 0 0 0 0 1 0.34 0.34 0.34
+  parent 101
+  mesh "sphere" -1 1 1 1 1 0 1
+  materialAsset "Materials/Buoy Light.material"
+entity "Gate 2"
+  transform 30 4.6 -150 0 -0 -0 1 1 1 1
+  parent 97
+  mesh "Models/Gate.obj" -1 1 1 1 1 0 1
+  materialAsset "Materials/Buoy Light.material"
+  collider sphere 7.5 0 0 0 1
+  component "Collectible"
+    field collector "Boat"
+    field counter "buoys"
+    field amount "1"
+    field sound ""
+    field effect ""
+entity "Buoy 3"
+  transform 0 0.3 -240 0 0 0 1 1 1 1
+  parent 97
+  mesh "Models/Buoy.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Buoy.material"
+  collider sphere 0.7 0 0 0 0
+  body dynamic 60 0.1 0.6 0.4 1 0 0.08
+  component "Buoyancy"
+    field waterLevel "0"
+    field lift "1.8"
+    field depth "0.9"
+    field drag "3"
+    field hull "0 0 0"
+    field turnDrag "1.5"
+    field current "0 0 0"
+    field lengthDrag "1"
+entity "Light"
+  transform 0 2.15 0 0 0 0 1 0.34 0.34 0.34
+  parent 104
+  mesh "sphere" -1 1 1 1 1 0 1
+  materialAsset "Materials/Buoy Light.material"
+entity "Gate 3"
+  transform 0 4.6 -240 0 0.26693356 0 0.96371496 1 1 1
+  parent 97
+  mesh "Models/Gate.obj" -1 1 1 1 1 0 1
+  materialAsset "Materials/Buoy Light.material"
+  collider sphere 7.5 0 0 0 1
+  component "Collectible"
+    field collector "Boat"
+    field counter "buoys"
+    field amount "1"
+    field sound ""
+    field effect ""
+entity "Buoy 4"
+  transform -60 0.3 -300 0 0 0 1 1 1 1
+  parent 97
+  mesh "Models/Buoy.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Buoy.material"
+  collider sphere 0.7 0 0 0 0
+  body dynamic 60 0.1 0.6 0.4 1 0 0.08
+  component "Buoyancy"
+    field waterLevel "0"
+    field lift "1.8"
+    field depth "0.9"
+    field drag "3"
+    field hull "0 0 0"
+    field turnDrag "1.5"
+    field current "0 0 0"
+    field lengthDrag "1"
+entity "Light"
+  transform 0 2.15 0 0 0 0 1 0.34 0.34 0.34
+  parent 107
+  mesh "sphere" -1 1 1 1 1 0 1
+  materialAsset "Materials/Buoy Light.material"
+entity "Gate 4"
+  transform -60 4.6 -300 0 0.24253564 0 0.9701425 1 1 1
+  parent 97
+  mesh "Models/Gate.obj" -1 1 1 1 1 0 1
+  materialAsset "Materials/Buoy Light.material"
+  collider sphere 7.5 0 0 0 1
+  component "Collectible"
+    field collector "Boat"
+    field counter "buoys"
+    field amount "1"
+    field sound ""
+    field effect ""
+entity "Buoy 5"
+  transform -80 0.3 -390 0 0 0 1 1 1 1
+  parent 97
+  mesh "Models/Buoy.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Buoy.material"
+  collider sphere 0.7 0 0 0 0
+  body dynamic 60 0.1 0.6 0.4 1 0 0.08
+  component "Buoyancy"
+    field waterLevel "0"
+    field lift "1.8"
+    field depth "0.9"
+    field drag "3"
+    field hull "0 0 0"
+    field turnDrag "1.5"
+    field current "0 0 0"
+    field lengthDrag "1"
+entity "Light"
+  transform 0 2.15 0 0 0 0 1 0.34 0.34 0.34
+  parent 110
+  mesh "sphere" -1 1 1 1 1 0 1
+  materialAsset "Materials/Buoy Light.material"
+entity "Gate 5"
+  transform -80 4.6 -390 0 -0.08722512 -0 0.99618864 1 1 1
+  parent 97
+  mesh "Models/Gate.obj" -1 1 1 1 1 0 1
+  materialAsset "Materials/Buoy Light.material"
+  collider sphere 7.5 0 0 0 1
+  component "Collectible"
+    field collector "Boat"
+    field counter "buoys"
+    field amount "1"
+    field sound ""
+    field effect ""
+entity "Buoy 6"
+  transform -30 0.3 -470 0 0 0 1 1 1 1
+  parent 97
+  mesh "Models/Buoy.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Buoy.material"
+  collider sphere 0.7 0 0 0 0
+  body dynamic 60 0.1 0.6 0.4 1 0 0.08
+  component "Buoyancy"
+    field waterLevel "0"
+    field lift "1.8"
+    field depth "0.9"
+    field drag "3"
+    field hull "0 0 0"
+    field turnDrag "1.5"
+    field current "0 0 0"
+    field lengthDrag "1"
+entity "Light"
+  transform 0 2.15 0 0 0 0 1 0.34 0.34 0.34
+  parent 113
+  mesh "sphere" -1 1 1 1 1 0 1
+  materialAsset "Materials/Buoy Light.material"
+entity "Gate 6"
+  transform -30 4.6 -470 0 -0.05530039 -0 0.99846977 1 1 1
+  parent 97
+  mesh "Models/Gate.obj" -1 1 1 1 1 0 1
+  materialAsset "Materials/Buoy Light.material"
+  collider sphere 7.5 0 0 0 1
+  component "Collectible"
+    field collector "Boat"
+    field counter "buoys"
+    field amount "1"
+    field sound ""
+    field effect ""
+entity "Buoy 7"
+  transform -60 0.3 -570 0 0 0 1 1 1 1
+  parent 97
+  mesh "Models/Buoy.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Buoy.material"
+  collider sphere 0.7 0 0 0 0
+  body dynamic 60 0.1 0.6 0.4 1 0 0.08
+  component "Buoyancy"
+    field waterLevel "0"
+    field lift "1.8"
+    field depth "0.9"
+    field drag "3"
+    field hull "0 0 0"
+    field turnDrag "1.5"
+    field current "0 0 0"
+    field lengthDrag "1"
+entity "Light"
+  transform 0 2.15 0 0 0 0 1 0.34 0.34 0.34
+  parent 116
+  mesh "sphere" -1 1 1 1 1 0 1
+  materialAsset "Materials/Buoy Light.material"
+entity "Gate 7"
+  transform -60 4.6 -570 0 -0.16883373 -0 0.9856446 1 1 1
+  parent 97
+  mesh "Models/Gate.obj" -1 1 1 1 1 0 1
+  materialAsset "Materials/Buoy Light.material"
+  collider sphere 7.5 0 0 0 1
+  component "Collectible"
+    field collector "Boat"
+    field counter "buoys"
+    field amount "1"
+    field sound ""
+    field effect ""
+entity "Buoy 8"
+  transform 30 0.3 -640 0 0 0 1 1 1 1
+  parent 97
+  mesh "Models/Buoy.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Buoy.material"
+  collider sphere 0.7 0 0 0 0
+  body dynamic 60 0.1 0.6 0.4 1 0 0.08
+  component "Buoyancy"
+    field waterLevel "0"
+    field lift "1.8"
+    field depth "0.9"
+    field drag "3"
+    field hull "0 0 0"
+    field turnDrag "1.5"
+    field current "0 0 0"
+    field lengthDrag "1"
+entity "Light"
+  transform 0 2.15 0 0 0 0 1 0.34 0.34 0.34
+  parent 119
+  mesh "sphere" -1 1 1 1 1 0 1
+  materialAsset "Materials/Buoy Light.material"
+entity "Gate 8"
+  transform 30 4.6 -640 0 -0.65255636 -0 0.7577402 1 1 1
+  parent 97
+  mesh "Models/Gate.obj" -1 1 1 1 1 0 1
+  materialAsset "Materials/Buoy Light.material"
+  collider sphere 7.5 0 0 0 1
+  component "Collectible"
+    field collector "Boat"
+    field counter "buoys"
+    field amount "1"
+    field sound ""
+    field effect ""
+entity "Buoy 9"
+  transform 140 0.3 -600 0 0 0 1 1 1 1
+  parent 97
+  mesh "Models/Buoy.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Buoy.material"
+  collider sphere 0.7 0 0 0 0
+  body dynamic 60 0.1 0.6 0.4 1 0 0.08
+  component "Buoyancy"
+    field waterLevel "0"
+    field lift "1.8"
+    field depth "0.9"
+    field drag "3"
+    field hull "0 0 0"
+    field turnDrag "1.5"
+    field current "0 0 0"
+    field lengthDrag "1"
+entity "Light"
+  transform 0 2.15 0 0 0 0 1 0.34 0.34 0.34
+  parent 122
+  mesh "sphere" -1 1 1 1 1 0 1
+  materialAsset "Materials/Buoy Light.material"
+entity "Gate 9"
+  transform 140 4.6 -600 0 0.92387956 -0 -0.38268346 1 1 1
+  parent 97
+  mesh "Models/Gate.obj" -1 1 1 1 1 0 1
+  materialAsset "Materials/Buoy Light.material"
+  collider sphere 7.5 0 0 0 1
+  component "Collectible"
+    field collector "Boat"
+    field counter "buoys"
+    field amount "1"
+    field sound ""
+    field effect ""
+entity "Buoy 10"
+  transform 190 0.3 -480 0 0 0 1 1 1 1
+  parent 97
+  mesh "Models/Buoy.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Buoy.material"
+  collider sphere 0.7 0 0 0 0
+  body dynamic 60 0.1 0.6 0.4 1 0 0.08
+  component "Buoyancy"
+    field waterLevel "0"
+    field lift "1.8"
+    field depth "0.9"
+    field drag "3"
+    field hull "0 0 0"
+    field turnDrag "1.5"
+    field current "0 0 0"
+    field lengthDrag "1"
+entity "Light"
+  transform 0 2.15 0 0 0 0 1 0.34 0.34 0.34
+  parent 125
+  mesh "sphere" -1 1 1 1 1 0 1
+  materialAsset "Materials/Buoy Light.material"
+entity "Gate 10"
+  transform 190 4.6 -480 0 0.9805807 -0 -0.19611613 1 1 1
+  parent 97
+  mesh "Models/Gate.obj" -1 1 1 1 1 0 1
+  materialAsset "Materials/Buoy Light.material"
+  collider sphere 7.5 0 0 0 1
+  component "Collectible"
+    field collector "Boat"
+    field counter "buoys"
+    field amount "1"
+    field sound ""
+    field effect ""
+entity "Boat"
+  transform 0 0.4 0 0 0 0 1 1 1 1
+  tag "Player" 0
+  collider box 1.1 0.42 3 0 0 0 0
+  body dynamic 700 0.1 0.6 0.02 1 1 0.08
+  component "Buoyancy"
+    field waterLevel "0"
+    field lift "2.3"
+    field depth "0.42"
+    field drag "2.2"
+    field hull "1.1 0.42 3"
+    field turnDrag "2.2"
+    field current "0 0 0"
+    field lengthDrag "1"
+  component "Boat"
+    field acceleration "7.5"
+    field topSpeed "17"
+    field turnSpeed "52"
+    field reverse "0.4"
+    field usesInput "1"
+    field throttle "0"
+    field steer "0"
+    field sound "Audio/boat.wav"
+entity "Hull"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 128
+entity "Skin"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 129
+  mesh "Models/Hull.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Hull.material"
+entity "Stripe"
+  transform 0 0.5 0.3 0 0 0 1 2.26 0.1 5.3
+  parent 129
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Hull Stripe.material"
+entity "Windscreen"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 129
+  mesh "Models/Windscreen.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Glass.material"
+entity "Seat L"
+  transform -0.45 0.72 0.5 0 0 0 1 0.6 0.34 0.6
+  parent 129
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Seats.material"
+entity "Seat R"
+  transform 0.45 0.72 0.5 0 0 0 1 0.6 0.34 0.6
+  parent 129
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Seats.material"
+entity "Bench"
+  transform 0 0.7 2.2 0 0 0 1 1.7 0.3 0.55
+  parent 129
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Seats.material"
+entity "Outboard"
+  transform 0 0.62 3.12 0 0 0 1 0.5 0.9 0.5
+  parent 129
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Outboard.material"
+entity "Outboard Leg"
+  transform 0 -0.1 3.2 0 0 0 1 0.16 0.9 0.3
+  parent 129
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Outboard.material"
+entity "Camera"
+  transform 0 4 10 0 0 0 1 1 1 1
+  camera 1.0821041 0.25 3000 0 10 1
+  component "Follow"
+    field target "Boat"
+    field offset "0 3.4 9.5"
+    field smoothness "3.5"
+    field looksAtTarget "1"
+    field turnsWithTarget "1"
+entity "Interface"
+  transform 0 0 0 0 0 0 1 1 1 1
+entity "Count Panel"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 139
+  component "UIPanel"
+    field anchor "0.5 0"
+    field offset "0 40"
+    field size "230 52"
+    field color "0.04 0.045 0.055 0.62"
+    field border "1.5"
+    field borderColor "1 1 1 0.16"
+entity "Count Label"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 139
+  component "HudText"
+    field text "BUOYS"
+    field anchor "0.5 0"
+    field offset "-52 30"
+    field font ""
+    field size "13"
+    field color "1 1 1 0.6"
+entity "Count"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 139
+  component "HudText"
+    field text "{buoys} / 10"
+    field anchor "0.5 0"
+    field offset "46 24"
+    field font ""
+    field size "26"
+    field color "1 0.62 0.28 1"
+entity "Dial"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 139
+  component "UIGauge"
+    field value "knots"
+    field most "40"
+    field numbersEvery "10"
+    field numbersScale "1"
+    field redFrom "0"
+    field label "knots"
+    field showsValue "1"
+    field anchor "0.5 1"
+    field offset "0 -98"
+    field radius "78"
+    field thickness "7"
+    field color "1 0.5 0.18 1"
+    field backColor "0.04 0.045 0.055 0.7"
+entity "Help 1"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 139
+  component "HudText"
+    field text "W  S    ahead and astern"
+    field anchor "0 1"
+    field offset "94.399994 -41"
+    field font ""
+    field size "12"
+    field color "1 1 1 0.62"
+entity "Help 2"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 139
+  component "HudText"
+    field text "A  D    the rudder: it bites once the boat is moving"
+    field anchor "0 1"
+    field offset "181.2 -24"
+    field font ""
+    field size "12"
+    field color "1 1 1 0.62"
+entity "Restart"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 139
+  component "UIButton"
+    field label "Restart"
+    field anchor "1 0"
+    field offset "-70 40"
+    field size "104 36"
+    field color "1 1 1 0.16"
+    field textColor "1 1 1 1"
+    field action ""
+    field isRound "0"
+    field radius "50"
+    field onlyOnTouchScreens "0"
+    field scene ""
+    field value ""
+    field amount "1"
+    field font ""
+  component "WhenThen"
+    field when "It is clicked"
+    field who ""
+    field message "doorOpened"
+    field value "score"
+    field atLeast "10"
+    field seconds "0"
+    field once "0"
+    field action1 "Restart scene"
+    field target1 ""
+    field amount1 "1"
+    field action2 "Nothing"
+    field target2 ""
+    field amount2 "1"
+    field action3 "Nothing"
+    field target3 ""
+    field amount3 "1"
+    field action4 "Nothing"
+    field target4 ""
+    field amount4 "1"
+entity "Goal"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 139
+  component "Goal"
+    field counter "buoys"
+    field target "10"
+    field message "All ten buoys rounded!"
+    field nextScene ""
+    field delay "4"

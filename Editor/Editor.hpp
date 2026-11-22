@@ -27,22 +27,38 @@ void registerInspectorPanel(EditorContext& editor);
 void registerBuiltinComponents(EditorContext& editor);
 void registerAssetBrowserPanel(EditorContext& editor);
 void registerAssetViewerPanel(EditorContext& editor);
-/// The viewer of the asset chosen in the Explorer: drawn by the Inspector, under the scene's things.
+/// The viewer of the asset chosen in the Explorer: drawn by the Explorer, at its right.
 void drawAssetViewer(EditorContext& editor);
 void registerRenderingPanel(EditorContext& editor);
 void registerConsolePanel(EditorContext& editor);
 void registerProfilerPanel(EditorContext& editor);
-void registerTimelinePanel(EditorContext& editor);
 void registerAnimationPanel(EditorContext& editor);
 void registerAnimatorPanel(EditorContext& editor);
 void registerSourceControlPanel(EditorContext& editor);
 void registerSceneWeightPanel(EditorContext& editor);
+/// The Profiler's Weight page: what each thing of the scene costs in memory.
+void drawSceneWeightPage(EditorContext& editor);
 void registerProjectPanel(EditorContext& editor);
+/// The project's game settings (tags, layers, gravity...) made so and written to its Settings/Game.settings.
+void saveGameSettings(EditorContext& editor, const GameSettings& settings);
+/// The Input page of Project Settings: the actions and what moves them.
+void drawInputSettings(EditorContext& editor);
 void registerVisualScriptPanel(EditorContext& editor);
+void registerManualPanel(EditorContext& editor);
+/// Opens Help > Molten Manual on a document, by its file's name without the ending: "MakingGames".
+void showManual(EditorContext& editor, const std::string& page);
 void registerCreateEntries(EditorContext& editor);
 
 /// The entries of the Create menu as menu items. New entities become children of `parent`.
-void drawCreateMenu(EditorContext& editor, Entity parent);
+void drawCreateMenu(EditorContext& editor, Entity parent, bool withEmpty = true);
+/// What the Explorer's "+ New" makes, as menu items: made in the folder it shows.
+void drawAssetCreateMenu(EditorContext& editor);
+/// Every component by category, as menu items: chosen, it is added to all the selected entities that lack it.
+void drawAddComponentMenu(EditorContext& editor);
+/// A point added to the chosen spline (or after the chosen point of one).
+void addSplinePoint(EditorContext& editor);
+/// True for a piece of the game's interface (a component of the UI category): on the screen, not in the world.
+bool isInterfacePiece(Scene& scene, Entity entity);
 /// Makes an entity as one entry of the Create menu does, under `parent` if it is one, and chooses it.
 Entity createFromEntry(EditorContext& editor, const CreateEntry& entry, Entity parent);
 
@@ -55,8 +71,8 @@ std::string convertCppToGraph(EditorContext& editor, const std::string& cppPath)
 /// A small picture of a texture with a menu to choose, drop or clear it. True if it changed.
 bool textureSlot(EditorContext& editor, const char* name, std::shared_ptr<Texture>& slot, TextureFormat format);
 
-/// The settings of a particle effect, in sections, with effects to start from. With
-/// `offersFiles`, also a button that saves it as a `.effect` file. True if one was changed.
+/// The settings of a particle system.
+/// Its modules, as in Unity. True if one was changed.
 bool drawEmitterProperties(EditorContext& editor, ParticleEmitter& emitter, bool offersFiles);
 
 /// The scene that is open, as its own camera sees it, as a picture (Panels/AssetPreviews.cpp):
@@ -97,6 +113,11 @@ void drawSceneView(EditorContext& editor);
 void drawGameView(EditorContext& editor, bool takesCanvas);
 /// With no project open there is nothing to show in either.
 void hideSceneAndGameViews(EditorContext& editor);
+/// What drawing the picture in front of the user took last frame: the Scene view's when it
+/// is on screen, the Game view's otherwise. The two side by side each have their own.
+RenderStats shownRenderStats(EditorContext& editor);
+/// The numbers of a picture, each kind of draw on its own line: for a tooltip or an overlay.
+std::vector<std::string> renderStatsLines(const RenderStats& stats);
 
 // ---- PluginHost.cpp
 class PluginHost {

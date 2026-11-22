@@ -80,8 +80,8 @@ void Scene::updateTransforms() {
     }
 }
 
-void Scene::flushDestroyed() {
-    if (pendingDestroy_.empty()) return;
+const std::vector<Entity>& Scene::doomedEntities() {
+    if (pendingDestroy_.empty()) return pendingDestroy_;
 
     // Children go with their parents. Repeat until no new entity is caught, so that
     // grandchildren are found whatever order the transforms are stored in.
@@ -99,7 +99,12 @@ void Scene::flushDestroyed() {
             }
         }
     }
+    return pendingDestroy_;
+}
 
+void Scene::flushDestroyed() {
+    if (pendingDestroy_.empty()) return;
+    doomedEntities();
     for (Entity entity : pendingDestroy_) {
         for (auto& storage : storages_) {
             if (storage) storage->remove(entity.index);

@@ -4,7 +4,12 @@ This is the shortest way from an empty editor to something you can play: what co
 
 ## Start from a game
 
-The example game is **Driving**: a Fiat 500 on a small circuit, to race four rivals or to lap against the clock.
+A new project starts empty, or from one of the six small games the editor's New Project page
+offers (**Car Game**, **Plane Game**, **Boat Game**, **Third Person Game**, **Shooter Game**, **Online Game**:
+see [Templates/README.md](../Templates/README.md)). Each is made only of the components that
+come with the engine, so everything in it can be changed in the Inspector.
+
+The larger example game is **Driving**: a Fiat 500 on a small circuit, to race four rivals or to lap against the clock.
 
 | | |
 | --- | --- |
@@ -26,7 +31,7 @@ The second project is a plaza of everything the engine does, to drive around in 
 | **Materials** | Plastic and gold from smooth to rough, a mirror, glass, a glowing ball, a textured car paint with its normal map, and two of the project's own shaders. |
 | **Shaders** | A lake of lava and a hologram on a column, each a `.shader` file in `Assets/Shaders`: change one, save, and it changes. |
 | **Lights** | A dark hall: red, green and blue spot lights crossing on a statue, braziers that flicker, neon strips that bloom. |
-| **Effects** | The nine particle presets, each on a pedestal, in the wind. |
+| **Effects** | Particle systems on pedestals, in the wind. |
 | **Physics** | A pyramid of crates, a curve of dominoes that falls by itself, five balls hung in a row, a wrecking ball, two gates on hinges, bowling pins, a chute that never runs out of balls. The car shoves what it hits. |
 | **Jumps** | A table top, whoops and a kicker: models with mesh colliders, solid exactly as they are drawn. |
 | **Water** | A basin of ocean waves, with crates and buoys floating on them. |
@@ -57,8 +62,14 @@ They are under **Add Component** in the inspector, like a game's own. Each does 
 | **Breakable** | Removed when hit, with points. |
 | **Explosion** | Pushes bodies away and hurts what has Health, once, when it appears. |
 | **Flicker** | Makes a light waver like a flame. |
+| **Shuttle** | Takes its entity to a place and back, again and again: a platform, a moving target, a gate. |
+| **CharacterController**, **CharacterMover**, **OrbitCamera** | Someone to walk with, seen from behind: see "Someone to walk with". |
+| **FirstPersonLook** | The same seen from its own eyes: the mouse turns the body and tips the camera. |
+| **Weapon** | A gun under a first-person camera: a magazine, a reserve, loading, a shot that lands on what the view looks at. |
+| **ShootingTarget**, **Hunter**, **Supply**, **DamageFlash** | A plate that falls when shot; a machine that hunts the player; rounds or health to pick up; red at the screen's edges when hurt. |
+| **NetworkSession**, **Networked** | A game on several machines: who is in it, and what is the same for all of them. See "Playing together". |
 
-Their code is `Engine/Kit/Kit.cpp`, about three hundred lines, written against the same interface a game's code uses. When one almost fits, copy it into the project's `Source` folder under another name and change it.
+Their code is in `Engine/Kit` (`Kit.cpp` for the first of them, a file each for characters, shooting, vehicles, navigation and the network), written against the same interface a game's code uses. When one almost fits, copy it into the project's `Source` folder under another name and change it.
 
 ### Shared values
 
@@ -127,7 +138,7 @@ A prefab is read when it is used: change the file and the next one spawned is th
 
 ## Effects
 
-**Create > Effects** has fire, smoke, sparks, an explosion, rain and snow. Each is an entity with a particle emitter you can then change in the inspector (fire also carries a light with `Flicker`; an explosion a light, `Explosion` and `Lifetime`). Save one as a prefab and it can be the `effect` of a `Health` or a `Collectible`.
+**Entity > Effects > Particle System** makes an entity with a particle emitter, which the Inspector shapes into fire, smoke, sparks, rain or anything else (see Particle systems below). Save one as a prefab and it can be the `effect` of a `Health` or a `Collectible`.
 
 A particle can be drawn as a streak along the way it goes instead of a round dot: **Streak** in the inspector, in seconds of its movement (rain falls in streaks of about 0.05).
 
@@ -147,13 +158,30 @@ In the editor, Play runs the scene as it is open, saved or not, and starting ove
 
 ## The editor's windows
 
+**Starting the editor.** `build/Molten Metal Engine.app` is the editor with its icon: double-click it,
+or keep it in the Dock (`./build/molten` from the Terminal is the same editor). It opens on the engine's
+logo, then the projects opened lately on the left: choose one and it is shown on the right, with the
+question whether to open it (Return opens it, a double-click opens it at once); **New Project** starts
+one with an empty scene. Opening a project, a scene, building the game's code and exporting each show
+what is being done, step by step, until it is done.
+
+**Moving and deleting.** In the **Explorer**, Cmd and a click chooses several files, Shift a range,
+Cmd+A all; Delete (or Backspace) moves them to the Trash after asking; Cmd+X and Cmd+V, or Move To in
+the right-click menu, or dragging onto a folder, move them, and the scenes, prefabs, materials and
+animations that name a moved file are changed to name it where it is now (the open scene too). In the
+**Hierarchy**, a row dropped on the line between two others goes there, under the same parent (between
+two children of a parent: under it, in that place); dropped on a row, it goes under it; with several
+chosen, they all go, in their order. Delete or Cmd+Backspace deletes what is chosen in the scene.
+
 **Project** shows the assets with pictures made from the files: a model as its shape, a material as a lit ball, a sound as its wave, a scene or a prefab as a plan from above, a visual script as its boxes, code as its first lines. **Add Component** in the inspector is sorted as Unity's is (Mesh, Rendering, Physics, Audio, Effects, UI, Vehicles, Gameplay, Scripts) and can be searched; each component's menu has Reset, Copy Values, Paste Values and Remove.
 
-**Inspector and Viewer.** The Inspector is for the things of the scene: what is chosen in the view or the hierarchy, and nothing else. The Viewer is for the things of the Explorer, and it is part of the Inspector: choose an asset (or a folder) in the Explorer and it opens in the Inspector's lower part, under the scene's things; drag the bar between the two to share the height, and close it with its **x** or by clicking empty space in the Explorer. Choosing in one never unchooses the other, so a material can be looked at in the Viewer and dragged onto the entity in the Inspector above it.
+**Inspector and Viewer.** The Inspector is for the things of the scene: what is chosen in the view or the Hierarchy, and nothing else. Each component has an icon by its name (a cube for a mesh, a bulb for a light, a speaker for a sound, braces for a script), so they are told apart at a glance; titles inside one (a material's Surface, Textures) are lines, not more folding headers. With nothing chosen, the Inspector shows the scene at a glance, what was chosen lately, and tiles to make the usual things. The Viewer is for the things of the Explorer, and it is part of the Explorer: choose an asset (or a folder) and it opens at the Explorer's right, as wide as its bar is dragged; close it with its **x** or by clicking empty space. A right click anywhere in the Explorer offers what can be made there. Choosing in one never unchooses the other, so a material in the Viewer can be dragged onto the entity in the Inspector.
+
+**Menus.** They are Unity's: **File** (scenes, projects, Build Settings), **Edit** (undo, cut, copy and paste, select, find, Play, Project Settings, Preferences), **Assets** (create and import files, compile the scripts), **Entity** (make things and arrange them in the Hierarchy: Unity's GameObject), **Component** (add one to what is selected), **Window** and **Help**. Every command is in one of them with its keys beside it, and Edit > **Search Everything** (Cmd+K) finds any of them by name, with the entities and the assets. Edit > **Preferences** (Cmd+,) has the editor's own settings: autosave, its look, and every shortcut (searchable, and changed by pressing the new keys). Edit > **Project Settings** has the project's: Game, Quality, Input, Physics, Tags and Layers. The Scene view's **Gizmos** button chooses what it shows besides the scene, the outline of every collider among it. The **Profiler** has three pages: the frame's time, what the scene holds (Scene), and what it weighs (Memory). The **Input** page of Project Settings shows a controller and a keyboard, lit as they are pressed (and whether a controller is connected), with what the chosen action is bound to in orange; **Bind by Pressing** takes the next key or button.
 
 **Text fields name nothing.** Wherever a field names something (a sound, a scene, a prefab, a timeline, an entity, a tag, a bone, an animation, a state or parameter of the Animator, an input action, a key, a shared value, a message), the Inspector and the Visual Script boxes offer a list of what it can actually be, with a search box when the list is long; files can also be dropped on it from the Explorer. A name that is no longer there shows in orange as missing. Values and messages, which are new names a game invents, have **A new name** at the end of their list. Only words people read (a button's label, a text on screen, a win message) are typed.
 
-**Layouts.** The default is Unity's: Hierarchy at the left, Inspector at the right, Scene and Game as tabs in the middle, and Explorer, Console, Input and Visual Script as tabs along the bottom. Run, Hold and Frame are at the top right, beside the layout menu, which has four arrangements (Default, 2 by 3, Tall and Wide). Arrange the windows as you like and choose Save Layout: it joins the list, on this Mac, for every project. **Export Layout...** writes it to a file to keep or pass on; **Import Layout...** takes one back. The Scene and Game views never get smaller than 360 by 240.
+**Layouts.** The default is Unity's: Hierarchy at the left, Inspector at the right, Scene and Game as tabs in the middle, and Explorer, Console and Visual Script as tabs along the bottom. Play, Pause and Step are in the middle of the tool bar, as in Unity and Unreal, with the project and its scene at their left (and a disk that is lit while the scene has changes to save) and, at their right, the scripts' light and the layout menu, which has four arrangements (Default, 2 by 3, Tall and Wide). Arrange the windows as you like and choose Save Layout: it joins the list, on this Mac, for every project. **Export Layout...** writes it to a file to keep or pass on; **Import Layout...** takes one back. The Scene and Game views never get smaller than 360 by 240.
 
 **Where the time goes.** Window > Profiler shows the last five seconds, a bar per frame for the CPU and a line for the GPU, and below them the parts of a frame (events, fixed update, physics, update and each kind of component in it, particles, interface, each pass the renderer prepares, and the time spent waiting for the GPU or the display) with their times: the average of the last second, or one frame's when its bar is clicked. When the CPU's bar is short and the GPU's line is high, the GPU is the limit; much time "Waiting for the GPU" says the same. In a running game, F1 shows the slowest parts of the last frame. Your own code can add parts: `Profiler::Scope timed(world.profiler, "Pathfinding");` times the rest of its block.
 
@@ -185,34 +213,20 @@ In the scene view a camera is drawn as the pyramid of what it sees, a directiona
 
 ## Shots, and a camera that glides between them
 
-**Create > Camera Shot** makes a shot where the Scene view looks from now (and, the first time,
+**Entity > Camera Shot** makes a shot where the Scene view looks from now (and, the first time,
 gives the scene's Camera a **Camera Director**). The director films the shot of the highest
 `priority` among those switched on, and glides to a new one over its `blendSeconds` (0 cuts),
 slowing out and in, its field of view too. Switch a close shot on (from a trigger, a script, a
 timeline's Show track) and the camera goes to it; switch it off and it goes back. A shot can move:
 give it Follow or Orbit Camera and the camera follows it, blends included.
 
-## Cutscenes: Timeline
+## Cutscenes
 
-A **Timeline Player** (Add Component > Animation) plays a `.timeline` file: what happens when,
-on tracks. **Window > Timeline** shows the tracks of the Timeline Player chosen (or the scene's
-first); **New Timeline** makes its file.
-
-- **Add Track > Move** (with an entity chosen): put the entity where it should be, drag the time,
-  press **Key**; again at another time. It goes smoothly through its keys.
-- **Camera cuts**: at each mark, that camera is the one seen (its Camera made active, the others
-  the track names made inactive). **Add** puts the camera chosen in the Hierarchy.
-- **Sounds**, **Set a shared value** (what a menu or a script waits for), **Show or hide**,
-  **Clips on** an entity (a clip made in the Animation window, played on it from its mark and seen
-  as the time is dragged, or one of its model's animations, started on its Animator), and
-  **Animator triggers** (a trigger of its controller, chosen from its list).
-
-Drag the time along the top to see the scene as it is then; **Preview** plays it here, without
-its sounds and values; **Stop** puts everything back where it was. Drag a diamond to move it in
-time; a right click changes or removes it. Every change is written to the file at once.
-
-The player: `playsOnStart`, `loops`, `speed`, and `doneValue`, a shared value set to 1 when it
-ends. From code: `player->play()`, `pause()`, `seek(world, seconds)`.
+A cutscene is an animation like any other: of an entity that holds what moves in it (the camera,
+the characters, the doors), made in **Window > Timeline** with Record, its sounds and the
+moments the game waits for as events (a sound plays; any other name is a message the scripts
+hear). Its Animator plays it when told: `animator->play("Intro")`, or Play Animation in a visual
+script. Scenes made before keep their Timeline Players and `.timeline` files, which still play.
 
 ## Morning, noon and night
 
@@ -226,7 +240,7 @@ values `hour` and `night` (0 by day, 1 in the deep night): turn on lamps and hea
 
 ## Hills and valleys: Terrain
 
-**Create > 3D Object > Terrain** makes flat ground, 200 by 200 meters. With it chosen, brushes
+**Entity > 3D Object > Terrain** makes flat ground, 200 by 200 meters. With it chosen, brushes
 appear in the lower left of the Scene view: **Raise**, **Lower**, **Smooth**, **Flatten**. Paint on
 the ground with the left button; Shift does the other way round (Raise lowers); Alt and the left
 button still turn the view. **Size** is the brush's radius, **Strength** how fast it works.
@@ -243,7 +257,7 @@ From code: `terrain->heightAt(Vec2{x, z})`, `normalAt`, and `sculpt(...)` to dig
 
 ## Grass, trees and rocks: Foliage
 
-**Create > 3D Object > Foliage** makes an entity whose Mesh Renderer's model (little cubes until
+**Entity > 3D Object > Foliage** makes an entity whose Mesh Renderer's model (little cubes until
 you give it yours: a tuft of grass, a tree, a rock) is painted on the ground. With it chosen,
 brushes appear in the lower left of the Scene view: **Paint** puts copies on whatever is solid
 under the brush (a Terrain, the ground, a roof), **Erase** (or Shift) takes them away. **Density**
@@ -252,9 +266,14 @@ is copies a square meter; `spacing` keeps them apart; each gets a turn and a siz
 `drawDistance` meters. Their places are a file (`Foliage/Grass.foliage`), written when a stroke
 ends. For grass and a tree on the same hill, make two Foliage entities.
 
+
+Foliage is copies of the entity's mesh (grass, stones, trees) painted on whatever is under them:
+choose it, and paint in the Scene view with the brush that shows there (Paint, Erase, Size,
+Density). Where the copies are kept is the editor's business: it is not shown.
+
 ## Curves: roads, rails, paths
 
-**Create > Paths > Spline** makes a curve; **Create > Paths > Road** makes one that is closed,
+**Entity > Paths > Spline** makes a curve; **Entity > Paths > Road** makes one that is closed,
 with a road along it. A Spline's points are its children, named **Point 1**, **Point 2** and so
 on: the curve goes through them in the order of those numbers, smoothly. Move them in the Scene
 view like anything else; the curve is drawn there in blue (orange when it or one of its points
@@ -273,6 +292,10 @@ halfway to the next, or at the end when the Spline itself is chosen, and numbers
 
 In code, `findSpline(world, "Track")->path` gives `pointAt(meters)`, `directionAt(meters)`,
 `length()` and `closestDistance(point)`: how far along the curve something is.
+
+
+A spline becomes a road with **Make It a Road** under its Spline in the Inspector: a Road
+component (width, banking, texture) and the mesh it makes are added to it.
 
 ## Files changed in other programs
 
@@ -304,7 +327,7 @@ Save the scene before committing it.
 
 ## Your keys, your colors
 
-**Edit > Editor Settings** (Cmd+,). Under **Shortcuts**, click an action and press its new keys:
+**Edit > Preferences** (Cmd+,). Under **Shortcuts**, click an action and press its new keys:
 Backspace leaves it without one, Esc keeps what it had. An action whose keys another one uses
 says so in orange. **Reset** puts one back; **All as They Were** puts them all back. The menus
 and Cmd+K show the keys as you set them. Under **Look**: Forge (the orange of hot iron), Ocean,
@@ -312,8 +335,8 @@ Moss, Midnight. Both are kept for the next time the editor opens.
 
 ## Finding anything: Cmd+K
 
-**Cmd+K** (or **Edit > Find Anything**) opens one field that finds by name everything the editor
-has: what the menus do, the windows, the Create menu, every entity of the scene and every asset
+**Cmd+K** (or **Edit > Search**) opens one field that finds by name everything the editor
+has: what the menus do, the windows, everything that can be created, every entity of the scene and every asset
 of the project. A few letters are enough, in order: `svsc` finds Save Scene, `cpl` Create Point
 Light. Up and Down choose, Enter does it, Esc closes.
 
@@ -492,6 +515,51 @@ place; if the code does not build, the engine's own is used, so the game still r
 
 A visual script can be written out as C++, and C++ made that way can go back to boxes: see [To C++ and back](VisualScripting.md#to-c-and-back).
 
+## Lighting, Rendering and Quality
+
+**Lighting** is one page: the Sun; the **Sky**, from a simulated atmosphere by default (sunlight
+scattered by the air and the haze, as on the Earth: blue by day; gold, orange and red round a low
+sun with the earth's shadow rising opposite; dark at night; all from the sun's height, so turn the
+sun); **Clouds** (with depth, at a height and a thickness of your choosing: a camera can fly in,
+through and above them, and inside them the world fades into white); Fog; Wind; how the light is
+worked out (shadow maps, ray tracing, ambient occlusion); and the scene's lights in a list that
+opens when wanted. The Hierarchy's funnel button shows only one kind of thing (lights, cameras...).
+
+**Rendering** is the camera: bloom, exposure and tone mapping (none by default), grading, color
+(contrast, saturation, temperature, tint, sharpen), depth of field, motion blur, and the **lens
+flare**: the sun's light scattered in the glass, a glow, a star, a halo and ghosts, while the sun
+is in view and not hidden.
+
+**Project Settings > Quality** is how well the game draws as it ships, the same for every scene.
+A scene says what it wants to look like (where its sun is, whether its clouds have depth, how
+far its shadows should reach, which of its light is ray traced); the quality says how much of
+that the machine is asked for. Four levels, **Low, Medium, High** (where a project starts) and
+**Ultra**, and under them seven groups that can each be at a level of their own with the
+L M H U buttons at the right of their row, or opened to set their values one by one:
+
+| Group | What it decides |
+|---|---|
+| Resolution | How many pixels are drawn before the picture is made the screen's size (MetalFX keeps it sharp), and **dynamic resolution**: fewer pixels while the GPU cannot keep the frame rate, more again when it can |
+| Anti-Aliasing | Multisampling: off, 2x or 4x |
+| Shadows | The farthest the sun's shadows reach (a scene may ask for less: Window > Lighting > Shadow Maps), the shadow map's size, how many slices |
+| Ray Tracing | The most of it a scene gets: none, the sun's shadows, the light around things and reflections, or all a scene asks |
+| Effects | The screen's ambient occlusion, bloom, the steps of light shafts |
+| Sky | Clouds with depth or flat, in how many steps, into how large a picture |
+| Detail | How far the far levels of LOD groups and painted foliage last |
+
+Where a scene asks for more than the level gives, the Lighting panel says so, with a button to
+this page. The quality is kept in Settings/Quality.settings and goes into the exported game.
+
+**Ray tracing costs about a ray a pixel**, at any level: one ray toward the sun from each pixel
+that faces it, and more only along the edges of shadows; the light around things (the sky's,
+hidden in corners and under cars, and what is bounced off lit walls) is traced for one pixel in
+four before the scene is drawn, and smoothed. On a laptop at the size of its own screen that is
+still millions of rays a frame: leave Dynamic Resolution on, and a GPU that cannot keep up
+draws fewer pixels instead of fewer frames.
+
+**Area lights** (Entity > Light > Area Light) are glowing rectangles: a window, a ceiling panel, a
+screen, shining from their front, softly, as much as their size.
+
 ## The picture: grading, exposure, focus, motion, sky, decals, wind
 
 All in **Window > Rendering**, saved with the scene.
@@ -518,10 +586,14 @@ round it with a pink belt across from it, the clouds are lit from below in the s
 (and stay lit a little after it has set, being higher), and then the sky fades through the blue
 hour into night. Just turn the Sun, or let a Day / Night move it.
 
-**The sky from the air.** Under Sky, **From the Air** works the sky's colors out from how
-sunlight scatters in the air, from the sun's height alone: blue at noon, gold and red as the
-sun sets, dark at night (with a Day / Night, it goes round by itself). **Haze** whitens it.
-**Stars** shows stars when the sun is down, turning slowly and twinkling.
+**At night** (with Sunset Colors) the **Moon** takes over from the sun once it has set: across
+the sky from it, it lights the scene with a cold, dim light and casts its own shadows, and the sky
+is a deep blue, not black (Sky > Moon: 0 a night without a moon, 1 a full moon). **Stars** shows
+stars when the sun is down, turning slowly and twinkling.
+
+**Clouds with depth** (Clouds > With Depth) are heaped clouds, flat underneath and billowing
+above, between a **Height** and a **Thickness**: the sun lights them through, gold and red when it
+is low, and a camera can fly under, into and above them.
 
 **Decals.** A **Decal** (Add Component > Effects) projects a picture down its entity's box onto
 whatever is under it: the entity's scale is its size, and its y how deep it reaches (turn it to
@@ -569,37 +641,171 @@ heavy the load. One mesh is drawn along it, of the entity's own material: a tube
 
 ## Animation, as in Unity
 
-The same system for everything that moves by itself, made or imported:
+- **An entity's animations** are its own: made for it, and for nothing else. Choose the entity,
+  open **Window > Timeline** (or **Open Timeline** on its Animator) and **Create Animation**: it
+  is kept in Animations/<its name>, its **Animator** is made if it has none, and it is listed in
+  the Animator's **Animations**. A model's animations (a `.gltf` or `.glb`) are its too.
+- **The Timeline** keys it, as Unity's Animation window does: press **Record**, and where things
+  are is kept at the playhead; click another time, change things in the Inspector or move them in
+  the view, and each change is a key there. **Key** keeps everything animated as it is now. Keys
+  are dragged along their track, a double click adds one, a right click chooses how the curve
+  comes into it (smooth, linear, step); a right click on the ruler adds an event (a sound, or a
+  message the entity's scripts hear). **Stop** puts everything back.
+- **Procedural**: a right click on a track's name makes it move by itself, over its keys or alone:
+  a wave, a wander, or a parameter of the Animator that the game sets (a door opened as much as
+  "open" says). **Time by** makes a whole animation follow a parameter (0 its start, 1 its end)
+  instead of time. **Create Procedural Animation** (in the Timeline, or in the Animator window's
+  right click) starts one.
+- **The Animator** plays one of them from the start (**Clip**), or, with a **Controller** (a
+  `.animator`, drawn in **Window > Animator**: states, transitions on parameters, blend trees,
+  layers, lit while the game runs), what its states say.
+- **From code**: `animator->play("Open")`, `stop()`, `pause()`, `resume()`,
+  `isPlayingAnimation("Open")`, `setFloat("speed", v)`, `setBool`, `setTrigger("jump")`,
+  `crossFade("Jump", 0.1f)`. **From a visual script**: the Animation boxes (Play Animation, Stop,
+  Pause, Resume, Is Animation Playing, Set Animator Float, Bool and Trigger, Play State).
 
-- **Clips.** A model's animations (a `.gltf` or `.glb`) are clips as they are. A clip made in the
-  editor is a `.anim` file: tracks, each a property of the entity or of one under it (position,
-  rotation, scale, active; a light's color and intensity; a camera's field of view; a mesh's tint;
-  any number, switch, vector or color of any component, a script's included) with keys along time,
-  and events (a sound played, or a message sent to the entity) at moments of it.
-- **The Animation window** (Window > Animation, or **Open Animation** on an Animator) shows the
-  clips of the chosen entity's Animator. **Create New Clip...** makes one (and the Animator, and
-  a controller to hold it once there are two). Press **Record** and change things in the
-  Inspector or move them in the view: each change is a key at the playhead. Drag the playhead to
-  see the clip at that moment, drag keys along their track, double-click a track for a key there;
-  a right click on a key chooses how the curve comes into it (smooth, linear, step), on the ruler
-  adds an event. **Stop** puts everything back as it was.
-- **The Animator Controller** (a `.animator` file, Create > Animator Controller in the Explorer, or
-  **Create Controller** in the Animator window) holds states, each a clip or a blend tree of
-  clips by a parameter, the **parameters** the game sets (float, bool, trigger), the
-  **transitions** between states when their conditions hold (with an exit time and a blend), and
-  **layers** that play over the base on some bones. **The Animator window** draws it as a graph:
-  right-click for a new state (empty, from a clip, a blend tree) or a transition, drag the boxes,
-  and edit what is chosen on the right. While the game runs, the state each Animator is in is
-  lit with how far through it is, and the parameters can be changed there to try them.
-- **The Animator** component plays a controller (or one clip by itself), on a model or on any
-  entity at all.
-- **From code**: `animator->setFloat("speed", v)`, `setBool`, `setTrigger("jump")`,
-  `crossFade("Jump", 0.1f)`, `playState("Idle")`, `play("Animations/Door Open.anim")`,
-  `currentState()`, `isFinished()`. **From a visual script**: the Animation boxes (Set Animator
-  Float, Bool and Trigger, Play State, Play Clip, Set Animator Speed, Animator Parameter, Animator
-  State). The events of clips and states come to the entity's scripts as messages: On Message in a
-  visual script, `onMessage` in code.
-- **Timelines** stay what a cutscene is made of, with the same clips on their Clip tracks.
+## Someone to walk with
+
+**Entity > Characters > Third Person Player** makes one: a **Character Controller** (the capsule
+that is moved, slides along walls, climbs steps and stands on slopes), a **Character Mover**
+(W A S D or the left stick, seen from the camera; Shift is the other pace; Space jumps) and an
+**Orbit Camera** on the scene's camera. The template **Third Person Game** is the same with a
+figure that is animated.
+
+- **Its animations** follow how it moves: the mover tells the **Animator** under it its
+  `speed` (meters a second), whether it is `grounded`, its `verticalSpeed`, and the trigger
+  `jump`. A controller with the states Idle, Move (a blend of Walk and Run by `speed`), Jump and
+  Fall, and transitions on those, is all a character needs: the template's
+  `Animations/Player.animator` is one to copy, and **Window > Animator** draws it.
+- **Feet that do not slide**: a walk covers the ground at one speed and a run at another. Set
+  the mover's **Walk Speed** and **Run Speed** to the speeds the clips were made for, and put
+  those same numbers on the two motions of the blend.
+- **The camera**: turned by dragging with a mouse button, or, with **Captures Mouse**, without
+  one (see "The pointer" below); the right stick always turns it. It comes closer rather than
+  go behind a wall.
+
+### A character of your own
+
+A character is a model with bones and clips in one `.gltf` or `.glb` file. One made in a
+modeling program, or downloaded from a library of characters and animations, is brought in
+like this:
+
+1. Save it as **glTF Binary (.glb)** with its animations in the same file, each named for what
+   it is. (A library that gives one file a clip: open them together in a modeling program,
+   name the clips Idle, Walk, Run, Jump, Fall, and export once.)
+2. Put the file in the project's `Assets/Models`. Choose it as the **mesh** of the entity that
+   shows the character, and as the **Model** of its Animator; give the entity a material (the
+   model's own textures are not read: its color picture is chosen in the material).
+3. Models face +z and the engine's forward is -z: turn that entity half way round (0, 180, 0)
+   under the entity that walks. Scale it there too, if it was made in other units.
+4. In the controller, each motion names a clip of the model. If its walk and run cover the
+   ground at other speeds, change the mover's speeds and the blend's numbers to match.
+
+## Seen from your own eyes
+
+A body with a camera under it at the height of its eyes:
+
+- on the body, a **Character Controller** and a **Character Mover** with **Turns To Face** off
+  (its view turns it, not the way it goes);
+- on the camera, **First Person Look**: the mouse, or the right stick, turns the body left and
+  right and tips the camera up and down.
+
+The template **Shooter Game** is that, with a rifle.
+
+### The pointer
+
+A view turned by the mouse with no button held needs the pointer: it is hidden and kept in the
+window, and only how the mouse moves is told. **First Person Look** (and an **Orbit Camera**
+with **Captures Mouse**) take it when the game starts; **Esc** (the action `pause`) gives it
+back, so that the buttons on the screen can be clicked, and a click on the game takes it
+again. In the editor it is held only while the Game window has the keys; there, the first Esc gives
+the pointer back and the next one stops the game. From code: `world.input.setPointerCaptured(true)`.
+
+### A weapon
+
+**Weapon**, on an entity under the camera (the rifle's model goes under it):
+
+| | |
+| --- | --- |
+| **Fire** | The action `fire` (the mouse's button; a game with a gun should take Space out of it, in Project Settings > Input, since Space jumps). **Is Automatic**: on firing while it is held, at **Fire Rate** shots a second. |
+| **A shot** | A ray from the camera to the first solid Collider within **Range**: it does not fly, it lands at once. It strays by **Spread** degrees standing, **Moving Spread** at a run, and a little more for having just fired; the sights drawn on the screen open and close with it. |
+| **What is hit** | is told with the message `shot` (the number it carries is the damage), it and what it is part of: a component hears it in `onMessage`, a visual script in On Message. The first of them with **Health** loses **Damage**; a body that can move is shoved by **Push**; **Hit Effect** is a prefab left there. |
+| **Loading** | **Magazine Size** rounds, **Reserve** besides (-1: no end of them). The action `reload` (or R) loads what the magazine lacks in **Reload Time** seconds; firing with nothing in it does too. |
+| **On the screen** | The shared values `ammo`, `ammoReserve` and `ammoLoading` (0 to 1): a Text with `{ammo} / {ammoReserve}`, a Bar on `ammoLoading`. |
+| **In the hand** | It rocks with the walk, jumps back at a shot (and kicks the view up by **Kick** degrees), is lowered while it loads, and is drawn back against a wall instead of going through it. **Muzzle** is an entity at the end of the barrel: its Light is on for a moment at each shot, and what is drawn under it shows for that moment. |
+
+### Things to shoot, and things that come for you
+
+- **Shooting Target**: a plate that falls back about its foot when it is shot and adds to a
+  shared value; with **Stands After**, it stands up again. Put its plate (with a solid
+  Collider) and its post under it. On a **Shuttle** (to a place and back, again and again:
+  also a platform, a gate) it is a moving target.
+- **Hunter**: a machine that hovers where it was put until it sees its prey (near enough,
+  nothing solid between), then flies at them, over what is in its way, and hurts them while it
+  is within reach. With a solid Collider and **Health** it can be shot down; Health's
+  **Effect** is the prefab it leaves.
+- **Supply**: with a trigger Collider, rounds for the Weapon of whoever touches it, or Health.
+- **Damage Flash**: the edges of the screen go red when a shared value (`health`) drops.
+- **Guard** (with a **Nav Agent**, see Navigation) is the enemy that walks: it goes its
+  round, chases the player it sees and looks for the one it lost.
+
+## Playing together
+
+A game on several machines: one **hosts** (it listens, and plays too) or is a **server** (it
+listens, and does not play), and the others **join** it at its address. The template **Online
+Game** is the garden of the Third Person Game for several players, to take apart.
+
+Two components do it:
+
+- **Network Session** (**Entity > Gameplay > Network Session**), one in the scene: who is in the
+  game. Everyone who is in gets a copy of its **Player Prefab**, theirs to move, at the next of
+  the entities whose names start with **Spawn Points**. Its **Mode** says what happens when
+  the game starts: **Menu** asks on the screen (Host a game, or Join one at an address),
+  **Host**, **Join** and **Server** do that at once, **Off** waits for code
+  (`session->host(world)`, `join`, `serve`, `leave`).
+- **Networked**, on every entity that must be the same thing for everyone: where it is goes
+  from the machine that owns it to the others (and what its Animator was told, so that a
+  figure is seen walking); destroyed on the server, it is gone everywhere.
+
+Who owns what decides everything else. What is in the scene, and what the server spawns
+(`session->spawn(world, "Prefabs/Crate.prefab", position)`), is the **server's**: only it runs
+their rules, and the others show the result. A player's own object is **that player's**: their
+machine moves it with their keys. So on each Networked, **Owner Only** names what only the
+owner's machine keeps, by commas, components and entities under it alike:
+
+| On | Owner Only | Why |
+| --- | --- | --- |
+| the player prefab | `CharacterController, CharacterMover` (and the camera, if it is under the player) | a copy on another machine has no keys to read: it goes where it is told |
+| a gem | `Collectible` | only the server says who collected it; then it is gone from every machine |
+| a crate that physics moves | `RigidBody` | only the server pushes it about; the others show where it has it |
+
+**Shared Values** on the session are the shared values (the score) that are the server's on
+every machine. A message reaches other machines with
+`session->tell(world, entity, "wave")`: there, the same entity hears it as if it had been sent
+to it there (to everyone else by default; `NetTo::Owner` or `NetTo::Server` for one machine).
+**Forwards** on a Networked does that without code: `shot=damage` on a player tells its
+owner's machine "damage" when a copy of it, on any machine, hears "shot" (a Weapon's shot),
+and Health takes the message `damage` off itself.
+
+To try it on one Mac: run the game twice (the editor's Run for one, the built game for the
+other, or the built game twice), host in one and join `127.0.0.1` in the other. From a
+terminal, `MOLTEN_NET=host`, `MOLTEN_NET=server` or `MOLTEN_NET=join:192.168.1.20` before the
+program's name starts it that way without the menu. Keep both windows in view: macOS slows a
+window that is covered, and a host that stands still for eight seconds is taken to have gone. On a home network the others type the
+host's address, which its screen shows; from outside it, the host's router must send UDP port
+7777 on to the host (the session's **Port**). macOS asks once whether the game may accept
+connections: it must be allowed to host.
+
+What it does not do: everyone is in one scene, the session's, and loading another ends the
+game for that machine; there is no taking over when the host leaves; what physics moves is
+the server's alone, so a player who joined cannot shove a crate; and nothing hides from a
+player who cheats what their own machine decides (where they are).
+
+In code, under all this (`Engine/Net/Net.hpp`): `NetHost` is one end of a game over UDP
+(`openUdp`), whose reliable messages arrive once and in order however many packets are lost,
+and whose others arrive at once or never; `MemoryNetwork` is a network of nothing but memory,
+with loss and delay to ask for, which is how the tests play a game on three machines in one
+program (`Tests/NetworkTests.cpp`).
 
 ## glTF models and animation
 
@@ -609,6 +815,11 @@ which one plays (empty plays the first), `loops`, `speed`, and `blendTime` eases
 fine for a few characters and too slow for a crowd. Its textures are not read yet: give the entity a material.
 
 ## A sea that moves
+
+A material with the **Water** shader on any plane is a sea: the plane is drawn as a fine grid
+that rises and falls with the waves (from the scene's wind), shallow water is clear and takes the
+color of what is under it, and foam rings whatever stands in it (a rock, a pier, a hull) and laps
+against the shore.
 
 Add **Water** to an entity that draws a mesh with a Water material: the mesh becomes a sheet whose surface is an ocean worked out with a
 Fourier transform, from the wind you give it. `windSpeed` is in meters per second and raises the waves that wind really raises (3 ripples
@@ -729,20 +940,44 @@ becomes what the game uses. The file is never changed; the settings are kept in 
 
 A change is applied when you let go: the file is loaded again, and the open scene with it.
 
-## Effects
+## Particle systems
 
-A **Particle System** is set in sections (Emission, Shape, Life and Motion, Look), and
-**Start From...** fills it with one of the engine's effects (Fire, Smoke, Sparks, Explosion,
-Dust, Rain, Snow, Magic, Fountain) or one of the project's. **Save as Effect** makes a
-`.effect` file of it; **+ New > Effect** makes one from nothing. Selected in the Explorer, an
-effect runs in the Viewer above its settings, and what is changed there is saved as it is
-changed. In code: `effectPreset("Fire")`, `readEffect(text, emitter)`, `writeEffect(emitter)`.
+**Entity > Effects > Particle System** makes one: soft white particles rising in a cone, to make
+into whatever it should be (fire, smoke, rain, sparks are made, not picked). It is made of
+modules, as in Unity, each folding open in the Inspector; the ones with a box are switched off
+until they are wanted:
+
+- **Main**: playing or not, duration and looping, prewarm (already running when the scene
+  starts), start delay, lifetime and speed (between two numbers), size and shade variation,
+  gravity, **Simulation Space** (World: what it emitted stays behind as the entity moves on, a
+  trail; Local: carried along), simulation speed, inherit velocity, the most at once.
+- **Emission**: so many a second, so many a meter the entity moves (a trail), a burst at the
+  start and bursts that repeat.
+- **Shape**: a cone, a box, a ring, a sphere, a hemisphere or a line, from inside or from the surface.
+- **Velocity over Lifetime**: a drift, outward (radial), round the axis (orbital: a whirl).
+- **Forces**: **Buoyancy** (hot gas rises, and less as it cools: flames and smoke rise by this),
+  drag, and how much the scene's wind carries them.
+- **Noise**: swirling air (curl noise, which curls without clumping), its size, how fast it
+  changes, and octaves for swirls inside swirls, as real smoke has.
+- **Collision**: with the colliders of the scene and a floor; bounce, friction, the life lost on
+  a hit, or gone on a hit.
+- **Color** and **Size over Lifetime**: at birth, at a middle point, at death.
+- **Rotation**, **Texture Sheet Animation** (frames a second, a random first frame).
+- **Renderer**: billboard, stretched (a streak), horizontal (lying flat) or vertical (upright);
+  a picture with clear around its shape (the engine's Particles/Smoke.png, Flame.png, Spark.png,
+  Debris.png, or your own); additive (light) or alpha (matter) blending; **Lit** (lit by the sun
+  and the sky like smoke, brighter with the sun behind it); **Soft Particles** (fading where they
+  meet a surface instead of a hard line).
+
+A moving emitter spreads what it emits along the way it came each frame, each particle as old as
+it would be had it been born there: it leaves a smooth line, not a clump every frame.
 
 ## The game's interface
 
-**Create > UI** (the + of the Hierarchy) makes a piece of interface: a Text, a Button, a
-Panel, an Image, a Bar, a Gauge, a Stick, a Round Button. Touch controls are interface like the rest,
-in the same UI category. Each is an entity with one component.
+**Entity > UI** (the + of the Hierarchy) makes a basic piece of interface: a Panel, an Image, a
+Text, a Button, a Toggle, a Slider, a Text Field, a Bar, an Arc, a Layout, a Touch Stick. Anything
+more (a gauge, a menu, a health bar with a frame) is made of these, put under one another: each is
+an entity with one component.
 They are laid out in the **Game** view, where they are seen as the player will see them:
 click a piece to choose it, drag it into place, pull its lower right corner to resize it.
 
@@ -766,7 +1001,8 @@ another shape in that list (iPhone portrait, 16:9) to see the layout on that scr
   when clicked it can add to a shared value and load a scene. Scripts can ask `wasClicked`.
 - **Bar**: a shared value as a share of its most: health, fuel.
 - **Panel**, **Image**: a rectangle of color, a picture of Assets.
-- **Gauge**: a shared value as a dial, with numbers, a red zone and a needle: speed, revs, boost.
+- **Toggle**: a box ticked or not, which sets a shared value to 1 or 0: sound on, subtitles.
+- **Arc**: part of a ring, which can fill with a shared value: the face of a dial, a timer.
 - **Stick**, and a **Button** made round: for phones and tablets, where there are no keys. The
   stick pushes two axis actions (`moveX` and `moveZ` unless told otherwise), the button
   holds one (`jump`): a game written for keys is played by touch without changing a line.
@@ -782,10 +1018,10 @@ From code: `input.setVirtualAxis(...)`, `input.setVirtualButton(...)`.
 
 ### Rows, columns, grids, lists
 
-A **Layout** (Create > UI > Layout) places the pieces of interface under it in the Hierarchy,
+A **Layout** (Entity > UI > Layout) places the pieces of interface under it in the Hierarchy,
 one after the other: in a column, a row (`arrangement` 0) or a grid of `columns` (2). Their order
 is the order they are in on the screen, so in the Game view a piece dragged above another takes
-its place. **Create > UI > Menu** makes a column with three buttons in it, as wide as it.
+its place. A menu is a Layout with Buttons under it.
 
 - `padding` is the room inside its edge, `spacing` the room between two pieces; `alignment`
   puts them at the start, the middle or the end across.
@@ -795,10 +1031,10 @@ its place. **Create > UI > Menu** makes a column with three buttons in it, as wi
   only what is inside it is seen and can be pressed. A thin bar at its side says where one is.
 - Layouts go inside layouts: a row of icons in a column of a menu.
 
-A **Slider** (Create > UI > Slider) sets a shared value between `least` and `most` by dragging
+A **Slider** (Entity > UI > Slider) sets a shared value between `least` and `most` by dragging
 its bar, by `step` if it has one; `isSaved` keeps it between plays as a preference of that name.
 
-A **Text Field** (Create > UI > Text Field) is a box to type in: a name for the best laps, a
+A **Text Field** (Entity > UI > Text Field) is a box to type in: a name for the best laps, a
 code. Click or tap it and type; Return lets it go. What is typed is a shared text, shown by any
 text as a value is: `Hello {playerName}`. While it is typed in, the letters are the field's and
 not the game's (W does not drive the car), and a phone shows its keyboard. `isSaved` keeps it
@@ -806,6 +1042,12 @@ between plays. From code: `world.text("playerName")`, `world.setText(...)`.
 
 Texts and buttons can each have their own **font**: one made by `Tools/bake_font.py` and put in
 Assets (`Fonts/Title.png` and `Fonts/Title.txt`), named without its ending: `Fonts/Title`.
+
+
+A piece of interface lives on the screen, not in the world: the Inspector shows no 3D Transform
+for it, only its place (anchor, offset, size), and it is moved in the Game view, where the pieces
+under it move with it. A dial is made of the basic pieces under one: a Panel or an Arc for its
+face, an Arc that fills with the value, Texts for the number and its unit.
 
 ## The game in other languages
 
@@ -837,7 +1079,7 @@ script can then change one of them alone: the rear lamps glow when the brakes ar
 
 ## Build and Export
 
-**Game > Build and Export...** (Shift+Cmd+B) goes from a project to a game that runs by
+**File > Build Settings...** (Shift+Cmd+B) goes from a project to a game that runs by
 itself in five steps: the game (name, version, identifier, splash), where it starts, how it
 is played (touch controls), its scripts (built by themselves when saved and before the
 export: there is nothing to press), and the export, for the Mac or as an Xcode project for

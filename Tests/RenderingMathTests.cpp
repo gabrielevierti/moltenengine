@@ -28,12 +28,12 @@ TEST(gpu_structs_have_the_sizes_the_shaders_expect) {
     CHECK(offsetof(gpu::MaterialUniforms, water) == 64);
     CHECK(sizeof(gpu::CanvasVertex) == 32);
     CHECK(sizeof(gpu::LineVertex) == 32);
-    CHECK(sizeof(gpu::ParticleInstance) == 48);
+    CHECK(sizeof(gpu::ParticleInstance) == 80);
     CHECK(offsetof(gpu::PassUniforms, cameraPosition) == 320);
     CHECK(offsetof(gpu::PassUniforms, time) == 336);
     CHECK(offsetof(gpu::LightData, type) == 48);
     CHECK(offsetof(gpu::FrameUniforms, cascadeSplits) == 256);
-    CHECK(sizeof(gpu::FrameUniforms) == 576);
+    CHECK(sizeof(gpu::FrameUniforms) == 608);
     CHECK(offsetof(gpu::FrameUniforms, fogShaftSteps) == 528);
     CHECK(offsetof(gpu::FrameUniforms, volumetricClouds) == 532);
     CHECK(offsetof(gpu::FrameUniforms, fogHeightFalloff) == 508);
@@ -101,6 +101,77 @@ TEST(cascades_move_in_whole_texels) {
             CHECK_NEAR(texelsY, std::round(texelsY), 0.02);
         }
     }
+}
+
+TEST(a_cascade_draws_only_what_can_shade_its_slice) {
+    // A box at the camera's feet is inside the shadow map of every cascade (each covers a
+    // sphere around its slice), but its shadow falls only in the first slice.
+    Mat4 cameraWorld = simd::inverse(lookAt(Vec3{0, 1.7f, 0}, Vec3{0, 1.7f, -10}));
+    float fovY = radians(60), aspect = 16.0f / 9.0f, nearPlane = 0.1f;
+    CascadeSettings settings;
+    Vec3 light = simd::normalize(Vec3{-0.3f, -1.0f, -0.2f});
+    Cascades cascades = computeCascades(cameraWorld, fovY, aspect, nearPlane, light, settings);
+    AABB nearBox = AABB::fromCenter(Vec3{0, 0.5f, -3}, Vec3{0.5f, 0.5f, 0.5f});
+    CHECK(cascades.reaches(0, nearBox));
+    CHECK(!cascades.reaches(2, nearBox));
+    CHECK(!cascades.reaches(3, nearBox));
+    // The old test, the map's whole box, kept it in all four.
+    for (int i = 0; i < cascades.count; i++) CHECK(Frustum(cascades.viewProjection[i]).intersects(nearBox, false));
+    // What hangs high above the far slice, toward the sun, shades it.
+    Vec3 farPoint{0, 0, -50};
+    AABB above = AABB::fromCenter(farPoint - light * 30.0f, Vec3{1, 1, 1});
+    CHECK(cascades.reaches(3, above));
+    // What is under the ground there does not: it is farther from the sun than everything seen.
+    AABB below = AABB::fromCenter(farPoint + light * 400.0f, Vec3{1, 1, 1});
+    CHECK(!cascades.reaches(3, below));
+    // The ground itself reaches every slice it lies under.
+    AABB ground = AABB::fromCenter(Vec3{0, -0.05f, 0}, Vec3{200, 0.05f, 200});
+    for (int i = 0; i < cascades.count; i++) CHECK(cascades.reaches(i, ground));
+}
+
+TEST(no_shadow_that_falls_in_a_slice_is_left_out) {
+    // For many cameras, suns and boxes: wherever a point of a slice is shaded by a box, the
+    // cascade of that slice draws the box.
+    uint32_t seed = 12345;
+    auto random = [&]() {
+        seed = seed * 1664525u + 1013904223u;
+        return float(seed >> 8) / 16777216.0f;
+    };
+    float fovY = radians(55), aspect = 1.6f, nearPlane = 0.1f;
+    float tanY = std::tan(fovY / 2), tanX = tanY * aspect;
+    int shaded = 0, drawn = 0, asked = 0;
+    for (int round = 0; round < 60; round++) {
+        Vec3 eye{random() * 40 - 20, random() * 10 + 1, random() * 40 - 20};
+        Vec3 target = eye + simd::normalize(Vec3{random() - 0.5f, random() * 0.6f - 0.4f, random() - 0.5f}) * 10.0f;
+        Mat4 cameraWorld = simd::inverse(lookAt(eye, target));
+        Vec3 light = simd::normalize(Vec3{random() * 2 - 1, -0.15f - random(), random() * 2 - 1});
+        CascadeSettings settings;
+        settings.count = 1 + round % 4;
+        Cascades cascades = computeCascades(cameraWorld, fovY, aspect, nearPlane, light, settings);
+        for (int b = 0; b < 40; b++) {
+            Vec3 center = eye + Vec3{random() * 120 - 60, random() * 40 - 10, random() * 120 - 60};
+            AABB box = AABB::fromCenter(center, Vec3{0.3f + random() * 4, 0.3f + random() * 4, 0.3f + random() * 4});
+            for (int i = 0; i < cascades.count; i++) {
+                asked++;
+                bool reaches = cascades.reaches(i, box);
+                if (reaches) drawn++;
+                float from = i == 0 ? nearPlane : cascades.splitFar[i - 1], to = cascades.splitFar[i];
+                for (int k = 0; k < 40; k++) {
+                    // A point of the slice, and the ray from it toward the sun.
+                    float distance = from + (to - from) * random();
+                    Vec3 point = transformPoint(cameraWorld, Vec3{(random() * 2 - 1) * tanX * distance, (random() * 2 - 1) * tanY * distance, -distance});
+                    Ray ray{point, -light};
+                    std::optional<float> hit = intersectAABB(ray, box);
+                    if (hit && *hit <= settings.casterDistance) {
+                        shaded++;
+                        CHECK(reaches);
+                    }
+                }
+            }
+        }
+    }
+    CHECK(shaded > 50);                   // the test did find shadows to ask about
+    CHECK(drawn < asked / 2);             // and most boxes are left out of most cascades
 }
 
 // ---------------------------------------------------------------- particles

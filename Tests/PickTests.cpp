@@ -11,12 +11,14 @@ using namespace molten;
 
 TEST(every_text_field_says_what_it_names) {
     // The fields that are words people read (or a name the field itself gives): free text.
-    std::set<std::string> words = {"UIButton.label", "UIGauge.label", "UISlider.label", "UITextField.placeholder", "TouchButton.label",
-                                   "HudText.text", "Goal.message", "Saveable.id", "TestSpinner.label", "RaceDirector.drivers"};
+    std::set<std::string> words = {"UIButton.label", "UIGauge.label", "UISlider.label", "UIToggle.label", "UITextField.placeholder", "TouchButton.label",
+                                   "HudText.text", "Goal.message", "Saveable.id", "TestSpinner.label", "TestLife.label", "RaceDirector.drivers",
+                                   // An address, a name, and lists of names by commas: typed.
+                                   "NetworkSession.address", "NetworkSession.playerName", "NetworkSession.sharedValues", "Networked.ownerOnly", "Networked.forwards"};
     std::string free;
     for (const ComponentType& type : ComponentRegistry::instance().types()) {
         for (const Field& field : type.fields) {
-            if (field.type != FieldType::String || !field.options.empty() || !field.pick.empty() || !field.pickBy.empty()) continue;
+            if (field.type != FieldType::String || !field.options.empty() || !field.pick.empty() || !field.pickBy.empty() || field.isHidden) continue;
             std::string id = type.name + "." + field.name;
             if (!words.count(id)) free += id + "\n";
         }

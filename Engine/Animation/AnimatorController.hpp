@@ -88,6 +88,7 @@ struct AnimatorController {
         float speed = 1;
         std::vector<Event> events;
         float x = 0, y = 0;                         // where the Animator window draws it ("place x y")
+        std::string timeBy;                         // a float parameter (0 to 1) that says how far through it is, instead of time ("timeBy open")
     };
     struct Condition {
         enum class Test { IsTrue, IsFalse, Greater, Less, Triggered } test = Test::IsTrue;

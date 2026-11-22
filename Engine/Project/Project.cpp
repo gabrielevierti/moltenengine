@@ -128,7 +128,7 @@ std::optional<Project> Project::create(const std::string& parentDirectory, const
     }
     text::writeFile((directory / ".gitignore").string(), kGitIgnore);
     // An empty project has no scripts: its Scripts folder is for the ones its maker writes
-    // (Game > New Script, or + New > Script in the Explorer).
+    // (Assets > New C++ Script, or + New > Script in the Explorer).
     if (!templateDirectory.empty()) {
         // The template's own files: what it is made of, not what the editor keeps about it.
         std::optional<Project> source = load(templateDirectory, error);

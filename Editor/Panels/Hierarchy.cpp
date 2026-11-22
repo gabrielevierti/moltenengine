@@ -2,7 +2,11 @@
 // Click to select (Cmd adds), drag one onto another to parent it, F2 to rename.
 #include "HierarchySearch.hpp"
 #include "Editor.hpp"
-#include "Kit/Effects.hpp"
+#include "Kit/Character.hpp"
+#include "Kit/Kit.hpp"
+#include "Kit/Network.hpp"
+#include "Kit/WhenThen.hpp"
+#include "Water/Water.hpp"
 #include "Kit/Spline.hpp"
 #include "Kit/Layout.hpp"
 #include "Kit/Terrain.hpp"
@@ -27,6 +31,21 @@ public:
     void draw(EditorContext& editor) override {
         SceneDocument& scene = editor.scene;
 
+        // Something else chose an entity (a click in the Scene view, a paste, the search): the tree
+        // shows where it is, unfolding what it is under. A click in the tree itself needs no such help.
+        if (scene.primary() != shownPrimary_) {
+            shownPrimary_ = scene.primary();
+            bool isOwnClick = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+            if (!isOwnClick && editor.engine.scene.isAlive(shownPrimary_)) {
+                const Transform* transform = editor.engine.scene.get<Transform>(shownPrimary_);
+                for (int depth = 0; depth < 64 && transform && editor.engine.scene.isAlive(transform->parent); depth++) {
+                    open_.insert(transform->parent.index);
+                    transform = editor.engine.scene.get<Transform>(transform->parent);
+                }
+                scrollTo_ = shownPrimary_;
+            }
+        }
+
         // ---- the top: add something, or find something
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, 6));
         if (ImGui::Button("+", ImVec2(ImGui::GetFrameHeight(), 0))) ImGui::OpenPopup("##create");
@@ -36,8 +55,38 @@ public:
             ImGui::EndPopup();
         }
         ImGui::SameLine(0, 6);
-        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::SetNextItemWidth(-(ImGui::GetFrameHeight() + 6));
+        if (editor.hierarchySearchRequested) {
+            editor.hierarchySearchRequested = false;
+            ImGui::SetKeyboardFocusHere();          // Edit > Find in Hierarchy (Cmd+F)
+        }
         ImGui::InputTextWithHint("##search", "Search: a name, c:Light, tag:Enemy", &filter_);
+        ImGui::SameLine(0, 6);
+        // Only one kind of thing: the lights, the cameras... (the same as typing c:Light).
+        {
+            ImVec2 at = ImGui::GetCursorScreenPos();
+            float side = ImGui::GetFrameHeight();
+            if (ImGui::Button("##kind", ImVec2(side, side))) ImGui::OpenPopup("##kinds");
+            ImDrawList* draw = ImGui::GetWindowDrawList();
+            ImU32 color = ImGui::GetColorU32(ImGuiCol_Text);
+            // A funnel.
+            ImVec2 funnel[3] = {ImVec2(at.x + side * 0.22f, at.y + side * 0.28f), ImVec2(at.x + side * 0.78f, at.y + side * 0.28f), ImVec2(at.x + side * 0.5f, at.y + side * 0.6f)};
+            draw->AddConvexPolyFilled(funnel, 3, color);
+            draw->AddLine(ImVec2(at.x + side * 0.5f, at.y + side * 0.55f), ImVec2(at.x + side * 0.5f, at.y + side * 0.76f), color, 2.0f);
+            ui::tooltip("Only one kind of thing");
+            if (ImGui::BeginPopup("##kinds")) {
+                const char* kinds[][3] = {{"Everything", "", "axes"}, {"Lights", "c:Light", "light"}, {"Cameras", "c:Camera", "camera"}, {"Meshes", "c:MeshRenderer", "cube"},
+                                          {"Colliders", "c:Collider", "collider"}, {"Bodies", "c:RigidBody", "physics"}, {"Sounds", "c:AudioSource", "audio"},
+                                          {"Animated", "c:Animator", "anim"}, {"Particles", "c:ParticleEmitter", "spark"}, {"Interface", "c:UI", "ui"},
+                                          {"Scripts", "c:VisualScript", "graph"}, {"Switched Off", "is:off", "eye"}};
+                for (auto& kind : kinds) {
+                    ImVec2 row = ImGui::GetCursorScreenPos();
+                    if (ImGui::Selectable((std::string("      ") + kind[0]).c_str(), filter_ == kind[1])) filter_ = kind[1];
+                    ui::drawIcon(ImGui::GetWindowDrawList(), ImVec2(row.x + 9, row.y + ImGui::GetTextLineHeight() * 0.5f), 13, kind[2], ImGui::GetColorU32(ImGuiCol_Text));
+                }
+                ImGui::EndPopup();
+            }
+        }
         ui::tooltip("A name; c: a component; tag: a tag; layer: a layer; prefab: a prefab's copies; is:off. "
                     "Every word must hold; a word with - before it must not.");
         ImGui::PopStyleVar();
@@ -90,6 +139,9 @@ public:
         }
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8, 6));
         if (ImGui::BeginPopupContextItem("##rest-menu")) {
+            editor.menuItem("paste");
+            editor.menuItem("selectAll");
+            ImGui::Separator();
             drawCreateMenu(editor, Entity{});
             ImGui::EndPopup();
         }
@@ -114,8 +166,13 @@ public:
         ImGui::EndChild();
         ImGui::PopStyleVar();
 
-        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) && !ImGui::IsAnyItemActive() && ImGui::IsKeyPressed(ImGuiKey_F2, false)) {
-            startRenaming(editor, scene.primary());
+        // Edit > Rename (F2), asked for from the menu or the keyboard.
+        if (editor.renameRequested) {
+            editor.renameRequested = false;
+            if (editor.engine.scene.isAlive(scene.primary())) {
+                scrollTo_ = scene.primary();
+                startRenaming(editor, scene.primary());
+            }
         }
     }
 
@@ -148,6 +205,37 @@ private:
             editor.notify("Saved " + path + ". Drag it into the scene to use it, or spawn it from the game.");
         } else {
             editor.notify("Cannot write " + path, ConsoleMessage::Level::Error);
+        }
+    }
+
+    /// What a drag carries: the dragged entity, or the whole selection if it was part of it, in
+    /// the order of the rows, without the ones that go along inside another.
+    std::vector<Entity> carried(EditorContext& editor, Entity dragged) {
+        SceneDocument& scene = editor.scene;
+        std::vector<Entity> chosen = scene.isSelected(dragged) ? scene.selection() : std::vector<Entity>{dragged};
+        std::vector<Entity> ordered;
+        for (Entity entity : scene.entities()) {
+            if (std::find(chosen.begin(), chosen.end(), entity) == chosen.end()) continue;
+            bool isInside = false;
+            for (Entity other : chosen) isInside |= other != entity && scene.isDescendant(entity, other);
+            if (!isInside) ordered.push_back(entity);
+        }
+        return ordered;
+    }
+
+    /// Dropped on the line between two rows: beside `target`, under its parent, in their order.
+    void dropBeside(EditorContext& editor, Entity dragged, Entity target, bool after) {
+        SceneDocument& scene = editor.scene;
+        std::vector<Entity> moved = carried(editor, dragged);
+        if (std::find(moved.begin(), moved.end(), target) != moved.end()) return;
+        Entity anchor = target;
+        for (Entity entity : moved) {
+            if (!scene.moveBeside(entity, anchor, after)) {
+                editor.notify("An entity cannot be put under itself", ConsoleMessage::Level::Warning);
+                continue;
+            }
+            anchor = entity;
+            after = true;
         }
     }
 
@@ -335,17 +423,25 @@ private:
         }
         bool isDropTarget = false;
         if (ImGui::BeginDragDropTarget()) {
-            // On the upper edge of a row: beside it, under the same parent. On the row itself: into it.
-            bool isBetween = ImGui::GetIO().MousePos.y - min.y < kRowHeight * 0.3f;
+            // On the upper edge of a row: before it, under the same parent. On the lower edge: after
+            // it (into an open branch: its first child). On the row itself: into it.
+            float into = ImGui::GetIO().MousePos.y - min.y;
+            bool isBefore = into < kRowHeight * 0.3f, isAfter = into > kRowHeight * 0.7f;
+            bool isBetween = isBefore || isAfter;
             if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(ui::kEntityPayload, ImGuiDragDropFlags_AcceptBeforeDelivery | ImGuiDragDropFlags_AcceptNoDrawDefaultRect)) {
+                std::vector<Entity> kids = isAfter && isOpen ? scene.children(entity) : std::vector<Entity>{};
                 if (isBetween) {
-                    float lineX = min.x + 8 + float(depth) * kIndent;
-                    ImGui::GetWindowDrawList()->AddLine(ImVec2(lineX, min.y), ImVec2(max.x - 4, min.y), IM_COL32(255, 122, 47, 255), 2.0f);
-                    ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(lineX, min.y), 3.0f, IM_COL32(255, 122, 47, 255));
+                    float lineY = isBefore ? min.y : max.y;
+                    float lineX = min.x + 8 + float(depth + (kids.empty() ? 0 : 1)) * kIndent;
+                    ImGui::GetWindowDrawList()->AddLine(ImVec2(lineX, lineY), ImVec2(max.x - 4, lineY), IM_COL32(255, 122, 47, 255), 2.0f);
+                    ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(lineX, lineY), 3.0f, IM_COL32(255, 122, 47, 255));
                 }
                 if (payload->IsDelivery()) {
-                    if (isBetween) {
-                        dropEntities(editor, *static_cast<const Entity*>(payload->Data), own ? own->parent : Entity{});
+                    Entity dragged = *static_cast<const Entity*>(payload->Data);
+                    if (!kids.empty()) {
+                        dropBeside(editor, dragged, kids.front(), false);
+                    } else if (isBetween) {
+                        dropBeside(editor, dragged, entity, isAfter);
                     } else {
                         dropEntities(editor, *static_cast<const Entity*>(payload->Data), entity);
                         open_.insert(entity.index);
@@ -377,20 +473,31 @@ private:
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8, 6));
         if (ImGui::BeginPopupContextItem("##menu")) {
             if (!scene.isSelected(entity)) scene.select(entity);
+            // The same commands as the Edit and Entity menus, with the same keys: see EditorCommands.cpp.
+            editor.menuItem("cut");
+            editor.menuItem("copy");
+            editor.menuItem("paste");
+            ImGui::Separator();
+            editor.menuItem("rename");
+            editor.menuItem("duplicate");
+            editor.menuItem("delete");
+            ImGui::Separator();
             if (ImGui::BeginMenu("Create Child")) {
                 drawCreateMenu(editor, entity);
                 ImGui::EndMenu();
             }
+            editor.menuItem("group");
+            editor.menuItem("clearParent");
+            editor.menuItem("firstSibling");
+            editor.menuItem("lastSibling");
+            editor.menuItem("selectChildren");
             ImGui::Separator();
-            if (ImGui::MenuItem("Rename", "F2")) startRenaming(editor, entity);
-            if (ImGui::MenuItem("Duplicate", "Cmd+D")) scene.duplicateSelection();
-            if (ImGui::MenuItem("Remove Parent", nullptr, false, world.isAlive(world.get<Transform>(entity)->parent))) {
-                for (Entity selected : std::vector<Entity>(scene.selection())) scene.reparent(selected, Entity{});
-            }
+            editor.menuItem("frame");
+            editor.menuItem("moveToView");
+            editor.menuItem("alignWithView");
+            editor.menuItem("toggleActive", world.get<Transform>(entity) && world.get<Transform>(entity)->isActive ? "Switch Off" : "Switch On");
             ImGui::Separator();
-            if (ImGui::MenuItem("Frame in View", "F")) editor.frameSelectionRequested = true;
-            if (ImGui::MenuItem("Align with View", "Shift+Cmd+F")) editor.alignWithViewRequested = true;
-            if (ImGui::MenuItem("Save as Prefab")) savePrefab(editor, entity);
+            if (ImGui::MenuItem("Save as Prefab...")) savePrefab(editor, entity);
             // A copy of a prefab follows the prefab; unpacked, it is the scene's own, to change freely.
             if (world.has<PrefabInstance>(entity) && ImGui::MenuItem("Unpack Prefab")) {
                 world.remove<PrefabInstance>(entity);
@@ -403,8 +510,6 @@ private:
                 }
                 scene.markChanged();
             }
-            ImGui::Separator();
-            if (ImGui::MenuItem("Delete", "Del")) scene.deleteSelection();
             ImGui::EndPopup();
         }
         ImGui::PopStyleVar();
@@ -502,6 +607,7 @@ private:
     std::unordered_set<uint32_t> open_;         // branches unfolded, by entity index: they start folded, or a scene of any size is unreadable
     std::vector<Entity> visible_, lastVisible_; // the rows as drawn, top to bottom: for arrows and ranges
     Entity scrollTo_;
+    Entity shownPrimary_;                       // the last selected as of the last frame: when it changes from outside, the tree goes to it
     bool isSceneClosed_ = false;
     Entity renaming_;
     std::string renameText_;
@@ -528,7 +634,7 @@ Entity createFromEntry(EditorContext& editor, const CreateEntry& entry, Entity p
     return created;
 }
 
-void drawCreateMenu(EditorContext& editor, Entity parent) {
+void drawCreateMenu(EditorContext& editor, Entity parent, bool withEmpty) {
     // "Light/Point Light" becomes the item "Point Light" in the submenu "Light". Entries
     // are grouped in the order their groups first appear.
     std::vector<std::string> groups;
@@ -545,6 +651,7 @@ void drawCreateMenu(EditorContext& editor, Entity parent) {
             std::string itemGroup = slash == std::string::npos ? std::string() : item.value.path.substr(0, slash);
             if (itemGroup != group) continue;
             std::string label = slash == std::string::npos ? item.value.path : item.value.path.substr(slash + 1);
+            if (!withEmpty && item.value.path == "Empty") continue;         // the menu has its own Create Empty, with keys
             if (ImGui::MenuItem(label.c_str())) createFromEntry(editor, item.value, parent);
         }
         if (!group.empty()) ImGui::EndMenu();
@@ -598,8 +705,6 @@ void addSplinePoint(EditorContext& editor) {
 }
 
 void registerCreateEntries(EditorContext& editor) {
-    editor.registry.addMenuItem(nullptr, "Edit/Add Spline Point", [](EditorContext& context) { addSplinePoint(context); }, "",
-                                [](EditorContext& context) { return !context.scene.selection().empty() && !context.scene.isPlaying(); });
     auto add = [&editor](const char* path, Primitive kind) {
         editor.registry.addCreateEntry(nullptr, path, [kind](EditorContext& context) { return context.scene.create(kind); });
     };
@@ -623,6 +728,19 @@ void registerCreateEntries(EditorContext& editor) {
     add("Light/Directional Light", Primitive::DirectionalLight);
     add("Light/Point Light", Primitive::PointLight);
     add("Light/Spot Light", Primitive::SpotLight);
+    // A glowing rectangle: a window's light, a ceiling panel, a screen.
+    editor.registry.addCreateEntry(nullptr, "Light/Area Light", [](EditorContext& context) {
+        Entity made = context.scene.create(Primitive::SpotLight);
+        Scene& scene = context.engine.scene;
+        if (Light* light = scene.get<Light>(made)) {
+            light->type = LightType::Area;
+            light->intensity = 6.0f;
+            light->range = 15.0f;
+        }
+        if (Name* name = scene.get<Name>(made)) name->value = "Area Light";
+        context.scene.markChanged();
+        return made;
+    });
     add("Camera", Primitive::Camera);
     // Copies of a model painted on the ground: put the model in its Mesh Renderer, then paint.
     editor.registry.addCreateEntry(nullptr, "3D Object/Foliage", [](EditorContext& context) {
@@ -682,64 +800,19 @@ void registerCreateEntries(EditorContext& editor) {
             return entity;
         });
     };
-    addInterface("UI/Text", "Text", "HudText");
-    addInterface("UI/Button", "Button", "UIButton");
+    // The basic pieces, and nothing made of them: a gauge, a menu, a health bar with a frame are put
+    // together from these, as the game needs them.
     addInterface("UI/Panel", "Panel", "UIPanel");
     addInterface("UI/Image", "Image", "UIImage");
-    addInterface("UI/Bar", "Bar", "UIBar");
-    addInterface("UI/Gauge", "Gauge", "UIGauge");
-    addInterface("UI/Stick", "Stick", "TouchStick");
+    addInterface("UI/Text", "Text", "HudText");
+    addInterface("UI/Button", "Button", "UIButton");
+    addInterface("UI/Toggle", "Toggle", "UIToggle");
     addInterface("UI/Slider", "Slider", "UISlider");
-    addInterface("UI/Layout", "Layout", "UILayout");
     addInterface("UI/Text Field", "Text Field", "UITextField");
-    // A menu: a column that places its buttons, as wide as it, one under the other.
-    editor.registry.addCreateEntry(nullptr, "UI/Menu", [](EditorContext& context) {
-        Scene& scene = context.engine.scene;
-        Entity menu = scene.create("Menu");
-        scene.add(menu, Transform{});
-        kit::UILayout layout;
-        layout.size = Vec2{320, 0};
-        layout.fitsContent = true;
-        layout.stretches = true;
-        layout.color = Vec4{0.08f, 0.09f, 0.11f, 0.8f};
-        scene.add(menu, layout);
-        float y = 0;
-        for (const char* label : {"PLAY", "SETTINGS", "QUIT"}) {
-            Entity entity = scene.create(std::string("Button ") + label);
-            Transform transform;
-            transform.parent = menu;
-            scene.add(entity, transform);
-            kit::UIButton button;
-            button.label = label;
-            button.offset = Vec2{0, y += 60};               // their order, until the menu places them
-            scene.add(entity, button);
-        }
-        scene.updateTransforms();
-        context.scene.markChanged();
-        context.scene.select(menu);
-        ImGui::SetWindowFocus("Game");
-        return menu;
-    });
-    // A round button for a thumb: a Button, made round and shown only on touch screens.
-    editor.registry.addCreateEntry(nullptr, "UI/Round Button", [](EditorContext& context) {
-        Scene& scene = context.engine.scene;
-        Entity entity = scene.create("Round Button");
-        scene.add(entity, Transform{});
-        kit::UIButton button;
-        button.isRound = true;
-        button.radius = 52;
-        button.label = "A";
-        button.action = "jump";
-        button.anchor = Vec2{1, 1};
-        button.offset = Vec2{-100, -110};
-        button.color = Vec4{1, 1, 1, 0.6f};
-        button.onlyOnTouchScreens = true;
-        scene.add(entity, button);
-        context.scene.markChanged();
-        context.scene.select(entity);
-        ImGui::SetWindowFocus("Game");
-        return entity;
-    });
+    addInterface("UI/Bar", "Bar", "UIBar");
+    addInterface("UI/Arc", "Arc", "UIArc");
+    addInterface("UI/Layout", "Layout", "UILayout");
+    addInterface("UI/Touch Stick", "Touch Stick", "TouchStick");
     // Curves: an entity with a Spline and its points as children, "Point 1" to "Point 4".
     auto addPath = [&editor](const char* path, const char* name, bool isRoad) {
         editor.registry.addCreateEntry(nullptr, path, [name, isRoad](EditorContext& context) {
@@ -769,14 +842,194 @@ void registerCreateEntries(EditorContext& editor) {
         });
     };
     addPath("Paths/Spline", "Spline", false);
-    addPath("Paths/Road", "Road", true);
-    add("Effects/Particle Emitter", Primitive::ParticleEmitter);
-    for (int i = 0; i < int(effects::Preset::Count); i++) {
-        effects::Preset preset = effects::Preset(i);
-        editor.registry.addCreateEntry(nullptr, std::string("Effects/") + effects::name(preset), [preset](EditorContext& context) {
-            return effects::create(context.engine.scene, preset, Vec3{0, 0.1f, 0});
-        });
-    }
+    // One particle system, to make into whatever it should be: fire, smoke, rain are made, not picked.
+    add("Effects/Particle System", Primitive::ParticleEmitter);
+
+    // A sheet of water with waves: a sea or a lake. Its material's shader is Water, and the Water
+    // component moves its surface; things with a Buoyancy float on it.
+    editor.registry.addCreateEntry(nullptr, "3D Object/Water", [](EditorContext& context) {
+        Scene& scene = context.engine.scene;
+        SceneDocument& document = context.scene;
+        Entity water = document.create(Primitive::Plane);
+        if (Name* name = scene.get<Name>(water)) name->value = "Water";
+        scene.remove<Collider>(water);                  // water stops nothing: things float by their Buoyancy
+        if (Transform* transform = scene.get<Transform>(water)) transform->scale = Vec3{400, 1, 400};
+        std::shared_ptr<Material> look;
+        for (const NamedMaterial& named : document.materials) {
+            if (named.name == "Water" && named.material && named.material->isWater) look = named.material;
+        }
+        if (!look) {
+            look = std::make_shared<Material>();
+            look->isWater = true;
+            // The color it ends up where it is deep, and how murky it is: a clear sea, that shows its bottom near the shore.
+            look->baseColor = Vec4{0.02f, 0.13f, 0.2f, 0.3f};
+            look->alphaMode = AlphaMode::Blend;
+            look->roughness = 0.05f;
+            document.materials.push_back(NamedMaterial{"Water", look});
+        }
+        if (MeshRenderer* renderer = scene.get<MeshRenderer>(water)) {
+            renderer->material = look;
+            renderer->castsShadows = false;
+        }
+        scene.add(water, Water{});
+        scene.updateTransforms();
+        document.select(water);
+        document.markChanged();
+        return water;
+    });
+
+    // ---- starting points: something that already works, to take apart and make one's own
+
+    // Someone to walk with: a character moved by W A S D (or a stick), a camera that follows and turns with the mouse.
+    editor.registry.addCreateEntry(nullptr, "Characters/Third Person Player", [](EditorContext& context) {
+        Scene& scene = context.engine.scene;
+        SceneDocument& document = context.scene;
+        Entity player = document.create(Primitive::Empty);
+        if (Name* name = scene.get<Name>(player)) name->value = "Player";
+        scene.add(player, Tag{"Player", 0});
+        scene.add(player, kit::CharacterController{});
+        scene.add(player, kit::CharacterMover{});
+        // What triggers see of it (a coin, a zone): a capsule its size, that blocks nothing itself.
+        Collider seen = Collider::capsule(0.35f, 0.55f);
+        seen.offset = Vec3{0, 0.9f, 0};
+        seen.isTrigger = true;
+        scene.add(player, seen);
+        // Something to look at, until it has a model of its own: put one under the Player and delete this.
+        Entity body = document.create(Primitive::Cylinder, player);
+        if (Name* name = scene.get<Name>(body)) name->value = "Body";
+        scene.remove<Collider>(body);
+        if (Transform* transform = scene.get<Transform>(body)) {
+            transform->position = Vec3{0, 0.9f, 0};
+            transform->scale = Vec3{0.7f, 1.8f, 0.7f};
+        }
+        // The scene's camera follows it; a scene without one gets one.
+        Entity camera = document.gameCamera();
+        if (!scene.isAlive(camera)) camera = document.create(Primitive::Camera);
+        if (!scene.get<kit::OrbitCamera>(camera)) scene.add(camera, kit::OrbitCamera{});
+        scene.updateTransforms();
+        document.select(player);
+        document.markChanged();
+        context.notify("Made a Player: W A S D walks, Shift runs, Space jumps; hold a mouse button and move the mouse to turn the camera. Press Run to try it.");
+        return player;
+    });
+
+    // The same seen from its own eyes: the scene's camera goes under the player, at the height of its eyes, and the mouse looks about.
+    editor.registry.addCreateEntry(nullptr, "Characters/First Person Player", [](EditorContext& context) {
+        Scene& scene = context.engine.scene;
+        SceneDocument& document = context.scene;
+        Entity player = document.create(Primitive::Empty);
+        if (Name* name = scene.get<Name>(player)) name->value = "Player";
+        scene.add(player, Tag{"Player", 0});
+        scene.add(player, kit::CharacterController{});
+        kit::CharacterMover mover;
+        mover.walkSpeed = 3.6f;
+        mover.runSpeed = 6.4f;
+        mover.turnsToFace = false;                  // its view turns it
+        scene.add(player, mover);
+        Collider seen = Collider::capsule(0.35f, 0.55f);
+        seen.offset = Vec3{0, 0.9f, 0};
+        seen.isTrigger = true;
+        scene.add(player, seen);
+        Entity camera = document.gameCamera();
+        if (!scene.isAlive(camera)) camera = document.create(Primitive::Camera);
+        if (Transform* eye = scene.get<Transform>(camera)) {
+            eye->parent = player;
+            eye->position = Vec3{0, 1.62f, 0};
+            eye->rotation = Quat{};
+        }
+        if (Camera* lens = scene.get<Camera>(camera)) lens->nearPlane = std::min(lens->nearPlane, 0.05f);
+        scene.remove<kit::OrbitCamera>(camera);
+        if (!scene.get<kit::FirstPersonLook>(camera)) scene.add(camera, kit::FirstPersonLook{});
+        scene.updateTransforms();
+        document.select(player);
+        document.markChanged();
+        context.notify("Made a Player seen from its own eyes: W A S D walks, Shift runs, Space jumps, the mouse looks about (Esc gives the pointer back). Press Run to try it.");
+        return player;
+    });
+
+    // A game for several machines: who is in it. With a prefab for its players, Run asks whether to host or to join.
+    editor.registry.addCreateEntry(nullptr, "Gameplay/Network Session", [](EditorContext& context) {
+        Scene& scene = context.engine.scene;
+        SceneDocument& document = context.scene;
+        Entity session = document.create(Primitive::Empty);
+        if (Name* name = scene.get<Name>(session)) name->value = "Session";
+        scene.add(session, kit::NetworkSession{});
+        document.select(session);
+        document.markChanged();
+        context.notify("Made a Session. Give it a Player Prefab (a prefab with a Networked on it) and put Networked on what everyone must see the same; then Run, and host or join.");
+        return session;
+    });
+
+    // Something to pick up: it turns, and adds one to the score when the Player touches it.
+    editor.registry.addCreateEntry(nullptr, "Gameplay/Collectible", [](EditorContext& context) {
+        Scene& scene = context.engine.scene;
+        SceneDocument& document = context.scene;
+        Entity coin = document.create(Primitive::Sphere);
+        if (Name* name = scene.get<Name>(coin)) name->value = "Coin";
+        if (Transform* transform = scene.get<Transform>(coin)) {
+            transform->position.y += 0.4f;
+            transform->scale = Vec3{0.5f, 0.5f, 0.5f};
+        }
+        if (Collider* collider = scene.get<Collider>(coin)) {
+            collider->radius = 0.4f;
+            collider->isTrigger = true;
+        }
+        std::shared_ptr<Material> gold;
+        for (const NamedMaterial& named : document.materials) {
+            if (named.name == "Gold") gold = named.material;
+        }
+        if (!gold) {
+            gold = std::make_shared<Material>();
+            gold->baseColor = Vec4{1.0f, 0.76f, 0.2f, 1.0f};
+            gold->metallic = 1.0f;
+            gold->roughness = 0.3f;
+            document.materials.push_back(NamedMaterial{"Gold", gold});
+        }
+        if (MeshRenderer* renderer = scene.get<MeshRenderer>(coin)) renderer->material = gold;
+        scene.add(coin, kit::Collectible{});
+        scene.add(coin, kit::Spin{});
+        scene.updateTransforms();
+        document.select(coin);
+        document.markChanged();
+        context.notify("Made a Coin: it adds 1 to the shared value \"score\" when the entity called Player touches it. Its Collectible says who and how much.");
+        return coin;
+    });
+
+    // An invisible box that does something when the Player walks into it: what, is chosen in its When Then.
+    editor.registry.addCreateEntry(nullptr, "Gameplay/Trigger Zone", [](EditorContext& context) {
+        Scene& scene = context.engine.scene;
+        SceneDocument& document = context.scene;
+        Entity zone = document.create(Primitive::Empty);
+        if (Name* name = scene.get<Name>(zone)) name->value = "Trigger Zone";
+        Collider box = Collider::box(Vec3{1.5f, 1.0f, 1.5f});
+        box.offset = Vec3{0, 1.0f, 0};
+        box.isTrigger = true;
+        scene.add(zone, box);
+        kit::WhenThen rule;
+        rule.when = "Something enters";
+        rule.who = "Player";
+        scene.add(zone, rule);
+        scene.updateTransforms();
+        document.select(zone);
+        document.markChanged();
+        context.notify("Made a Trigger Zone: its When Then (in the Inspector) says what happens when the Player enters. Its box shows in green in the Scene view.");
+        return zone;
+    });
+
+    // The end of the level: a message when the score is reached, and the next scene if there is one.
+    editor.registry.addCreateEntry(nullptr, "Gameplay/Goal", [](EditorContext& context) {
+        Scene& scene = context.engine.scene;
+        SceneDocument& document = context.scene;
+        Entity goal = document.create(Primitive::Empty);
+        if (Name* name = scene.get<Name>(goal)) name->value = "Goal";
+        kit::Goal rule;
+        rule.target = 3;
+        scene.add(goal, rule);
+        document.select(goal);
+        document.markChanged();
+        context.notify("Made a Goal: when the shared value \"score\" reaches 3 it says \"You win!\". Its Goal says which value, how much, and what comes next.");
+        return goal;
+    });
 }
 
 }  // namespace molten::editor

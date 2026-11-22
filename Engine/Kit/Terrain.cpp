@@ -225,6 +225,6 @@ void Terrain::sculpt(Vec2 local, float radius, float amount, TerrainBrush brush,
 
 using namespace molten::kit;
 
-MOLTEN_COMPONENT(Terrain, MOLTEN_FIELD(heights).picks("terrain").help("The file of its heights in Assets: Terrains/Island.terrain. Made when it is first shaped"),
+MOLTEN_COMPONENT(Terrain, MOLTEN_FIELD(heights).picks("terrain").hidden().help("The file of its heights in Assets: Terrains/Island.terrain. Made when it is first shaped"),
                  MOLTEN_FIELD(size).help("Meters across x and z"), MOLTEN_FIELD(resolution).range(2, 1024).help("Squares along each side"),
                  MOLTEN_FIELD(uvTiling).range(0.1f, 200).help("Meters per repeat of its material's texture"), MOLTEN_FIELD(hasCollider))

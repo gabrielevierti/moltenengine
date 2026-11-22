@@ -1,0 +1,1 @@
+A light aeroplane, a runway and eight rings in the sky. Hold Shift for power, pull back with S at 110 km/h, and fly through them all. No code: every part is in the Inspector.

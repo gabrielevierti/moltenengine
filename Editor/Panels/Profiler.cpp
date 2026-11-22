@@ -7,6 +7,10 @@
 // bar is clicked (click it again, or Live, to follow the frames again).
 #include "Editor.hpp"
 #include "Panels/Widgets.hpp"
+#include "Physics/Physics.hpp"
+#include "Rendering/Material.hpp"
+#include "Rendering/Mesh.hpp"
+#include "Rendering/Renderer.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -63,6 +67,61 @@ public:
     }
 
     void draw(EditorContext& editor) override {
+        // Three pages: the frame's time, what the scene holds, what it weighs.
+        if (ImGui::BeginTabBar("##profiler")) {
+            if (ImGui::BeginTabItem("Frame")) {
+                drawFrame(editor);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Scene")) {
+                drawStatistics(editor);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Memory")) {
+                drawSceneWeightPage(editor);
+                ImGui::EndTabItem();
+            }
+            ImGui::EndTabBar();
+        }
+    }
+
+private:
+    /// What the scene holds and what drawing it took, this frame.
+    void drawStatistics(EditorContext& editor) {
+        Scene& scene = editor.engine.scene;
+        size_t triangles = 0;
+        scene.each<MeshRenderer>([&](Entity, MeshRenderer& renderer) {
+            if (renderer.mesh && renderer.isVisible) triangles += renderer.mesh->indexCount() / 3;
+        });
+        const RenderStats& stats = editor.engine.renderer().stats;
+        auto row = [](const char* name, size_t value, const char* icon) {
+            ImVec2 at = ImGui::GetCursorScreenPos();
+            ui::drawIcon(ImGui::GetWindowDrawList(), ImVec2(at.x + 8, at.y + ImGui::GetTextLineHeight() * 0.5f), 12, icon, ImGui::GetColorU32(ImGuiCol_Text));
+            ImGui::SetCursorScreenPos(ImVec2(at.x + 22, at.y));
+            ImGui::TextUnformatted(name);
+            ImGui::SameLine(200);
+            ImGui::Text("%zu", value);
+        };
+        ui::subheading("The Scene");
+        row("Entities", editor.scene.entities().size(), "axes");
+        row("Meshes", scene.count<MeshRenderer>(), "cube");
+        row("Triangles", triangles, "cube");
+        row("Lights", scene.count<Light>(), "light");
+        row("Colliders", scene.count<Collider>(), "collider");
+        row("Bodies", scene.count<RigidBody>(), "physics");
+        row("Materials", editor.scene.materials.size(), "material");
+        // Every picture drawn in the frame together: the Scene and the Game view, when both show.
+        ui::subheading("The Last Frame");
+        row("Draw calls", size_t(stats.drawCalls), "cube");
+        row("Shadow draws", size_t(stats.shadowDraws), "light");
+        row("Depth draws", size_t(stats.depthDraws), "cube");
+        row("Full-screen passes", size_t(stats.passes), "eye");
+        row("Interface and lines", size_t(stats.overlayDraws), "ui");
+        row("Drawn", size_t(stats.visibleObjects), "eye");
+        row("Culled", size_t(stats.culledObjects), "eye");
+    }
+
+    void drawFrame(EditorContext& editor) {
         Profiler& profiler = editor.engine.profiler;
         profiler.isEnabled = isRecording_;
         std::vector<const Profiler::Frame*> frames = profiler.frames();
@@ -180,7 +239,6 @@ public:
         }
     }
 
-private:
     bool isRecording_ = true;
     uint64_t chosen_ = 0;               // the frame looked at; 0 for the average of the last second
 };

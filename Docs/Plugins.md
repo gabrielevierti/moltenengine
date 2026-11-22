@@ -7,11 +7,11 @@ A plugin is a dynamic library the editor loads at start. It is written in C++ ag
 | A dockable window | `registry.addPanel` | a level statistics window |
 | Menu items | `registry.addMenuItem` | "Tools/Drop Selection to Ground" |
 | A component in the inspector | `registry.addComponent<T>` | fields of your own component, with Add and Remove |
-| Entries of the Create menu | `registry.addCreateEntry` | "Gameplay/Spawn Point" |
+| Entries of the Entity menu (and the + of the Hierarchy) | `registry.addCreateEntry` | "Gameplay/Spawn Point" |
 | Drawings over the 3D view | `registry.addViewportOverlay` | labels, paths, zones |
 | Work every frame | `Plugin::onUpdate` | shortcuts, watching files |
 
-`Plugins/SceneTools/SceneTools.cpp` does four of these in a hundred lines. This page walks through it.
+`Plugins/SceneTools/SceneTools.cpp` does four of these in a hundred lines. This page walks through it. It is an example to learn from, not part of the editor: it is built only when asked for (`cmake -DMOLTEN_BUILD_EXAMPLE_PLUGIN=ON`), and then adds a Tools menu.
 
 ## The smallest plugin
 

@@ -1,4 +1,5 @@
 #include "Rendering/Renderer.hpp"
+#include "Rendering/Quality.hpp"
 #include "Water/Ocean.hpp"
 
 #include <cstring>
@@ -8,6 +9,7 @@
 #include "Scene/Components.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <functional>
 
 namespace molten {
@@ -18,6 +20,8 @@ Renderer::Renderer(GraphicsDevice& device, const std::string& shaderDirectory)
     for (FrameAllocator& allocator : allocators_) allocator.initialize(device.device(), 1 << 20);
     white_ = Texture::solidColor(device, Vec4{1, 1, 1, 1});
     flatNormal_ = Texture::solidColor(device, Vec4{0.5f, 0.5f, 1.0f, 1.0f});
+    // The clouds' noise: half a second of arithmetic, done while the rest of the engine starts.
+    cloudNoiseMaking_ = std::async(std::launch::async, [] { return makeCloudNoise(); });
 }
 
 Renderer::~Renderer() {
@@ -126,9 +130,11 @@ void Renderer::ensureTargets(int width, int height) {
         prepassDepth_ = prepassNormal_ = occlusionRaw_ = occlusion_ = postColor_ = NS::SharedPtr<MTL::Texture>();
     }
     // How bright the scene is: a small picture of its brightness, averaged down to one pixel.
-    luminance_ = device_.makeRenderTarget(MTL::PixelFormatR16Float, 64, 64, 1, false, 7);
-    adapted_[0] = device_.makeRenderTarget(MTL::PixelFormatR16Float, 1, 1);
-    adapted_[1] = device_.makeRenderTarget(MTL::PixelFormatR16Float, 1, 1);
+    // Their size does not follow the view's, and the exposure they keep must not start over
+    // while a view is being resized (that blacked the picture out while a divider was dragged).
+    if (!luminance_) luminance_ = device_.makeRenderTarget(MTL::PixelFormatR16Float, 64, 64, 1, false, 7);
+    if (!adapted_[0]) adapted_[0] = device_.makeRenderTarget(MTL::PixelFormatR16Float, 1, 1);
+    if (!adapted_[1]) adapted_[1] = device_.makeRenderTarget(MTL::PixelFormatR16Float, 1, 1);
     hasPreviousView_ = false;
 
     // The bloom chain: half size, quarter size, and so on.
@@ -199,7 +205,8 @@ void Renderer::collectItems(Scene& scene, const View& view, std::vector<DrawItem
         if (!renderer.isVisible || !renderer.mesh || renderer.isBeyondItsDetail) return;
         // Many copies: one item each, those too far away left out.
         if (const MeshInstances* copies = scene.get<MeshInstances>(entity)) {
-            float reach = copies->drawDistance > 0 ? copies->drawDistance * copies->drawDistance : 1e30f;
+            float far = copies->drawDistance * detailDistanceScale();
+            float reach = copies->drawDistance > 0 ? far * far : 1e30f;
             const Material* material = renderer.material ? renderer.material.get() : &defaultMaterial_;
             const AABB local = renderer.mesh->bounds();
             for (const Mat4& place : copies->places) {
@@ -219,6 +226,9 @@ void Renderer::collectItems(Scene& scene, const View& view, std::vector<DrawItem
         DrawItem item;
         item.mesh = renderer.mesh.get();
         item.material = renderer.material ? renderer.material.get() : &defaultMaterial_;
+        // Water on a flat mesh of few vertices (a plane): drawn as a fine grid of the same size,
+        // so that its waves can rise and fall.
+        if (item.material->isWater) item.mesh = waterGridFor(renderer.mesh.get());
         item.world = transform.world;
         item.tint = renderer.tint;
         item.bounds = renderer.mesh->bounds().transformed(transform.world);
@@ -226,6 +236,22 @@ void Renderer::collectItems(Scene& scene, const View& view, std::vector<DrawItem
         item.castsShadows = renderer.castsShadows;
         items.push_back(item);
     });
+}
+
+Mesh* Renderer::waterGridFor(Mesh* mesh) const {
+    const AABB& box = mesh->bounds();
+    Vec3 size = box.max - box.min;
+    bool isFlat = size.y <= std::max(size.x, size.z) * 0.01f + 1e-4f;
+    if (!isFlat || mesh->isDynamic || mesh->indexCount() > 6000 || size.x <= 0 || size.z <= 0) return mesh;
+    auto found = waterGrids_.find(mesh);
+    if (found != waterGrids_.end()) return found->second.get();
+    MeshData grid = MeshData::plane(size.x, size.z, 160, 1.0f);
+    Vec3 center = box.center();
+    for (Vec3& p : grid.positions) p += Vec3{center.x, box.max.y, center.z};
+    auto made = std::make_unique<Mesh>(device_, grid);
+    Mesh* kept = made.get();
+    waterGrids_[mesh] = std::move(made);
+    return kept;
 }
 
 int Renderer::collectLights(Scene& scene, gpu::LightData* lights, gpu::FrameUniforms& frame, bool& sunCastsShadows) const {
@@ -247,6 +273,8 @@ int Renderer::collectLights(Scene& scene, gpu::LightData* lights, gpu::FrameUnif
         float cosOuter = std::cos(std::max(light.outerConeAngle, light.innerConeAngle + 0.001f));
         data.spotScale = 1.0f / (cosInner - cosOuter);
         data.spotOffset = -cosOuter * data.spotScale;
+        data.areaWidth = std::max(light.areaSize.x, 0.01f) * std::abs(transform.scale.x);
+        data.areaHeight = std::max(light.areaSize.y, 0.01f) * std::abs(transform.scale.y);
 
         // The first directional light is the sun: it lights the sky and may cast shadows.
         if (light.type == LightType::Directional && !hasSun) {
@@ -262,12 +290,26 @@ int Renderer::collectLights(Scene& scene, gpu::LightData* lights, gpu::FrameUnif
     if (hasSun) {
         lights[count++] = sun;                  // the shaders expect the sun first
         frame.sunDirection = sun.direction;
+        frame.skySunDirection = sun.direction;
         frame.sunColor = sun.color;
-        // Low in the sky, the sun's light crosses more air: gold, then orange and red, then none.
-        if (settings.sky.sunsetColors) frame.sunColor = sun.color * sunlightThroughAir(-sun.direction.y);
+        if (settings.sky.sunsetColors) {
+            // Low in the sky, the sun's light crosses more air: gold, then orange and red, then none.
+            frame.sunColor = sun.color * sunlightThroughAir(-sun.direction.y);
+            // Once it has set, the moon across the sky from it lights the scene: cold, dim, with its own shadows.
+            float night = std::clamp((0.02f - (-sun.direction.y)) / 0.14f, 0.0f, 1.0f);
+            night = night * night * (3 - 2 * night);
+            Vec3 moonlight = Vec3{0.55f, 0.66f, 1.0f} * (0.16f * std::max(settings.sky.moon, 0.0f) * night);
+            auto brightness = [](Vec3 c) { return c.x * 0.2126f + c.y * 0.7152f + c.z * 0.0722f; };
+            if (brightness(moonlight) > brightness(frame.sunColor)) {
+                frame.sunDirection = -sun.direction;
+                frame.sunColor = moonlight;
+                lights[0].direction = frame.sunDirection;
+            }
+        }
         lights[0].color = frame.sunColor;
     } else {
         frame.sunDirection = Vec3{0, -1, 0};
+        frame.skySunDirection = Vec3{0, -1, 0};
         frame.sunColor = Vec3{0, 0, 0};
     }
     for (const gpu::LightData& light : others) {
@@ -356,7 +398,7 @@ bool Renderer::buildSceneAccelerationStructure(MTL::CommandBuffer* commandBuffer
     for (const DrawItem& item : items) {
         const MTL::AccelerationStructure* meshStructure = item.mesh->accelerationStructure();
         // Glass and other blended materials let light through: they cast no shadow here either.
-        if (!meshStructure || !item.castsShadows || item.material->alphaMode == AlphaMode::Blend) continue;
+        if (!meshStructure || !item.castsShadows || item.material->isSeenThrough()) continue;
         auto found = std::find(tracedMeshes_.begin(), tracedMeshes_.end(), meshStructure);
         uint32_t meshIndex = uint32_t(found - tracedMeshes_.begin());
         if (found == tracedMeshes_.end()) tracedMeshes_.push_back(meshStructure);
@@ -410,18 +452,51 @@ bool Renderer::buildSceneAccelerationStructure(MTL::CommandBuffer* commandBuffer
     return true;
 }
 
+void Renderer::takeCloudNoise() {
+    if (!cloudNoiseMaking_.valid() || cloudNoiseMaking_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+    CloudNoise noise = cloudNoiseMaking_.get();
+    if (noise.isEmpty()) return;
+    // A block of points with all its smaller copies, which the far clouds are read from.
+    auto makeBlock = [&](int width, int height, int depth, std::vector<uint8_t> pixels) {
+        auto descriptor = NS::TransferPtr(MTL::TextureDescriptor::alloc()->init());
+        descriptor->setTextureType(MTL::TextureType3D);
+        descriptor->setPixelFormat(MTL::PixelFormatRGBA8Unorm);
+        descriptor->setWidth(NS::UInteger(width));
+        descriptor->setHeight(NS::UInteger(height));
+        descriptor->setDepth(NS::UInteger(depth));
+        int levels = 1;
+        while ((1 << levels) <= std::max(width, std::max(height, depth))) levels++;
+        descriptor->setMipmapLevelCount(NS::UInteger(levels));
+        descriptor->setUsage(MTL::TextureUsageShaderRead);
+        descriptor->setStorageMode(MTL::StorageModeShared);
+        NS::SharedPtr<MTL::Texture> texture = NS::TransferPtr(device_.device()->newTexture(descriptor.get()));
+        for (int level = 0; texture && level < levels && !pixels.empty(); level++) {
+            texture->replaceRegion(MTL::Region::Make3D(0, 0, 0, NS::UInteger(width), NS::UInteger(height), NS::UInteger(depth)), NS::UInteger(level), 0,
+                                   pixels.data(), NS::UInteger(width) * 4, NS::UInteger(width) * NS::UInteger(height) * 4);
+            pixels = halvedNoise(pixels, width, height, depth);
+        }
+        return texture;
+    };
+    cloudShape_ = makeBlock(noise.shapeWidth, noise.shapeHeight, noise.shapeDepth, std::move(noise.shape));
+    cloudDetail_ = makeBlock(noise.detailSize, noise.detailSize, noise.detailSize, std::move(noise.detail));
+    if (!cloudShape_ || !cloudDetail_) cloudShape_ = cloudDetail_ = NS::SharedPtr<MTL::Texture>();
+}
+
 void Renderer::adjustDynamicScale() {
-    if (!settings.dynamicResolution) {
+    // The scene's own settings say whether, or, for a scene that does not ask, the project's quality.
+    bool isOn = settings.dynamicResolution;
+    float targetFrameRate = settings.targetFrameRate, lowest = settings.lowestDynamicScale;
+    if (quality) quality->dynamicResolutionFor(isOn, targetFrameRate, lowest);
+    if (!isOn) {
         dynamicScale_ = 1.0f;
         return;
     }
-    // In steps, and not more often than every half second: each change makes new targets.
+    // Not more often than every third of a second: each change makes new pictures to draw into,
+    // and the GPU's time is that of a frame drawn a few frames ago.
     framesSinceScaleChange_++;
-    float gpu = lastGpuMilliseconds(), budget = 1000.0f / std::max(settings.targetFrameRate, 1.0f);
-    if (gpu <= 0 || framesSinceScaleChange_ < 30) return;
-    float lowest = std::clamp(settings.lowestDynamicScale, 0.25f, 1.0f), before = dynamicScale_;
-    if (gpu > budget * 0.92f) dynamicScale_ = std::max(lowest, dynamicScale_ - 0.1f);           // behind: smaller, quickly
-    else if (gpu < budget * 0.7f) dynamicScale_ = std::min(1.0f, dynamicScale_ + 0.05f);      // room to spare: larger, slowly
+    if (framesSinceScaleChange_ < 20) return;
+    float before = dynamicScale_;
+    dynamicScale_ = nextDynamicScale(dynamicScale_, lastGpuMilliseconds(), targetFrameRate, lowest);
     if (dynamicScale_ != before) framesSinceScaleChange_ = 0;
 }
 
@@ -442,6 +517,10 @@ void Renderer::swapTargets(size_t slot) {
     std::swap(kept.bloom, bloom_);
     std::swap(kept.upscaler, upscaler_);
     std::swap(kept.postColor, postColor_);
+    std::swap(kept.cloudColor, cloudColor_);
+    std::swap(kept.tracedLight[0], tracedLight_[0]);
+    std::swap(kept.tracedLight[1], tracedLight_[1]);
+    std::swap(kept.tracedSurface, tracedSurface_);
     std::swap(kept.luminance, luminance_);
     std::swap(kept.adapted[0], adapted_[0]);
     std::swap(kept.adapted[1], adapted_[1]);
@@ -477,6 +556,7 @@ void Renderer::render(Scene& scene, const Canvas& canvas, const RenderTarget& ta
     }
 
     MTL::CommandBuffer* commandBuffer = device_.queue()->commandBuffer();
+    takeCloudNoise();
     prepareOcean(commandBuffer, time);
 
     if (views.empty()) {
@@ -492,9 +572,11 @@ void Renderer::render(Scene& scene, const Canvas& canvas, const RenderTarget& ta
         const Rect viewportBefore = sceneViewport;
         sceneViewport = Rect{};             // a view fills its texture
         viewColors_.resize(views.size());
+        viewStats_.assign(views.size(), RenderStats{});
         for (size_t i = 0; i < views.size(); i++) {
             const SceneView& wanted = views[i];
             if (wanted.width < 1 || wanted.height < 1) continue;
+            const RenderStats before = stats;
             NS::SharedPtr<MTL::Texture>& color = viewColors_[i];
             if (!color || int(color->width()) != wanted.width || int(color->height()) != wanted.height) {
                 // Whoever was handed the old texture (an interface drawn earlier in this
@@ -509,6 +591,7 @@ void Renderer::render(Scene& scene, const Canvas& canvas, const RenderTarget& ta
             swapTargets(i + 1);
             renderView(commandBuffer, scene, int(i) == canvasView ? canvas : noCanvas, viewTarget, time, false);
             swapTargets(i + 1);
+            viewStats_[i] = stats.since(before);
         }
         cameraOverride = cameraBefore;
         sceneViewport = viewportBefore;
@@ -532,6 +615,19 @@ void Renderer::render(Scene& scene, const Canvas& canvas, const RenderTarget& ta
 
 void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const Canvas& canvas, const RenderTarget& target, double time,
                           bool withOverlay) {
+    // The project's quality, over what the scene says, for this view only: the scene keeps its own.
+    struct QualityScope {
+        RenderSettings& settings;
+        RenderSettings saved;
+        bool isOn;
+        QualityScope(RenderSettings& s, const GameQuality* quality) : settings(s), saved(s), isOn(quality != nullptr) {
+            if (quality) quality->applyTo(settings);
+        }
+        ~QualityScope() {
+            if (isOn) settings = saved;
+        }
+    } qualityScope(settings, quality);
+
     Rect area = sceneRect(target.texture);
     float scale = settings.renderScale * dynamicScale_ * (settings.followsDeviceHeat ? heatScale : 1.0f);
     int width = std::max(1, int(float(area.width) * scale));
@@ -555,13 +651,23 @@ void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const
     int lightCount = collectLights(scene, lights, frame, sunCastsShadows);
     frame.lightCount = uint32_t(lightCount);
     stats.lights = std::max(stats.lights, lightCount);
+    if (withOverlay) {
+        // The main view: where its sun is, for the lens flare of the final pass.
+        flareSunDirection_ = frame.sunDirection;
+        flareSunColor_ = frame.sunColor;
+        flareViewProjection_ = view.viewProjection;
+    }
 
     // Ray-traced sun shadows replace the shadow maps where they are available and asked for.
     bool wantsTracedShadows = settings.shadowsEnabled && sunCastsShadows && settings.rayTracedShadows && canTraceRays();
 
     Cascades cascades;
+    std::vector<ShadowCaster> casters;
     if (settings.shadowsEnabled && sunCastsShadows && !wantsTracedShadows) {
         cascades = computeCascades(view.world, view.fovY, view.aspect, view.nearPlane, frame.sunDirection, settings.cascades);
+        casters = findShadowCasters(items, cascades);
+        // Nothing whose shadow reaches the view: no maps to draw, and none for the scene to read.
+        if (casters.empty()) cascades.count = 0;
         frame.cascadeCount = uint32_t(cascades.count);
         for (int i = 0; i < cascades.count; i++) {
             frame.cascadeViewProjection[i] = cascades.viewProjection[i];
@@ -587,14 +693,31 @@ void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const
     frame.fogHeightFalloff = std::max(settings.fogHeightFalloff, 0.0f);
     frame.fogSunScatter = std::max(settings.fogSunScatter, 0.0f);
     frame.cloudCoverage = settings.sky.cloudCoverage;
-    frame.volumetricClouds = settings.sky.cloudsHaveDepth ? 1u : 0u;
+    // Clouds with depth, in so many steps; none where they cannot be walked (the noise is still
+    // being made, the shaders are without the extras): the flat layer then.
+    const bool hasCloudsWithDepth = marchesClouds();
+    frame.volumetricClouds = hasCloudsWithDepth ? uint32_t(std::clamp(settings.sky.cloudSteps, 16, 128)) : 0u;
     frame.fogShaftSteps = settings.fogDensity > 0 ? uint32_t(std::clamp(settings.fogShaftSteps, 0, 48)) : 0u;
     frame.cloudScale = settings.sky.cloudScale;
     frame.cloudOffset = settings.sky.cloudSpeed * float(time);
     frame.sunAngularRadius = settings.sky.sunAngularRadius;
-    frame.physicalSky = settings.sky.isPhysical ? 1u : 0u;
+    frame.sceneDepthReady = wantsDepth() ? 1.0f : 0.0f;
+    frame.cameraPosition = view.position;
+    frame.cloudBase = std::max(settings.sky.cloudHeight, 50.0f);
+    frame.cloudTop = frame.cloudBase + std::max(settings.sky.cloudThickness, 50.0f);
+    // Inside the clouds (a plane flying through them): the world itself fades into their white.
+    if (settings.sky.cloudsHaveDepth && settings.sky.cloudCoverage > 0) {
+        float y = view.world.columns[3].y;
+        float inside = std::clamp((y - frame.cloudBase) / 80.0f, 0.0f, 1.0f) * std::clamp((frame.cloudTop - y) / 80.0f, 0.0f, 1.0f);
+        if (inside > 0) {
+            frame.fogDensity = std::max(frame.fogDensity, inside * settings.sky.cloudCoverage * 0.02f);
+            Vec3 white = frame.skyHorizonColor * 1.2f + frame.sunColor * 0.08f;
+            frame.fogColor = frame.fogColor + (white - frame.fogColor) * inside;
+            frame.fogHeightFalloff = 0;
+        }
+    }
     frame.sunsetColors = settings.sky.sunsetColors ? 1u : 0u;
-    frame.skyHaze = std::clamp(settings.sky.haze, 0.0f, 1.0f);
+    frame.moonBrightness = settings.sky.sunsetColors ? std::max(settings.sky.moon, 0.0f) : 0.0f;
     frame.starBrightness = std::max(settings.sky.stars, 0.0f);
     frame.starTime = float(std::fmod(time, 86400.0));
     float deltaTime = lastViewTime_ >= 0 ? float(std::clamp(time - lastViewTime_, 0.0, 0.25)) : 0.0f;
@@ -610,7 +733,7 @@ void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const
             continue;
         }
         stats.visibleObjects++;
-        (item.material->alphaMode == AlphaMode::Blend ? transparentItems : opaqueItems).push_back(&item);
+        (item.material->isSeenThrough() ? transparentItems : opaqueItems).push_back(&item);
     }
     // Transparent surfaces must be blended from the farthest to the nearest.
     std::sort(transparentItems.begin(), transparentItems.end(),
@@ -634,6 +757,11 @@ void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const
     frame.reflectionMaxRoughness = std::clamp(settings.reflectionMaxRoughness, 0.01f, 1.0f);
     frame.reflectionStrength = std::max(settings.reflectionStrength, 0.0f);
     frame.bounceIntensity = tracesRaysThisFrame_ && settings.rayTracedOcclusion && settings.rayTracedBounce ? std::max(settings.bounceIntensity, 0.0f) : 0.0f;
+    // The light around things (the sky's, hidden in corners; what is bounced): traced before the
+    // scene for one pixel in four and smoothed, where that pass can be drawn. The scene's pass
+    // then reads it and sends no rays for it; and the screen's own ambient occlusion is not needed.
+    const bool tracesAmbientFirst = frame.occlusionRayCount > 0 && wantsTracedAmbient() && prepassDepth_ && prepassNormal_ && canTraceAmbientFirst();
+    frame.tracedAmbientReady = tracesAmbientFirst ? 1u : 0u;
 
     FrameAllocator::Allocation passUniforms = allocator().copy(
         makePassUniforms(view.view, view.projection, view.position, width, height, view.nearPlane, view.farPlane, time));
@@ -641,10 +769,10 @@ void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const
     FrameAllocator::Allocation lightBuffer = allocator().copyArray(lights, size_t(lightCount));
 
     // What each pass costs to prepare and encode on the CPU (the GPU's time is the frame's, below).
-    environment_.updateIfNeeded(commandBuffer, frame);
+    environment_.updateIfNeeded(commandBuffer, frame, hasCloudsWithDepth ? cloudShape_.get() : nullptr, hasCloudsWithDepth ? cloudDetail_.get() : nullptr);
     if (frame.cascadeCount > 0) {
         Profiler::Scope timed(timing, "Shadow maps");
-        renderShadows(commandBuffer, items, cascades);
+        renderShadows(commandBuffer, casters, cascades, passUniforms, frameUniforms);
     }
     // Decals this frame: they need the depth of what is under them.
     hasDecals_ = false;
@@ -655,7 +783,17 @@ void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const
     if (wantsDepth()) {
         Profiler::Scope timed(timing, "Ambient occlusion");
         renderPrepass(commandBuffer, opaque, passUniforms);
-        if (settings.ambientOcclusionEnabled) renderOcclusion(commandBuffer, opaque, view, passUniforms);
+        if (settings.ambientOcclusionEnabled && !tracesAmbientFirst) renderOcclusion(commandBuffer, opaque, view, passUniforms);
+    }
+    tracedLightDrawn_ = nullptr;
+    if (tracesAmbientFirst) {
+        Profiler::Scope timed(timing, "Traced ambient light");
+        tracedLightDrawn_ = renderTracedAmbient(commandBuffer, view, width, height, time, frameUniforms, frame.bounceIntensity > 0);
+    }
+    cloudsDrawn_ = false;
+    if (hasCloudsWithDepth) {
+        Profiler::Scope timed(timing, "Clouds");
+        cloudsDrawn_ = renderClouds(commandBuffer, view, width, height, time, frameUniforms);
     }
     {
         Profiler::Scope timed(timing, "Scene pass");
@@ -726,6 +864,7 @@ void Renderer::prepareOcean(MTL::CommandBuffer* commandBuffer, double time) {
         defaultOcean_->update(float(std::fmod(time, 3600.0)));
         showOcean(*defaultOcean_, Vec2{0, 0});
     }
+    waterLastFrame_ = waterSeen_;
     waterSeen_ = false;
     oceanTexture_ = nullptr;
     if (!oceanFed_ || oceanSize_ < 2) return;

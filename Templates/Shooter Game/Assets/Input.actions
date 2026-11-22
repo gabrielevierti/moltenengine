@@ -1,0 +1,8 @@
+molten-input 1
+axis "moveX" negative A Left positive D Right gamepad LeftX joystick 0
+axis "moveZ" negative W Up positive S Down gamepad LeftY inverted joystick 1
+button "jump" keys Space gamepad A
+button "fire" keys gamepad RightShoulder mouse Left
+button "pause" keys Escape gamepad Start
+button "reload" keys R gamepad X
+button "run" keys LeftShift gamepad LeftStick

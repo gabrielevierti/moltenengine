@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <optional>
 #include <random>
 
 namespace molten {
@@ -335,6 +336,45 @@ std::string AssetDatabase::move(const std::string& path, const std::string& newP
     }
     refresh();
     return newPath;
+}
+
+std::string AssetDatabase::replaceReferences(const std::string& text, const std::string& from, const std::string& to) {
+    if (from.empty() || from == to) return text;
+    std::string out;
+    out.reserve(text.size());
+    size_t at = 0;
+    while (true) {
+        size_t found = text.find(from, at);
+        if (found == std::string::npos) break;
+        size_t end = found + from.size();
+        char before = found > 0 ? text[found - 1] : '\0';
+        char after = end < text.size() ? text[end] : '\0';
+        // A whole path: it starts a quoted value or an item of a comma list, and ends one, or
+        // goes on into the folder ("Models/" in "Models/car.obj").
+        bool isWhole = (before == '"' || before == ',') && (after == '"' || after == ',' || after == '/');
+        out.append(text, at, found - at);
+        out += isWhole ? to : from;
+        at = end;
+    }
+    out.append(text, at, std::string::npos);
+    return out;
+}
+
+int AssetDatabase::retargetReferences(const std::string& from, const std::string& to) {
+    int written = 0;
+    for (const AssetInfo& asset : assets_) {
+        switch (asset.type) {
+            case AssetType::Scene: case AssetType::Prefab: case AssetType::Material: case AssetType::Effect: case AssetType::Animation:
+            case AssetType::Controller: case AssetType::Timeline: case AssetType::Graph: break;
+            default: continue;
+        }
+        std::string file = absolutePath(asset.path);
+        std::optional<std::string> text = text::readFile(file);
+        if (!text || text->find(from) == std::string::npos) continue;
+        std::string changed = replaceReferences(*text, from, to);
+        if (changed != *text && text::writeFile(file, changed)) written++;
+    }
+    return written;
 }
 
 std::string AssetDatabase::importFile(const std::string& sourcePath, const std::string& folder, std::string* error) {

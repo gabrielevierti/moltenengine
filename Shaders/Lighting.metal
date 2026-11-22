@@ -88,6 +88,19 @@ static LightSample sampleLight(LightData light, float3 position) {
     }
 
     float3 toLight = light.position - position;
+    float areaFacing = 1.0, area = 0.0;
+    if (light.type == MMLightArea) {
+        // A rectangle: the light comes from the point of it nearest this one, as much as the
+        // rectangle covers of the sky seen from here, and only from its front.
+        float3 n = light.direction;
+        float3 right = normalize(abs(n.y) > 0.99 ? cross(n, float3(1.0, 0.0, 0.0)) : cross(n, float3(0.0, 1.0, 0.0)));
+        float3 up = cross(right, n);
+        float3 fromMiddle = position - light.position;
+        float2 onIt = clamp(float2(dot(fromMiddle, right), dot(fromMiddle, up)), -0.5 * float2(light.areaWidth, light.areaHeight), 0.5 * float2(light.areaWidth, light.areaHeight));
+        toLight = light.position + right * onIt.x + up * onIt.y - position;
+        areaFacing = saturate(dot(normalize(position - light.position), n) * 4.0);
+        area = light.areaWidth * light.areaHeight;
+    }
     float distanceSquared = max(dot(toLight, toLight), 0.0001);
     float distance = sqrt(distanceSquared);
     result.direction = toLight / distance;
@@ -98,6 +111,7 @@ static LightSample sampleLight(LightData light, float3 position) {
     float ratio = distance / light.range;
     float window = saturate(1.0 - ratio * ratio * ratio * ratio);
     float attenuation = window * window / (distanceSquared + 1.0);
+    if (light.type == MMLightArea) attenuation = window * window * areaFacing * area / (distanceSquared + area);
 
     if (light.type == MMLightSpot) {
         float cosAngle = dot(-result.direction, light.direction);
@@ -161,28 +175,26 @@ static float sunVisibility(float3 worldPosition, float3 normal, float viewDepth,
 // different place on the disk gives shadows that are sharp where an object touches
 // the ground and soft far from it, as real ones are.
 
+
 #if MOLTEN_RAYTRACING
 #include <metal_raytracing>
 
-// A number in [0, 1) that differs from pixel to pixel in a pattern the eye reads as
-// even grain and not as blotches ("interleaved gradient noise", Jimenez 2014).
-static float pixelNoise(float2 pixel) {
-    return fract(52.9829189 * fract(dot(pixel, float2(0.06711056, 0.00583715))));
-}
-
 // How much sunlight reaches the point: 0 in full shadow, 1 fully lit.
 // `toSun` points from the surface to the sun; `pixel` is the pixel's position on screen.
+//
+// Nearly every pixel is either well inside the light or well inside a shadow, and for
+// those one ray says all there is to say. Only along the edge of a shadow, where part of
+// the sun's disk shows, do more rays have something to add. Which pixels are on an edge is
+// read off the first ray itself: the GPU shades pixels four at a time (two by two, which
+// is how it knows how fast anything changes across the screen), and where the four first
+// rays do not all give the same answer, an edge passes between them. So a frame costs
+// about one ray a pixel however smooth its shadows' edges are asked to be.
 static float sunVisibilityTraced(float3 worldPosition, float3 normal, float3 toSun, float viewDepth, float2 pixel,
                                  constant FrameUniforms &frame,
                                  raytracing::instance_acceleration_structure scene) {
     if (frame.shadowRayCount == 0) {
         return 1.0;
     }
-    // A surface facing away from the sun is dark whatever is in the way: no ray needed.
-    if (dot(normal, toSun) <= 0.0) {
-        return 0.0;
-    }
-
     // Any hit will do: the question is only whether the sun is hidden, not by what.
     raytracing::intersector<raytracing::triangle_data, raytracing::instancing> tracer;
     tracer.accept_any_intersection(true);
@@ -205,15 +217,31 @@ static float sunVisibilityTraced(float3 worldPosition, float3 normal, float3 toS
     // by a different angle in each pixel, so that neighbors sample different places and
     // the few rays of each add up to a smooth edge across several pixels.
     float turn = pixelNoise(pixel) * 2.0 * kPi;
-    float lit = 0.0;
-    for (uint i = 0; i < frame.shadowRayCount; i++) {
-        float radius = sqrt((float(i) + 0.5) / float(frame.shadowRayCount)) * diskRadius;
+    float count = float(frame.shadowRayCount);
+
+    // A surface facing away from the sun is dark whatever is in the way: no ray needed.
+    bool faces = dot(normal, toSun) > 0.0;
+    float first = 0.0;
+    if (faces) {
+        float radius = sqrt(0.5 / count) * diskRadius;
+        shadowRay.direction = normalize(toSun + (side * cos(turn) + up * sin(turn)) * radius);
+        raytracing::intersection_result<raytracing::triangle_data, raytracing::instancing> hit = tracer.intersect(shadowRay, scene);
+        first = hit.type == raytracing::intersection_type::none ? 1.0 : 0.0;
+    }
+    // The same answer as the pixels beside it: no edge here, and the one ray was enough.
+    bool onEdge = fwidth(first) > 0.0;
+    if (!faces || !onEdge || frame.shadowRayCount < 2) {
+        return first;
+    }
+    float lit = first;
+    for (uint i = 1; i < frame.shadowRayCount; i++) {
+        float radius = sqrt((float(i) + 0.5) / count) * diskRadius;
         float angle = float(i) * 2.39996323 + turn;             // the golden angle
         shadowRay.direction = normalize(toSun + (side * cos(angle) + up * sin(angle)) * radius);
         raytracing::intersection_result<raytracing::triangle_data, raytracing::instancing> hit = tracer.intersect(shadowRay, scene);
         lit += hit.type == raytracing::intersection_type::none ? 1.0 : 0.0;
     }
-    return lit / float(frame.shadowRayCount);
+    return lit / count;
 }
 
 #if MOLTEN_EXTRAS
@@ -266,12 +294,17 @@ static float4 ambientTraced(float3 worldPosition, float3 normal, float viewDepth
     const float reach = 3.0;                                    // meters: what is farther does not darken a corner
     occlusionRay.max_distance = bounces ? 40.0 : reach;         // but it can still light one
 
+    // Each pixel turns the pattern by its own angle and lifts it by its own amount, so that
+    // the one or two rays of a pixel and those of the pixels round it, which are smoothed
+    // together afterward, cover the whole half-sphere between them.
     float turn = pixelNoise(pixel) * 2.0 * kPi;
+    float lift = pixelNoise(pixel + float2(47.0, 113.0));
+    float count = float(frame.occlusionRayCount);
     float open = 0.0;
     float3 bounced = float3(0.0);
     for (uint i = 0; i < frame.occlusionRayCount; i++) {
         // Spread over the hemisphere, more toward the normal, where light counts for more.
-        float share = (float(i) + 0.5) / float(frame.occlusionRayCount);
+        float share = fract((float(i) + 0.5) / count + lift);
         float radius = sqrt(share);
         float angle = float(i) * 2.39996323 + turn;
         float3 direction = normalize(side * (cos(angle) * radius) + forward * (sin(angle) * radius) + normal * sqrt(max(1.0 - share, 0.0)));
@@ -281,14 +314,21 @@ static float4 ambientTraced(float3 worldPosition, float3 normal, float viewDepth
             open += 1.0;
             continue;
         }
-        // Something near hides more than something at the end of the ray's reach.
-        open += saturate(hit.distance / reach) * 0.6;
+        // Something near hides more than something farther off, and at the end of the short
+        // rays' reach it hides nothing: no step between a ray that just hits and one that just misses.
+        float near = hit.distance / 1.2;
+        float hidden = 1.0 / (1.0 + near * sqrt(near));
+        if (!bounces) {
+            hidden *= 1.0 - smoothstep(0.6 * reach, reach, hit.distance);
+        }
+        open += 1.0 - hidden;
         if (bounces) {
             bounced += tracedSurfaceLight(occlusionRay.origin + direction * hit.distance, -direction, surfaces[hit.instance_id], frame, scene, irradianceMap, linearSampler);
         }
     }
-    float count = float(frame.occlusionRayCount);
-    return float4(bounced * (frame.bounceIntensity / count), open / count);
+    // One ray into a lamp must not put a bright dot on the wall: what comes back is kept within reason.
+    bounced = min(bounced * (frame.bounceIntensity / count), float3(6.0));
+    return float4(bounced, open / count);
 }
 
 // What a smooth surface mirrors: `a` is 0 where the mirrored direction is clear to the
@@ -319,6 +359,58 @@ static float4 reflectionTraced(float3 worldPosition, float3 normal, float3 view,
     float3 seen = tracedSurfaceLight(mirrorRay.origin + mirrorRay.direction * hit.distance, -mirrorRay.direction, surfaces[hit.instance_id], frame, scene,
                                      irradianceMap, linearSampler);
     return float4(seen, 1.0);
+}
+
+// Where in the world a place of the picture is (`uv`: 0 to 1 across and down), `viewDepth`
+// in front of the camera. For any camera, with perspective or without.
+static float3 worldPositionAt(float2 uv, float viewDepth, constant PassUniforms &pass) {
+    float clipZ = pass.projection[3][2] - pass.projection[2][2] * viewDepth;
+    float clipW = pass.projection[3][3] - pass.projection[2][3] * viewDepth;
+    float4 world = pass.inverseViewProjection * float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, clipZ / clipW, 1.0);
+    return world.xyz / world.w;
+}
+
+// How much the surface found at one pixel of the traced light's picture (`there`: which way
+// it faces and how far it is; at `uv`) is the surface at `position` facing `normal`: 1 on
+// the same plane and facing the same way, falling off with its distance from that plane and
+// with the angle between the two. A road seen at a low angle stays one surface from here to
+// the horizon; the wall that rises from it, and the car that stands on it, are others.
+static float sameSurface(float4 there, float2 uv, float3 position, float3 normal, float viewDepth, float sharpness, constant PassUniforms &pass) {
+    float3 thereAt = worldPositionAt(uv, there.a, pass);
+    float offPlane = abs(dot(normal, thereAt - position));
+    float facing = saturate(dot(there.xyz, normal));
+    return exp(-offPlane / (viewDepth * 0.01 + 0.01)) * pow(facing, sharpness);
+}
+
+// The light around a pixel, where it was traced before the scene at half the size and
+// smoothed (Traced.metal): read for this pixel from the four pixels of that smaller picture
+// nearest to it, each counted for as much as its surface is this one, so that the shade
+// under a car does not spill onto the road beside it, nor the light of a wall onto what
+// stands in front of it. Where none of the four is this surface (glass, which is not in
+// that picture; a wire too thin for it), the sky's light, unhidden.
+static float4 tracedAmbientAt(float2 pixel, float3 position, float3 normal, float viewDepth, constant PassUniforms &pass,
+                              texture2d<float> tracedLight, texture2d<float> tracedSurface) {
+    float2 size = float2(float(tracedLight.get_width()), float(tracedLight.get_height()));
+    float2 at = pixel / pass.viewportSize * size - 0.5;
+    float2 corner = floor(at);
+    float2 part = at - corner;
+    int2 last = int2(int(tracedLight.get_width()) - 1, int(tracedLight.get_height()) - 1);
+    float4 sum = float4(0.0);
+    float total = 0.0;
+    for (int j = 0; j < 2; j++) {
+        for (int i = 0; i < 2; i++) {
+            int2 tap = clamp(int2(int(corner.x) + i, int(corner.y) + j), int2(0, 0), last);
+            float4 there = tracedSurface.read(uint2(uint(tap.x), uint(tap.y)));
+            float weight = (i == 0 ? 1.0 - part.x : part.x) * (j == 0 ? 1.0 - part.y : part.y);
+            weight *= sameSurface(there, (float2(float(tap.x), float(tap.y)) + 0.5) / size, position, normal, viewDepth, 2.0, pass);
+            sum += tracedLight.read(uint2(uint(tap.x), uint(tap.y))) * weight;
+            total += weight;
+        }
+    }
+    if (total < 0.0001) {
+        return float4(0.0, 0.0, 0.0, 1.0);
+    }
+    return sum / total;
 }
 #endif
 #endif
@@ -358,12 +450,15 @@ static EnvironmentParts environmentParts(Surface surface, constant FrameUniforms
     return parts;
 }
 
+#if !MOLTEN_EXTRAS
+// Without the extras the two are simply added (with them, shadePixel weighs them itself).
 static float3 environmentLight(Surface surface, constant FrameUniforms &frame,
                                texturecube<float> irradianceMap, texturecube<float> prefilteredMap,
                                texture2d<float> brdfLUT, sampler linearSampler) {
     EnvironmentParts parts = environmentParts(surface, frame, irradianceMap, prefilteredMap, brdfLUT, linearSampler);
     return parts.diffuse + parts.specular;
 }
+#endif
 
 // ---------------------------------------------------------------- fog
 

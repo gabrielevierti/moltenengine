@@ -66,6 +66,13 @@ public:
     std::string rename(const std::string& path, const std::string& newName, std::string* error = nullptr);
     /// Moves a file or folder into another folder. Returns the new path, or "".
     std::string move(const std::string& path, const std::string& newParent, std::string* error = nullptr);
+    /// After `from` was renamed or moved to `to` (a file or a folder): every scene, prefab,
+    /// material, animation and the like that named it by its old path names it by the new one.
+    /// Returns how many files were written.
+    int retargetReferences(const std::string& from, const std::string& to);
+    /// `text` with the asset path `from` replaced by `to` where it is a whole path in quotes or
+    /// in a comma list in quotes ("a.anim,b.anim"), and, for a folder, the paths inside it.
+    static std::string replaceReferences(const std::string& text, const std::string& from, const std::string& to);
     /// Copies a file from anywhere on disk into a folder of the project.
     std::string importFile(const std::string& sourcePath, const std::string& folder, std::string* error = nullptr);
     /// A path in `folder` that nothing uses yet: "Scenes/New Scene 2.scene".

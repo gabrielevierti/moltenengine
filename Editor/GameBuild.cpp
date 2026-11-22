@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <functional>
 
 // Where the engine's headers are, as CMake knew them when the editor was built: the
 // folders a game's code is compiled against, separated by '|'.
@@ -142,7 +143,44 @@ std::string createScriptFile(const Project& project, const std::string& name, st
     return file.string();
 }
 
-BuildResult buildGameCode(const Project& project, const std::string& hostExecutable) {
+namespace {
+
+/// The next number after the builds that are in the folder: "Game-12.dylib" there, 13.
+int nextBuildNumber(const fs::path& folder) {
+    std::error_code code;
+    int number = 1;
+    for (const auto& entry : fs::directory_iterator(folder, code)) {
+        std::string name = entry.path().stem().string();       // "Game-12"
+        if (name.rfind("Game-", 0) == 0) number = std::max(number, std::atoi(name.c_str() + 5) + 1);
+    }
+    return number;
+}
+
+/// What a build is made from, as one line: the code as it is now, and the program it is
+/// loaded into. The editor built again may have other types under the same names, and code
+/// compiled against the old ones must not be loaded into it.
+std::string buildStamp(const Project& project, const std::string& hostExecutable) {
+    std::error_code code;
+    uint64_t hostSize = uint64_t(fs::file_size(hostExecutable, code));
+    if (code) hostSize = 0;
+    code.clear();
+    long long hostTime = static_cast<long long>(fs::last_write_time(hostExecutable, code).time_since_epoch().count());
+    if (code) hostTime = 0;
+    return "molten-build 1 " + std::to_string(gameSourceSignature(project)) + " " + std::to_string(hostSize) + " " + std::to_string(hostTime) + " " +
+           std::to_string(std::hash<std::string>()(hostExecutable + "|" + MOLTEN_GAME_INCLUDE_DIRS));
+}
+
+}  // namespace
+
+std::string copyOfBuild(const std::string& libraryPath) {
+    std::error_code code;
+    fs::path folder = fs::path(libraryPath).parent_path();
+    fs::path copy = folder / ("Game-" + std::to_string(nextBuildNumber(folder)) + ".dylib");
+    fs::copy_file(libraryPath, copy, fs::copy_options::overwrite_existing, code);
+    return code ? std::string() : copy.string();
+}
+
+BuildResult buildGameCode(const Project& project, const std::string& hostExecutable, bool mayReuse) {
     BuildResult result;
     std::vector<std::string> sources = gameSourceFiles(project);
     result.hadSources = !sources.empty();
@@ -151,12 +189,26 @@ BuildResult buildGameCode(const Project& project, const std::string& hostExecuta
     std::error_code code;
     fs::path folder = fs::path(project.libraryDirectory()) / "Game";
     fs::create_directories(folder, code);
-    // The next number after the builds that are there.
-    int number = 1;
-    for (const auto& entry : fs::directory_iterator(folder, code)) {
-        std::string name = entry.path().stem().string();       // "Game-12"
-        if (name.rfind("Game-", 0) == 0) number = std::max(number, std::atoi(name.c_str() + 5) + 1);
+    // Built from exactly this already, and the library is still there: it is used as it is.
+    // (Library/Game/built.txt: what the last good build was made from, and its file's name.)
+    const std::string stamp = buildStamp(project, hostExecutable);
+    const fs::path stampFile = folder / "built.txt";
+    if (mayReuse) {
+        if (std::optional<std::string> last = text::readFile(stampFile.string())) {
+            size_t lineEnd = last->find('\n');
+            if (lineEnd != std::string::npos && last->compare(0, lineEnd, stamp) == 0) {
+                std::string name = last->substr(lineEnd + 1);
+                while (!name.empty() && (name.back() == '\n' || name.back() == '\r' || name.back() == ' ')) name.pop_back();
+                if (!name.empty() && name.find('/') == std::string::npos && fs::exists(folder / name, code)) {
+                    result.succeeded = true;
+                    result.reused = true;
+                    result.libraryPath = (folder / name).string();
+                    return result;
+                }
+            }
+        }
     }
+    int number = nextBuildNumber(folder);
     fs::path library = folder / ("Game-" + std::to_string(number) + ".dylib");
 
     // A "bundle" is a library made to be loaded into one particular program: what the code
@@ -179,8 +231,15 @@ BuildResult buildGameCode(const Project& project, const std::string& hostExecuta
     result.log = run(command, exitCode);
     result.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
     result.succeeded = exitCode == 0 && fs::exists(library, code);
-    if (!result.succeeded) return result;
+    // What was asked of the compiler and what it said, kept beside the builds: to read after the
+    // Console has moved on, or to send to someone who can help.
+    text::writeFile((folder / "build.log").string(), std::string(result.succeeded ? "succeeded" : "FAILED") + "\n\n" + command + "\n\n" + result.log);
+    if (!result.succeeded) {
+        fs::remove(stampFile, code);        // the code as it is now does not build: nothing to use again
+        return result;
+    }
     result.libraryPath = library.string();
+    text::writeFile(stampFile.string(), stamp + "\n" + library.filename().string() + "\n");
 
     fs::copy_file(library, folder / "Game.dylib", fs::copy_options::overwrite_existing, code);
     // Older builds are no longer needed on disk (the ones still loaded stay in memory). Keep the last few.
@@ -220,6 +279,12 @@ std::string exportMacApplication(const Project& project, const std::string& dest
         ShrinkOptions shrink;
         shrink.largestPicture = 4096;
         copyAssetsSmaller(project.assetsDirectory(), (resources / "Project" / "Assets").string(), shrink);
+    }
+    // The project's quality and its game settings (tags, layers, gravity), as Project Settings set them.
+    for (const char* file : {"Quality.settings", "Game.settings"}) {
+        if (!fs::exists(fs::path(project.settingsDirectory()) / file, code)) continue;
+        fs::create_directories(resources / "Project" / "Settings", code);
+        fs::copy_file(fs::path(project.settingsDirectory()) / file, resources / "Project" / "Settings" / file, fs::copy_options::overwrite_existing, code);
     }
     fs::copy_file(project.filePath(), resources / "Project" / fs::path(project.filePath()).filename(), fs::copy_options::overwrite_existing, code);
     // A development build: the player sees this mark and turns on the developer keys (F1: statistics and profiler).

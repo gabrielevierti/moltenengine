@@ -36,6 +36,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace molten {
@@ -47,12 +48,26 @@ struct AnimationKey {
     Ease ease = Ease::Smooth;           // how the curve comes into this key from the one before
 };
 
+/// What makes a track move by itself, over its keys (or alone, without keys): a wave, a wander,
+/// or a parameter of the Animator the game sets (setFloat). Written under the track:
+///   procedural wave 0.2 1.5        amplitude, cycles a second (and a phase, in turns)
+///   procedural noise 0.1 0.5       amplitude, how fast it wanders
+///   procedural parameter 90 open   how much for each 1 of the parameter "open"
+struct Procedural {
+    enum class Kind : uint8_t { None, Wave, Noise, Parameter } kind = Kind::None;
+    float amplitude = 1, frequency = 1, phase = 0;
+    std::string parameter;
+    std::array<float, 4> axes{1, 1, 1, 1};  // which of the numbers it moves (a bob only up: 0 1 0)
+    bool isOn() const { return kind != Kind::None; }
+};
+
 struct AnimationTrack {
     std::string path;                   // "" the entity itself; "Arm/Hand" one under it
     std::string component;              // "Transform", "Light", or a registered component's name
     std::string field;                  // "position"; a registered component's field name
     int width = 1;                      // how many numbers: 1, 2, 3 or 4
     std::vector<AnimationKey> keys;     // by time
+    Procedural procedural;              // added to the keys' curve (or alone)
 
     /// The value at `time`: the first key's before it, the last's after it.
     std::array<float, 4> sample(float time) const;
@@ -71,6 +86,11 @@ struct AnimationClip {
     };
     float length = 1;
     bool loops = true;
+    /// The entity it was made for: a clip animates that one (and those under it), nothing else.
+    std::string owner;
+    /// A float parameter of the Animator that says where in the clip it is (0 the start, 1 the end),
+    /// instead of time: a door opened as much as "open" says, an aim by "aim". Empty: by time.
+    std::string timeBy;
     std::vector<AnimationTrack> tracks;
     std::vector<Event> events;          // by time
 
@@ -91,8 +111,8 @@ struct ClipPose {
     };
     std::map<std::string, Value> values;
 
-    /// The clip at `time` (seconds).
-    static ClipPose of(const AnimationClip& clip, float time);
+    /// The clip at `time` (seconds). `parameters`: the Animator's, for procedural tracks and timeBy.
+    static ClipPose of(const AnimationClip& clip, float time, const std::unordered_map<std::string, float>* parameters = nullptr);
     /// Eases this pose toward `other` by `t`: values in both are mixed, values only in `other` taken.
     void mixToward(const ClipPose& other, float t);
     /// Puts every value on the entities under `root`.

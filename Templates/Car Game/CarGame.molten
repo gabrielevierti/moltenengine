@@ -1,0 +1,4 @@
+molten-project 1
+name "Car Game"
+startScene "Scenes/Main.scene"
+version "0.1.0"

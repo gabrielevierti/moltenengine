@@ -19,7 +19,7 @@ else()
     set(MOLTEN_IOS OFF)
     set(CMAKE_OSX_DEPLOYMENT_TARGET 13.0 CACHE STRING "Oldest macOS the programs run on")
 endif()
-project(MoltenMetalEngine VERSION 1.0.0 LANGUAGES C CXX OBJC OBJCXX)
+project(MoltenMetalEngine VERSION 1.2.0 LANGUAGES C CXX OBJC OBJCXX)
 
 if(NOT APPLE)
     message(FATAL_ERROR "Metal only exists on Apple platforms: Molten builds on macOS, for macOS and iOS.")
@@ -32,7 +32,7 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-option(MOLTEN_BUILD_PLUGINS "Build the example editor plugin" ON)
+option(MOLTEN_BUILD_EXAMPLE_PLUGIN "Build the example editor plugin (Plugins/SceneTools): a Tools menu, to learn from" OFF)
 option(MOLTEN_BUILD_TESTS "Build the unit tests (off: only the engine, the editor and the player are built)" OFF)
 
 # ---------------------------------------------------------------- dependencies
@@ -235,17 +235,29 @@ target_link_libraries(molten-player PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,molten
 set_target_properties(molten-player PROPERTIES ENABLE_EXPORTS ON)
 # The editor exports the player it finds beside itself.
 add_dependencies(molten molten-player)
+# An application beside the program, "Molten Metal Engine.app": the editor with its icon, to
+# double-click or keep in the Dock instead of starting ./build/molten from the Terminal.
+add_custom_command(TARGET molten POST_BUILD
+    COMMAND sh ${CMAKE_SOURCE_DIR}/Tools/make_editor_app.sh $<TARGET_FILE:molten> ${CMAKE_SOURCE_DIR}/Assets/Branding/icon.png
+            ${PROJECT_VERSION} "${CMAKE_BINARY_DIR}/Molten Metal Engine.app"
+    VERBATIM)
 
 # The shaders compiled ahead of time (Shaders/Compiled), when the Metal compiler is installed:
 # the engine starts without compiling them, and a mistake in them stops here, in the build.
 # Without them, or with sources newer than them, the engine compiles the sources as it starts.
 add_executable(molten-shader-join Tools/ShaderJoin.cpp Engine/Rendering/ShaderSource.cpp)
 target_include_directories(molten-shader-join PRIVATE Engine)
-add_custom_target(molten-shaders
-    COMMAND sh ${CMAKE_SOURCE_DIR}/Tools/compile_shaders.sh $<TARGET_FILE:molten-shader-join> ${CMAKE_SOURCE_DIR}/Shaders ${CMAKE_BINARY_DIR}/shaders
-    DEPENDS molten-shader-join
+# Part of every build, and done again only when a shader file changes. It never stops the build:
+# what the Metal compiler says is kept in build/shader-work (errors-rt.txt, errors-plain.txt,
+# result.txt), and the engine compiles the sources itself when it starts if there is no library.
+file(GLOB MOLTEN_SHADER_FILES CONFIGURE_DEPENDS Shaders/*.metal Shaders/Shared/*.h)
+add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/shader-work/compiled.stamp
+    COMMAND sh ${CMAKE_SOURCE_DIR}/Tools/compile_shaders.sh $<TARGET_FILE:molten-shader-join> ${CMAKE_SOURCE_DIR}/Shaders ${CMAKE_BINARY_DIR}/shader-work
+    COMMAND ${CMAKE_COMMAND} -E touch ${CMAKE_BINARY_DIR}/shader-work/compiled.stamp
+    DEPENDS molten-shader-join ${MOLTEN_SHADER_FILES} ${CMAKE_SOURCE_DIR}/Tools/compile_shaders.sh
     COMMENT "Compiling the shaders ahead of time"
     VERBATIM)
+add_custom_target(molten-shaders ALL DEPENDS ${CMAKE_BINARY_DIR}/shader-work/compiled.stamp)
 
 # What an editor plugin compiles against: the editor's headers, the engine's, ImGui's.
 add_library(molten_editor_api INTERFACE)
@@ -264,8 +276,11 @@ function(molten_add_editor_plugin name)
                           LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/Plugins)
 endfunction()
 
-if(MOLTEN_BUILD_PLUGINS)
+if(MOLTEN_BUILD_EXAMPLE_PLUGIN)
     molten_add_editor_plugin(SceneTools Plugins/SceneTools/SceneTools.cpp)
+else()
+    # Built before, when it was on by default: not loaded any more.
+    file(REMOVE ${CMAKE_BINARY_DIR}/Plugins/SceneTools.dylib)
 endif()
 
 # ---------------------------------------------------------------- tests
@@ -274,7 +289,7 @@ endif()
 if(MOLTEN_BUILD_TESTS)
     enable_testing()
     file(GLOB MOLTEN_TEST_SOURCES CONFIGURE_DEPENDS Tests/*.cpp Tests/*.hpp)
-    add_executable(moltentests ${MOLTEN_TEST_SOURCES} Editor/PaletteSearch.cpp Editor/Shortcuts.cpp Editor/Git.cpp Editor/MultiEdit.cpp Editor/HierarchySearch.cpp Editor/Snapping.cpp Editor/SceneWeight.cpp)     # the palette's search, without the editor
+    add_executable(moltentests ${MOLTEN_TEST_SOURCES} Editor/PaletteSearch.cpp Editor/ProjectSummary.cpp Editor/Commands.cpp Editor/Shortcuts.cpp Editor/Git.cpp Editor/MultiEdit.cpp Editor/HierarchySearch.cpp Editor/Snapping.cpp Editor/SceneWeight.cpp)     # the palette's search, without the editor
     target_link_libraries(moltentests PRIVATE moltenengine)
     add_test(NAME unit COMMAND moltentests)
     set_tests_properties(unit PROPERTIES LABELS unit)

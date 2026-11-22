@@ -4,7 +4,7 @@ A visual script is a behavior drawn instead of written: boxes for what happens, 
 
 ## Making one
 
-**Game > New Visual Script**, or **+ New > Visual Script** in the asset browser. The script is a `.graph` file in the project's `Assets`; double-click it to open the drawing board.
+**Assets > Create > Visual Script**, or **+ New > Visual Script** in the Explorer. The script is a `.graph` file in the project's `Assets`; double-click it to open the drawing board.
 
 A new script has two nodes on it: **On Start** and **On Update**. Press Space over the board (or right-click it) to add more: type a few letters, press Enter.
 
@@ -73,7 +73,7 @@ An arrow leads to one place; wiring it somewhere else moves the wire. An input t
 
 **Variables** — Set Variable · Get Variable (numbers remembered by name, separately for each entity)
 
-**Animation** (the entity's Animator) — Set Animator Float · Set Animator Bool · Set Animator Trigger · Play State (a state now, eased over some seconds) · Play Clip (without a controller) · Set Animator Speed · Animator Parameter · Animator State (the state it is in, whether it is a given one, whether a clip that does not loop has ended). Parameters and states are chosen from the controller's lists; the events of clips come as messages to On Message.
+**Animation** (the entity's Animator) — Play Animation (one of its own, by name; with a controller, a state) · Stop Animation · Pause Animation · Resume Animation · Is Animation Playing · Set Animator Float · Set Animator Bool · Set Animator Trigger · Play State (eased over some seconds) · Set Animator Speed · Animator Parameter · Animator State. Names, parameters and states are chosen from lists; the events of animations come as messages to On Message.
 
 Every text box that names something (a key, a sound, a scene, a prefab, an entity, a message, a shared value, a variable, a parameter, a state) is a list of what it can be, never typed: only the words of a Log are.
 
@@ -137,4 +137,16 @@ that runs. Breakpoints stay while the editor is open, playing or not.
 
 **To C++** in the Visual Script toolbar (or **Convert to C++ Script** in the Viewer, or in the Explorer's right-click menu) writes the same behavior as a C++ component in `Assets/Scripts/<Name>.cpp`: each box becomes one call, in the same order, and it is built with the game's code like any script. The file keeps the graph it was made from in a comment at its end.
 
-The way back is **Convert to Visual Script**, offered for a `.cpp` that was made that way (in the Viewer, and in the Explorer's right-click menu): it writes the `.graph` beside it and opens it. If the code was changed after it was made, the graph that comes back is the one it was made from, and the console says that the changes are not in it. Code written by hand has no boxes to go back to: anything code can say that boxes have no shape for (loops of its own, other classes, pointers) has nowhere to go.
+The way back is **Convert to Visual Script** (in the Viewer, and in the Explorer's right-click menu on a `.cpp`): it writes the `.graph` beside it and opens it. Code made from a graph and not changed goes back to the very graph it was made from. Any other component (changed code, or code written by hand in the style of a new script) is read: `start`, `update`, `onCollision` and `onTriggerEnter` become their events; the entity's Transform and Rigid Body, its Animator, the keys and the mouse, numbers, points, yes-or-no, `if` and `else`, and the component's own number fields (they become the script's variables) become boxes and wires; a key pressed at the top of `update` becomes On Key Pressed, and a timer (`t += dt; if (t >= 2) { t -= 2; ... }`) On Timer. A line that has no box (a loop, a class of its own, a pointer) is left out and named in the Console with its line number: nothing goes missing without a word.
+
+## Watching one entity's script
+
+With **Follow Selection** on (it is to begin with), choosing an entity with a Visual Script in the
+scene shows its script. While the game runs, the board shows that entity's own copy of it: the
+values on its wires, the nodes it ran lighting up, and its variables beside its name at the top.
+Several entities can run the same script: choose another and the board shows what that one is doing.
+
+The board glides when it is zoomed (Cmd and the wheel, or - and +) and scrolled; F fits every node in
+view, and the map in its corner shows where the view is (a click there goes to that place). A wire
+pulled from a pin and let go on the empty board offers the nodes to add there, plugged into it. While
+a wire is pulled, the pins it fits light up.

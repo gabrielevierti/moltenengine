@@ -48,11 +48,29 @@ vertex MeshVertexOut vertex_mesh(MeshVertexIn in [[stage_in]],
                                  uint instanceID [[instance_id]],
                                  constant PassUniforms &pass [[buffer(MMBufferPass)]],
                                  constant InstanceData *instances [[buffer(MMBufferInstances)]],
-                                 constant MaterialUniforms &material [[buffer(MMBufferMaterial)]]) {
+                                 constant MaterialUniforms &material [[buffer(MMBufferMaterial)]],
+                                 texture2d<float> ocean [[texture(MMTextureNormal)]]) {
     InstanceData instance = instances[instanceID];
     float4 world = instance.model * float4(in.position, 1.0);
     if (material.sway > 0.0) {
         world.xyz += windSway(in.position.y, instance.model[3].xyz, world.xyz, pass, material.sway);
+    }
+    // Water rises and falls with its waves: the sea's heights (its Fourier transform), or a few
+    // crossing swells where there is none. Fading out far away, where they cannot be seen.
+    if (material.water > 0.0) {
+        float fade = 1.0 - saturate(length(world.xyz - pass.cameraPosition) / 1500.0);
+        float rise = 0.0;
+        if (material.oceanScale > 0.0) {
+            constexpr sampler wrap(filter::linear, address::repeat);
+            float2 at = (world.xz + material.oceanOffset) * material.oceanScale;
+            rise = ocean.sample(wrap, at, level(0.0)).w * 0.6 + ocean.sample(wrap, at * 3.7 + 0.31, level(0.0)).w * 0.15;
+        } else {
+            float2 p = world.xz * material.water;
+            float t = pass.time;
+            rise = sin(dot(p, float2(0.8, 0.6)) * 0.9 + t * 0.9) * 0.35 + sin(dot(p, float2(-0.5, 0.86)) * 2.3 + t * 1.5) * 0.12 +
+                   sin(dot(p, float2(0.3, -0.95)) * 5.7 + t * 2.4) * 0.04;
+        }
+        world.y += rise * material.waveHeight * 0.5 * fade;
     }
 
     MeshVertexOut out;
@@ -77,3 +95,59 @@ vertex float4 vertex_mesh_depth(DepthVertexIn in [[stage_in]],
                                 constant InstanceData *instances [[buffer(MMBufferInstances)]]) {
     return pass.viewProjection * (instances[instanceID].model * float4(in.position, 1.0));
 }
+
+// ---------------------------------------------------------------- the sun's shadow maps
+#ifdef MOLTEN_EXTRAS
+//
+// Every cascade is drawn in the same pass. The shadow map is an array of textures, and each
+// copy of a mesh says which of them it goes into (render_target_array_index). A thing whose
+// shadow reaches three cascades is one draw of three copies, where it was three draws in
+// three passes. Which copies there are is decided on the CPU (Cascades::reaches).
+
+struct ShadowVertexOut {
+    float4 position [[position]];
+    uint cascade [[render_target_array_index]];
+};
+
+vertex ShadowVertexOut vertex_shadow(DepthVertexIn in [[stage_in]],
+                                     uint copyID [[instance_id]],
+                                     constant FrameUniforms &frame [[buffer(MMBufferFrame)]],
+                                     constant InstanceData *instances [[buffer(MMBufferInstances)]],
+                                     constant ShadowCopy *copies [[buffer(MMBufferShadowCopies)]]) {
+    ShadowCopy copy = copies[copyID];
+    ShadowVertexOut out;
+    out.position = frame.cascadeViewProjection[copy.cascade] * (instances[copy.instance].model * float4(in.position, 1.0));
+    out.cascade = copy.cascade;
+    return out;
+}
+
+// Materials with holes cut in them, and those the wind sways: the same, with what the holes
+// and the sway need, so that the shadow of a tree moves with the tree.
+struct ShadowDetailVertexOut {
+    float4 position [[position]];
+    float2 uv;
+    float alpha;                            // of the instance's tint
+    uint cascade [[render_target_array_index]];
+};
+
+vertex ShadowDetailVertexOut vertex_shadow_detailed(MeshVertexIn in [[stage_in]],
+                                                    uint copyID [[instance_id]],
+                                                    constant PassUniforms &pass [[buffer(MMBufferPass)]],
+                                                    constant FrameUniforms &frame [[buffer(MMBufferFrame)]],
+                                                    constant InstanceData *instances [[buffer(MMBufferInstances)]],
+                                                    constant MaterialUniforms &material [[buffer(MMBufferMaterial)]],
+                                                    constant ShadowCopy *copies [[buffer(MMBufferShadowCopies)]]) {
+    ShadowCopy copy = copies[copyID];
+    InstanceData instance = instances[copy.instance];
+    float4 world = instance.model * float4(in.position, 1.0);
+    if (material.sway > 0.0) {
+        world.xyz += windSway(in.position.y, instance.model[3].xyz, world.xyz, pass, material.sway);
+    }
+    ShadowDetailVertexOut out;
+    out.position = frame.cascadeViewProjection[copy.cascade] * world;
+    out.uv = in.uv;
+    out.alpha = instance.tint.a;
+    out.cascade = copy.cascade;
+    return out;
+}
+#endif

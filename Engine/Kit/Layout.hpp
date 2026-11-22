@@ -70,6 +70,28 @@ struct UISlider {
     float current(const World& world) const;
 };
 
+/// A box that is ticked or not: sound on, subtitles, invert the camera. Its state is a shared
+/// value, 1 or 0 (`world.value(value)`), that code, scripts and other pieces read.
+struct UIToggle {
+    std::string label = "Sound";
+    std::string value = "sound";        // the shared value it shows and sets: 1 ticked, 0 not
+    bool isOn = true;                   // how it starts, when the value has not been set yet
+    bool isSaved = false;               // also kept as a preference of that name, between plays
+    Vec2 anchor{0.5f, 0.5f};
+    Vec2 offset{0, 0};
+    Vec2 size{260, 44};
+    Vec4 color{0.95f, 0.47f, 0.18f, 1};
+    Vec4 backColor{1, 1, 1, 0.15f};
+    Vec4 textColor{1, 1, 1, 1};
+
+    // State.
+    bool hasChanged = false;            // true for the frame it was clicked in
+
+    void start(World& world, Entity self);
+    void update(World& world, Entity self, float dt);
+    void draw(World& world, Entity self, Canvas& canvas);
+};
+
 /// A box to type in: a name, a code, a message. Click or tap it, type, press Return. What is
 /// typed is a shared text (`world.text(value)`), shown by any text as "{playerName}".
 struct UITextField {

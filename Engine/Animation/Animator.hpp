@@ -27,7 +27,10 @@ namespace molten {
 
 struct Animator {
     std::string model;                  // the .gltf or .glb file; empty uses the file the entity's mesh came from
-    std::string clip;                   // which of its animations; empty plays the first
+    /// Its own animations: clips made for this entity in the Timeline window (.anim files, by commas).
+    /// A model's animations are its too, by their names.
+    std::string animations;
+    std::string clip;                   // the one it plays from the start; empty: the model's first
     float speed = 1.0f;
     bool loops = true;
     bool isPlaying = true;
@@ -60,9 +63,19 @@ struct Animator {
     /// The events of the states passed this frame (sounds are played; the rest are for the game).
     std::vector<std::string> firedEvents;
 
-    /// Starts another clip (an animation of the model, or a .anim file), easing into it from
-    /// where things are now. Without a controller.
+    /// Plays an animation by its name: one of its own ("Open"), one of its model's ("Walk"), or,
+    /// with a controller, a state of it. Eases into it from where things are now.
     void play(const std::string& name);
+    /// Stops, back at the start of what it plays; pause() stops where it is, resume() goes on.
+    void stop();
+    void pause() { isPlaying = false; }
+    void resume() { isPlaying = true; }
+    /// True while it plays that animation (or is in that state).
+    bool isPlayingAnimation(const std::string& name) const;
+    /// Its own animations, as names: "Open", "Close".
+    std::vector<std::string> animationNames() const;
+    /// The file or model animation a name stands for.
+    std::string resolve(const std::string& name) const;
     /// With a controller: goes to a state now, easing into it over `seconds`, whatever the
     /// transitions say (Unity's CrossFade; 0 is Play).
     void crossFade(const std::string& state, float seconds = 0.2f);

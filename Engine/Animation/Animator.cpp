@@ -25,9 +25,68 @@ std::shared_ptr<const GltfModel> sharedGltfModel(const std::string& path) {
     return model;
 }
 
+namespace {
+
+std::vector<std::string> listOf(const std::string& text) {
+    std::vector<std::string> out;
+    size_t from = 0;
+    while (from <= text.size()) {
+        size_t comma = text.find(',', from);
+        std::string item = text.substr(from, comma == std::string::npos ? std::string::npos : comma - from);
+        size_t a = item.find_first_not_of(' '), b = item.find_last_not_of(' ');
+        if (a != std::string::npos) out.push_back(item.substr(a, b - a + 1));
+        if (comma == std::string::npos) break;
+        from = comma + 1;
+    }
+    return out;
+}
+
+std::string stemOf(const std::string& path) {
+    size_t slash = path.find_last_of('/');
+    std::string name = slash == std::string::npos ? path : path.substr(slash + 1);
+    size_t dot = name.rfind('.');
+    return dot == std::string::npos ? name : name.substr(0, dot);
+}
+
+}  // namespace
+
+std::vector<std::string> Animator::animationNames() const {
+    std::vector<std::string> names;
+    for (const std::string& path : listOf(animations)) names.push_back(stemOf(path));
+    return names;
+}
+
+std::string Animator::resolve(const std::string& name) const {
+    for (const std::string& path : listOf(animations)) {
+        if (path == name || stemOf(path) == name) return path;
+    }
+    return name;
+}
+
 void Animator::play(const std::string& name) {
-    if (name == clip && !hasEnded) return;
-    clip = name;
+    isPlaying = true;
+    if (!controller.empty()) {
+        crossFade(name, blendTime);
+        return;
+    }
+    std::string wanted = resolve(name);
+    if (wanted == clip && !hasEnded) return;
+    clip = wanted;
+    playing = "\n";                     // from its start, even if it was the one playing
+    hasEnded = false;
+}
+
+void Animator::stop() {
+    isPlaying = false;
+    hasEnded = false;
+    time = 0;
+    progress = 0;
+}
+
+bool Animator::isPlayingAnimation(const std::string& name) const {
+    if (!isPlaying || hasEnded) return false;
+    if (!controller.empty()) return currentState() == name;
+    return clip == resolve(name);
 }
 
 void Animator::update(World& world, Entity self, float dt) {
@@ -38,6 +97,7 @@ void Animator::update(World& world, Entity self, float dt) {
     if (file.empty()) {
         const MeshRenderer* renderer = world.scene.get<MeshRenderer>(self);
         if (renderer && renderer->mesh) file = renderer->mesh->name;
+        else if (renderer) file = renderer->meshName;      // where there is no GPU to hold the mesh, its name is still known
     }
     if (file.empty() || !isGltfFile(file)) file.clear();
     if (file != loadedFrom) {
@@ -201,7 +261,7 @@ void Animator::playClipFile(World& world, Entity self, float dt) {
         playing = clip;
         time = 0;
         hasEnded = false;
-        fireClipEvents(world, self, *file, -1, 0);
+        if (isPlaying) fireClipEvents(world, self, *file, -1, 0);
     }
     float duration = file->length;
     if (isPlaying && !hasEnded) {
@@ -223,7 +283,7 @@ void Animator::playClipFile(World& world, Entity self, float dt) {
         fireClipEvents(world, self, *file, before, time);
         blend = blendTime > 0 ? std::min(1.0f, blend + dt / blendTime) : 1.0f;
     }
-    props = ClipPose::of(*file, time);
+    props = ClipPose::of(*file, time, &parameters);
     if (blend < 1) {
         ClipPose from = propsFrom;
         from.mixToward(props, blend * blend * (3 - 2 * blend));
@@ -443,6 +503,8 @@ void Animator::runStates(World& world, float dt, const std::vector<AnimatorContr
     float before = run.progress;
     if (isPlaying && duration > 0) run.progress += dt * speed * now.speed / duration;
     if (!now.loops) run.progress = std::min(run.progress, 1.0f);
+    // Or as far through as a parameter says: a door opened as much as "open" is.
+    if (!now.timeBy.empty()) run.progress = std::clamp(parameter(now.timeBy), 0.0f, 1.0f);
     if (isBase) hasEnded = !now.loops && run.progress >= 1.0f;
     for (const AnimatorController::Event& event : now.events) {
         if (event.at <= 0) continue;
@@ -482,7 +544,7 @@ void Animator::runStates(World& world, float dt, const std::vector<AnimatorContr
     sum = 0;
     for (size_t i = 0; i < now.motions.size(); i++) {
         if (weights[i] <= 0 || !files[i]) continue;
-        ClipPose one = ClipPose::of(*files[i], phase * files[i]->length);
+        ClipPose one = ClipPose::of(*files[i], phase * files[i]->length, &parameters);
         if (sum <= 0) mixedProps = std::move(one);
         else mixedProps.mixToward(one, weights[i] / (sum + weights[i]));
         sum += weights[i];
@@ -573,8 +635,9 @@ void Animator::putLayers(World& world, float dt) {
 MOLTEN_COMPONENT(TwoBoneIK, MOLTEN_FIELD(bone).picks("bone").help("The end of the limb: the foot's or hand's node in the model"),
                  MOLTEN_FIELD(target).picks("entity").help("The entity it reaches for"), MOLTEN_FIELD(pole).picks("entity").help("An entity the knee or elbow bends toward; empty: as animated"),
                  MOLTEN_FIELD(weight).range(0, 1))
-MOLTEN_COMPONENT(Animator, MOLTEN_FIELD(model).picks("model").help("The .gltf or .glb file whose animations it plays. Empty uses the file the entity's mesh came from; none is needed for clips made in the editor"),
-                 MOLTEN_FIELD(clip).picks("animation").help("What it plays without a controller: one of the model's animations (empty: the first), or a clip made in the editor (.anim)"), MOLTEN_FIELD(speed).range(-4, 4), MOLTEN_FIELD(loops),
+MOLTEN_COMPONENT(Animator, MOLTEN_FIELD(animations).picks("ownClips").help("Its animations: made for this entity in the Timeline window (Window > Animation > Timeline, Create Animation)"),
+                 MOLTEN_FIELD(clip).picks("ownAnimation").help("What it plays from the start. From code: animator->play(\"Open\"), stop(), pause(), resume()"),
+                 MOLTEN_FIELD(model).picks("model").help("A .gltf or .glb whose animations are its too. Empty: the file the entity's mesh came from, if any"), MOLTEN_FIELD(speed).range(-4, 4), MOLTEN_FIELD(loops),
                  MOLTEN_FIELD(isPlaying), MOLTEN_FIELD(blendTime).range(0, 2).help("Seconds to ease from one clip into the next"),
                  MOLTEN_FIELD(controller).picks("controller").help("A .animator file: states and transitions the game drives with parameters. With one, `clip` is not used"),
                  MOLTEN_FIELD(rootMotion).help("The entity goes where the animation walks it, instead of the model walking away from it"),

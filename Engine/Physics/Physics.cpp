@@ -1,5 +1,7 @@
 #include "Physics/Physics.hpp"
 
+#include <bit>
+
 #include "Game/Component.hpp"
 #include "Scene/Components.hpp"
 
@@ -130,6 +132,7 @@ void Physics::step(Scene& scene, float dt) {
 
     // 2. Place every collider in the world.
     proxies_.clear();
+    std::unordered_map<uint64_t, Vec3> placesNow;
     scene.each<Collider, Transform>([&](Entity entity, Collider& collider, Transform& transform) {
         if (!transform.isActiveInHierarchy) return;
         Proxy proxy;
@@ -138,8 +141,17 @@ void Physics::step(Scene& scene, float dt) {
         proxy.body = scene.get<RigidBody>(entity);
         Vec3 position;
         Quat rotation;
-        if (proxy.body) position = proxy.body->position, rotation = proxy.body->rotation;
-        else worldPlace(transform, position, rotation);
+        if (proxy.body) {
+            position = proxy.body->position, rotation = proxy.body->rotation;
+        } else {
+            worldPlace(transform, position, rotation);
+            // Without a body it does not move by physics; if it is not where it was, something else
+            // moved it. (Seen for the first time, it is taken to have been there all along.)
+            uint64_t key = (uint64_t(entity.index) << 32) | entity.generation;
+            auto last = lastPlaces_.find(key);
+            proxy.movedItself = last != lastPlaces_.end() && simd::distance_squared(last->second, position) > 1e-10f;
+            placesNow[key] = position;
+        }
         proxy.shape = makeShape(collider, position, rotation);
         proxy.bounds = proxy.shape.bounds();
         if (proxy.body && proxy.body->type == BodyType::Dynamic) {
@@ -157,9 +169,16 @@ void Physics::step(Scene& scene, float dt) {
         return proxies_[l].bounds.min.x < proxies_[r].bounds.min.x;
     });
 
+    lastPlaces_ = std::move(placesNow);
+
     contacts_.clear();
     contactProxies_.clear();
     std::unordered_map<uint64_t, std::pair<Entity, Entity>> touchingNow, triggeringNow;
+    // What moves in this step, by any means: a pair of which neither does is not looked at.
+    std::unordered_map<uint64_t, bool> movesNow;
+    for (const Proxy& proxy : proxies_) {
+        movesNow[(uint64_t(proxy.entity.index) << 32) | proxy.entity.generation] = (proxy.body && proxy.body->type != BodyType::Static) || proxy.movedItself;
+    }
 
     for (size_t i = 0; i < order_.size(); i++) {
         Proxy& a = proxies_[order_[i]];
@@ -168,9 +187,11 @@ void Physics::step(Scene& scene, float dt) {
             if (b.bounds.min.x > a.bounds.max.x) break;             // nothing further along can overlap a
             if (!a.bounds.intersects(b.bounds)) continue;
             if (!(a.collider->layer & b.collider->mask) || !(b.collider->layer & a.collider->mask)) continue;
-            bool aMoves = a.body && a.body->type != BodyType::Static;
-            bool bMoves = b.body && b.body->type != BodyType::Static;
-            if (!aMoves && !bMoves) continue;                       // two obstacles never need testing
+            // The project's own table of which layers meet (Project Settings > Physics).
+            if (!(layerMeets[a.collider->layer ? size_t(std::countr_zero(a.collider->layer)) : 0] & b.collider->layer)) continue;
+            bool aMoves = (a.body && a.body->type != BodyType::Static) || a.movedItself;
+            bool bMoves = (b.body && b.body->type != BodyType::Static) || b.movedItself;
+            if (!aMoves && !bMoves) continue;                       // two things that stay put never need testing
 
             // 4. Narrow phase: the exact shapes.
             ContactInfo info;
@@ -295,6 +316,13 @@ void Physics::step(Scene& scene, float dt) {
         noted[key] = true;
     }
     std::vector<std::pair<Entity, Entity>> entered, exited;
+    // In a trigger and standing still: it has not left. (Such a pair was not looked at above.)
+    for (const auto& [key, pair] : triggering_) {
+        if (triggeringNow.count(key)) continue;
+        auto first = movesNow.find((uint64_t(pair.first.index) << 32) | pair.first.generation);
+        auto second = movesNow.find((uint64_t(pair.second.index) << 32) | pair.second.generation);
+        if (first != movesNow.end() && second != movesNow.end() && !first->second && !second->second) triggeringNow[key] = pair;
+    }
     for (const auto& [key, pair] : triggeringNow) {
         if (!triggering_.count(key)) entered.push_back(pair);
     }

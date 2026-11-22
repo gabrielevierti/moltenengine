@@ -18,6 +18,14 @@ static float luminance(float3 color) {
     return dot(color, float3(0.2126, 0.7152, 0.0722));
 }
 
+// A number in [0, 1) that differs from pixel to pixel in a pattern the eye reads as even
+// grain and not as blotches ("interleaved gradient noise", Jimenez 2014). Whatever takes a
+// few samples where it would want many (rays, steps through fog and cloud) starts each
+// pixel's at a different place with it.
+static float pixelNoise(float2 pixel) {
+    return fract(52.9829189 * fract(dot(pixel, float2(0.06711056, 0.00583715))));
+}
+
 // ---------------------------------------------------------------- full-screen triangle
 
 struct FullscreenOut {

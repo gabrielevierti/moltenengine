@@ -21,6 +21,7 @@
 #include "Physics/Physics.hpp"
 #include "Platform/Window.hpp"
 #include "Rendering/Renderer.hpp"
+#include "Rendering/Quality.hpp"
 #include "Scene/Components.hpp"
 
 #include <memory>
@@ -86,6 +87,11 @@ public:
 
 
     Renderer& renderer() { return *renderer_; }
+    /// The project's quality: read from its Settings/Quality.settings (none: High).
+    /// Used by the renderer as each view is drawn.
+    void loadQuality(const std::string& settingsDirectory);
+    void setQuality(const GameQuality& quality);
+    std::optional<GameQuality> quality;
     Assets& assets() { return *assets_; }
     Audio& audio() { return *audio_; }
     bool hasAudio() const { return audio_ != nullptr; }        // false where there is no sound device
@@ -118,6 +124,8 @@ public:
     std::shared_ptr<Texture> loadTexture(const std::string& name, TextureFormat format) override;
     std::shared_ptr<Font> loadFont(const std::string& name) override;
     void preloadMesh(const std::string& name, MeshData data) override;
+    void preloadPicture(const std::string& name, std::vector<uint8_t> pixels, int width, int height) override;
+    std::function<std::string(const std::string&)> assetPathFinder() const override;
     Engine* asEngine() override { return this; }
 
     // ---- conveniences
@@ -132,7 +140,7 @@ public:
     Entity activeCamera();
 
     /// The ray from the camera through a point of the screen: what the mouse is pointing at.
-    Ray screenRay(Vec2 screenPoint);
+    Ray screenRay(Vec2 screenPoint) override;
 
     /// Plays a sound as if it came from a place in the world, as heard from the camera.
     SoundHandle playSoundAt(const std::shared_ptr<const AudioClip>& clip, Vec3 position, float volume = 1.0f, float pitch = 1.0f);
@@ -147,6 +155,9 @@ public:
 
 private:
     void simulate(Game& game, double realDelta);
+    void onFixedUpdate(float dt) override;
+    void onUpdate(float dt) override;
+    const RenderSettings& effectSettings() override;
     void sceneWasLoaded(const std::string& sceneText) override;
     void runBehaviors(bool isFixedStep, float dt);
     void handleDeveloperKeys();

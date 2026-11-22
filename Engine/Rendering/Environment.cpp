@@ -23,15 +23,15 @@ NS::SharedPtr<MTL::Texture> Environment::makeCube(int size, int mipLevels) const
     return NS::TransferPtr(device_.device()->newTexture(descriptor.get()));
 }
 
-void Environment::renderFace(MTL::CommandBuffer* commandBuffer, MTL::Texture* target, int face, int mip,
+bool Environment::renderFace(MTL::CommandBuffer* commandBuffer, MTL::Texture* target, int face, int mip,
                              const char* fragmentFunction, const gpu::CaptureUniforms& capture,
-                             const gpu::FrameUniforms& frame, MTL::Texture* source) {
+                             const gpu::FrameUniforms& frame, MTL::Texture* source, MTL::Texture* cloudShape, MTL::Texture* cloudDetail) {
     PipelineDescription description;
     description.vertexFunction = "vertex_fullscreen";
     description.fragmentFunction = fragmentFunction;
     description.colorFormat = target->pixelFormat();
     MTL::RenderPipelineState* pipeline = shaders_.pipeline(description);
-    if (!pipeline) return;
+    if (!pipeline) return false;
 
     auto pass = NS::TransferPtr(MTL::RenderPassDescriptor::alloc()->init());
     MTL::RenderPassColorAttachmentDescriptor* color = pass->colorAttachments()->object(0);
@@ -47,23 +47,35 @@ void Environment::renderFace(MTL::CommandBuffer* commandBuffer, MTL::Texture* ta
     encoder->setFragmentBytes(&capture, sizeof(capture), gpu::MMBufferPass);
     encoder->setFragmentBytes(&frame, sizeof(frame), gpu::MMBufferFrame);
     if (source) encoder->setFragmentTexture(source, 0);
+    if (cloudShape && cloudDetail) {
+        encoder->setFragmentTexture(cloudShape, 1);
+        encoder->setFragmentTexture(cloudDetail, 2);
+        encoder->setFragmentSamplerState(device_.noiseSampler(), 0);
+    }
     encoder->setFragmentSamplerState(device_.linearClampSampler(), gpu::MMSamplerLinearClamp);
     encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0), NS::UInteger(3));
     encoder->endEncoding();
+    return true;
 }
 
-bool Environment::updateIfNeeded(MTL::CommandBuffer* commandBuffer, const gpu::FrameUniforms& frame) {
+bool Environment::updateIfNeeded(MTL::CommandBuffer* commandBuffer, const gpu::FrameUniforms& frame, MTL::Texture* cloudShape, MTL::Texture* cloudDetail) {
+    // Clouds with depth in the capture too, where they can be walked.
+    const bool withClouds = cloudShape && cloudDetail && frame.volumetricClouds != 0 && frame.cloudCoverage > 0 && shaders_.hasExtras();
     // Only the fields the sky shader reads matter here.
-    bool same = hasCapture_ &&
+    bool same = hasCapture_ && withClouds == capturedClouds_ &&
+                (!withClouds || (frame.cloudBase == captured_.cloudBase && frame.cloudTop == captured_.cloudTop)) &&
                 simd::all(frame.sunDirection == captured_.sunDirection) && simd::all(frame.sunColor == captured_.sunColor) &&
                 simd::all(frame.skyZenithColor == captured_.skyZenithColor) &&
                 simd::all(frame.skyHorizonColor == captured_.skyHorizonColor) &&
                 simd::all(frame.skyGroundColor == captured_.skyGroundColor) && frame.skyIntensity == captured_.skyIntensity &&
                 // Clouds drift every frame: only a change in how many there are is worth a new capture.
                 frame.cloudCoverage == captured_.cloudCoverage && frame.cloudScale == captured_.cloudScale &&
-                frame.physicalSky == captured_.physicalSky && frame.skyHaze == captured_.skyHaze &&
+                frame.moonBrightness == captured_.moonBrightness && simd::all(frame.skySunDirection == captured_.skySunDirection) &&
                 frame.sunsetColors == captured_.sunsetColors;
     if (same || !shaders_.isValid()) return false;
+    // A sky that moves a little every frame (a day going by) is captured again every few frames, not every frame.
+    if (hasCapture_ && withClouds == capturedClouds_ && skyBarelyChanged(frame, captured_) && ++callsSinceCapture_ < kCallsBetweenCaptures) return false;
+    callsSinceCapture_ = 0;
 
     gpu::CaptureUniforms capture{};
     capture.sourceSize = float(kSkySize);
@@ -71,7 +83,10 @@ bool Environment::updateIfNeeded(MTL::CommandBuffer* commandBuffer, const gpu::F
     // 1. The sky itself, then its mip chain: the filters below read blurry levels of it.
     for (int face = 0; face < 6; face++) {
         capture.face = uint32_t(face);
-        renderFace(commandBuffer, sky_.get(), face, 0, "fragment_sky_capture", capture, frame, nullptr);
+        // With its clouds walked through, or, where that cannot be done, with the flat layer.
+        if (!withClouds || !renderFace(commandBuffer, sky_.get(), face, 0, "fragment_sky_capture_clouds", capture, frame, nullptr, cloudShape, cloudDetail)) {
+            renderFace(commandBuffer, sky_.get(), face, 0, "fragment_sky_capture", capture, frame, nullptr);
+        }
     }
     MTL::BlitCommandEncoder* blit = commandBuffer->blitCommandEncoder();
     blit->generateMipmaps(sky_.get());
@@ -99,6 +114,7 @@ bool Environment::updateIfNeeded(MTL::CommandBuffer* commandBuffer, const gpu::F
     }
 
     captured_ = frame;
+    capturedClouds_ = withClouds;
     hasCapture_ = true;
     return true;
 }

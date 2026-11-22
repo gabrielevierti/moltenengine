@@ -71,7 +71,7 @@ struct InputAction {
 };
 
 /// The actions of a game: what a project's Input.actions file holds and the editor's
-/// Input window edits. Game code asks for actions by name and never for keys, so the
+/// Input page of Project Settings edits. Game code asks for actions by name and never for keys, so the
 /// keys can change without the code.
 struct InputMap {
     std::vector<InputAction> actions;
@@ -82,7 +82,7 @@ struct InputMap {
     static InputMap standard();
     /// The standard actions and those FlightControls reads: "yaw" (Q E), "throttle" (Shift
     /// and Ctrl, or Z X), "throttleLever" (a radio's or flight stick's lever), "flaps" (F) and
-    /// "brake" (B). For a game that flies: the Input window adds them with one button.
+    /// "brake" (B). For a game that flies: the Input page adds them with one button.
     static InputMap flying();
 };
 
@@ -161,8 +161,27 @@ public:
 
     /// In points of the game's picture, origin at its top left. (In an editor the game is
     /// shown in a part of the window, perhaps smaller than it is: see setPicture.)
-    Vec2 mousePosition() const { return (mousePosition_ - pictureOrigin_) * pictureScale_; }
+    /// While the game holds the pointer (see setPointerCaptured) there is none to be anywhere:
+    /// it is nowhere near the screen, so that no button drawn there is under it.
+    Vec2 mousePosition() const { return pointerIsCaptured_ ? Vec2{-1e6f, -1e6f} : (mousePosition_ - pictureOrigin_) * pictureScale_; }
     Vec2 mouseDelta() const { return isListening ? mouseDelta_ * pictureScale_ : Vec2{0, 0}; }     // movement during this frame
+
+    /// A game that looks about with the mouse (a first-person view, a camera turned without a
+    /// button held) asks for the pointer: it is hidden and kept in the window, however far the
+    /// mouse goes, and only how it moves is told (mouseDelta). Asked again with false, it is
+    /// given back: for a menu, or when Esc is pressed. The window does it (and an editor only
+    /// while its Game view is the one in use); nothing happens where there is no pointer.
+    void setPointerCaptured(bool wanted) { wantsPointer_ = wanted; }
+    /// What the game asked for, while it is being listened to and no menu holds the pointer out.
+    bool wantsPointerCaptured() const { return wantsPointer_ && isListening && !pointerIsFree_; }
+    /// A menu is on the screen and needs the pointer: it stays out, whatever asked for it,
+    /// until this is called again with false. What asked for it then has it back.
+    void setPointerFree(bool isFree) { pointerIsFree_ = isFree; }
+    bool isPointerFree() const { return pointerIsFree_; }
+    /// True while the window really holds the pointer for the game.
+    bool isPointerCaptured() const { return pointerIsCaptured_; }
+    /// The window says so, each time it changes.
+    void setPointerIsCaptured(bool isCaptured) { pointerIsCaptured_ = isCaptured; }
     /// Where the game's picture is in the window and how many of its points one of the
     /// window's is: an editor says so each frame, so that a click on a button drawn in
     /// the Game view is a click on that button. A game on its own never calls this.
@@ -267,6 +286,7 @@ private:
     Vec2 pictureOrigin_{0, 0};
     float pictureScale_ = 1.0f;
     Vec2 mouseDelta_{0, 0};
+    bool wantsPointer_ = false, pointerIsCaptured_ = false, pointerIsFree_ = false;
     float scrollDelta_ = 0;
     std::string textInput_;
     std::unordered_map<std::string, ButtonBinding> buttonBindings_;

@@ -41,11 +41,14 @@ GraphicsDevice::GraphicsDevice() {
     queue_ = NS::TransferPtr(device_->newCommandQueue());
     supportsMemoryless_ = device_->supportsFamily(MTL::GPUFamilyApple2);
     supportsRayTracing_ = device_->supportsRaytracing() && device_->supportsRaytracingFromRender();
+    supportsLayeredRendering_ = device_->supportsFamily(MTL::GPUFamilyApple5) || device_->supportsFamily(MTL::GPUFamilyMac2);
+    supportsFramebufferRead_ = device_->supportsFamily(MTL::GPUFamilyApple1);
     logInfo("GPU: %s", device_->name()->utf8String());
 
     MTL::Device* device = device_.get();
     materialSampler_ = makeSampler(device, MTL::SamplerMinMagFilterLinear, MTL::SamplerMipFilterLinear, MTL::SamplerAddressModeRepeat, 8, false);
     pixelSampler_ = makeSampler(device, MTL::SamplerMinMagFilterNearest, MTL::SamplerMipFilterLinear, MTL::SamplerAddressModeRepeat, 1, false);
+    noiseSampler_ = makeSampler(device, MTL::SamplerMinMagFilterLinear, MTL::SamplerMipFilterLinear, MTL::SamplerAddressModeRepeat, 1, false);
     linearClampSampler_ = makeSampler(device, MTL::SamplerMinMagFilterLinear, MTL::SamplerMipFilterLinear, MTL::SamplerAddressModeClampToEdge, 1, false);
     pointClampSampler_ = makeSampler(device, MTL::SamplerMinMagFilterNearest, MTL::SamplerMipFilterNotMipmapped, MTL::SamplerAddressModeClampToEdge, 1, false);
     shadowSampler_ = makeSampler(device, MTL::SamplerMinMagFilterLinear, MTL::SamplerMipFilterNotMipmapped, MTL::SamplerAddressModeClampToEdge, 1, true);

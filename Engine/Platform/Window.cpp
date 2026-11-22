@@ -107,6 +107,10 @@ void Window::pollEvents(Input& input) {
     glfwPollEvents();                   // runs the callbacks above
     input_ = nullptr;
     pollGamepad(input);
+    // A game that looks about with the mouse has the pointer while this window is the one in use.
+    bool wanted = input.wantsPointerCaptured() && glfwGetWindowAttrib(window_, GLFW_FOCUSED) != 0;
+    if (wanted != isCursorCaptured_) setCursorCaptured(wanted);
+    input.setPointerIsCaptured(isCursorCaptured_);
 }
 
 void Window::pollGamepad(Input& input) {
@@ -205,6 +209,7 @@ void Window::setCursorCaptured(bool captured) {
     glfwSetInputMode(window_, GLFW_CURSOR, captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
     if (glfwRawMouseMotionSupported()) glfwSetInputMode(window_, GLFW_RAW_MOUSE_MOTION, captured ? GLFW_TRUE : GLFW_FALSE);
     hasMousePosition_ = false;          // the pointer jumps when the mode changes: do not report that as movement
+    isCursorCaptured_ = captured;
 }
 
 void Window::setIcon(const std::string& picturePath) {

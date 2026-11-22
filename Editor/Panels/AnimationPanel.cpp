@@ -1,7 +1,10 @@
 // AnimationPanel.cpp
-// The Animation window, as in Unity: the clips of the chosen entity's Animator, their tracks (a
-// property of it, or of an entity under it, along time) and their keys. Record, then change things
-// in the Inspector or move them in the view: each change is a key at the time of the playhead.
+// The Timeline window, as in Unity's Animation window: the animations of the chosen entity (each
+// made for it, and for nothing else), their tracks (a property of it, or of an entity under it,
+// along time) and their keys. Press Record: where things are is kept at the playhead; click
+// another time and change things in the Inspector or move them in the view: each change is a key
+// there. Key keeps everything animated as it is now. A track can also move by itself
+// (Procedural: a wave, a wander, or a parameter the game sets).
 // Drag the playhead to see the clip at that moment; keys are dragged along their track, and a
 // right click changes how the curve comes into one, or removes it. Everything is put back as it
 // was when the window stops previewing.
@@ -31,15 +34,15 @@ const ImU32 kEventColor = IM_COL32(120, 200, 255, 255);
 class AnimationPanel final : public Panel {
 public:
     AnimationPanel() {
-        title = "Animation";
-        isOpen = false;                 // Window > Animation, or Open Animation on an Animator
+        title = "Timeline";
+        isOpen = false;                 // Window > Animation > Timeline, or Open Timeline on an Animator
     }
 
     void draw(EditorContext& editor) override {
         Scene& scene = editor.engine.scene;
         if (editor.scene.isPlaying()) {
             stopPreview(editor);
-            ImGui::TextDisabled("The game is running: its Animators play their clips. Stop it to edit them.");
+            ImGui::TextDisabled("The game is running: its Animators play their animations. Stop it to edit them.");
             return;
         }
         Entity root = rootOf(editor);
@@ -69,8 +72,8 @@ public:
         if (editing_.empty()) {
             ImGui::Spacing();
             const Name* name = scene.get<Name>(root);
-            ImGui::TextWrapped("%s has no clips yet. Create Clip makes one%s, and the Animator to play it.", name ? name->value.c_str() : "The entity",
-                               animator && !animator->controller.empty() ? " as a state of its controller" : "");
+            ImGui::TextWrapped("%s has no animations yet. Create Animation makes one for it (and the Animator that plays it); then press Record.",
+                               name ? name->value.c_str() : "The entity");
             return;
         }
         if (isRecording_) record(editor, root);
@@ -106,6 +109,7 @@ private:
         auto add = [&](const std::string& clip) {
             if (isAnimationClipFile(clip) && std::find(out.begin(), out.end(), clip) == out.end()) out.push_back(clip);
         };
+        for (const std::string& name : animator->animationNames()) add(animator->resolve(name));
         add(animator->clip);
         if (std::optional<AnimatorController> controller = readController(editor, animator->controller)) {
             for (const auto& state : controller->states) for (const auto& motion : state.motions) add(motion.clip);
@@ -145,17 +149,32 @@ private:
         if (!text::writeFile(editor.engine.assetPath(editing_), clip_.toText())) editor.notify("Cannot write " + editing_, ConsoleMessage::Level::Error);
     }
 
-    /// A new clip for the entity: in Animations, played by its Animator (made if it has none), as a
-    /// state of its controller if it has one.
-    void createClip(EditorContext& editor, Entity root) {
+    /// A new animation for the entity: in Animations/<its name>, made for it alone, listed in its
+    /// Animator (made if it has none), and the one it plays first if it had none; a state of its
+    /// controller too, if it has one.
+    void createClip(EditorContext& editor, Entity root, bool procedural = false) {
         Scene& scene = editor.engine.scene;
-        const Name* name = scene.get<Name>(root);
-        std::string stem = (name ? name->value : std::string("Entity")) + " " + newName_;
-        if (newName_.empty()) stem = name ? name->value : std::string("New Animation");
-        std::string path = editor.assets.uniquePath("Animations", stem, ".anim");
+        std::string owner = editor.scene.nameOf(root);
+        std::string stem = newName_.empty() ? std::string(procedural ? "Procedural" : "Animation") : newName_;
+        std::string path = editor.assets.uniquePath("Animations/" + owner, stem, ".anim");
         std::filesystem::create_directories(std::filesystem::path(editor.assets.absolutePath(path)).parent_path());
         AnimationClip fresh;
         fresh.length = 1;
+        fresh.owner = owner;
+        if (procedural) {
+            // A gentle bob to start from: change its kind, size and speed by the track's right click.
+            AnimationTrack bob;
+            bob.component = "Transform";
+            bob.field = "position";
+            bob.width = 3;
+            std::array<float, 4> now{};
+            readProperty(scene, root, "Transform", "position", now);
+            bob.setKey(0, now);
+            bob.procedural.kind = Procedural::Kind::Wave;
+            bob.procedural.amplitude = 0.25f;
+            bob.procedural.axes = {0, 1, 0, 0};
+            fresh.tracks.push_back(bob);
+        }
         if (!text::writeFile(editor.assets.absolutePath(path), fresh.toText())) {
             editor.notify("Cannot write " + path, ConsoleMessage::Level::Error);
             return;
@@ -166,6 +185,8 @@ private:
             scene.add(root, Animator{});
             animator = scene.get<Animator>(root);
         }
+        animator->animations += (animator->animations.empty() ? "" : ", ") + path;
+        if (animator->clip.empty()) animator->clip = std::filesystem::path(path).stem().string();
         if (!animator->controller.empty()) {
             if (std::optional<AnimatorController> controller = readController(editor, animator->controller)) {
                 AnimatorController::State state;
@@ -177,29 +198,31 @@ private:
                 if (controller->start.empty()) controller->start = state.name;
                 text::writeFile(editor.engine.assetPath(animator->controller), controller->toText());
             }
-        } else if (!isAnimationClipFile(animator->clip)) {
-            animator->clip = path;
-        } else {
-            // A second clip: a controller to hold both, the first as its start.
-            AnimatorController controller;
-            for (const std::string& clip : {animator->clip, path}) {
-                AnimatorController::State state;
-                state.name = std::filesystem::path(clip).stem().string();
-                state.motions.push_back({clip, 0, 0});
-                state.x = 80.0f + 220.0f * float(controller.states.size());
-                state.y = 80;
-                controller.states.push_back(state);
-            }
-            controller.start = controller.states.front().name;
-            std::string controllerPath = editor.assets.uniquePath("Animations", name ? name->value : std::string("Controller"), ".animator");
-            text::writeFile(editor.assets.absolutePath(controllerPath), controller.toText());
-            editor.assets.refresh();
-            animator->controller = controllerPath;
-            editor.notify("Two clips: " + controllerPath + " now plays them (Window > Animator)", ConsoleMessage::Level::Info);
         }
         editor.scene.markChanged();
         open(editor, path);
         newName_.clear();
+    }
+
+    /// Keys everything animated (or, in a clip with nothing yet, where it is: position, rotation,
+    /// scale) at the playhead, as it is now.
+    void keyAll(EditorContext& editor, Entity root) {
+        Scene& scene = editor.engine.scene;
+        if (clip_.tracks.empty()) {
+            for (const char* field : {"position", "rotation", "scale"}) {
+                AnimationTrack track;
+                track.component = "Transform";
+                track.field = field;
+                track.width = 3;
+                clip_.tracks.push_back(track);
+            }
+        }
+        for (AnimationTrack& track : clip_.tracks) {
+            Entity entity = entityAtPath(scene, root, track.path);
+            std::array<float, 4> now{};
+            if (entity.isValid() && readProperty(scene, entity, track.component, track.field, now)) track.setKey(cursor_, now);
+        }
+        save(editor);
     }
 
     // ---------------------------------------------------------------- preview: the scene at the playhead
@@ -317,10 +340,15 @@ private:
             ImGui::PushStyleColor(ImGuiCol_Button, isRecording_ ? ImVec4(0.8f, 0.2f, 0.2f, 1) : ImGui::GetStyleColorVec4(ImGuiCol_Button));
             if (ImGui::Button(isRecording_ ? "Recording" : "Record")) {
                 isRecording_ = !isRecording_;
+                // The first position: where it is now, at the playhead.
+                if (isRecording_ && clip_.tracks.empty()) keyAll(editor, root);
                 if (isRecording_) showAt(editor, root);
             }
             ImGui::PopStyleColor();
-            ui::tooltip("While on, whatever you change on the entity (or those under it) is kept as a key at the playhead");
+            ui::tooltip("While on, whatever you change on the entity (or those under it) is kept as a key at the playhead: click another time, change it, and so on");
+            ImGui::SameLine();
+            if (ImGui::Button("Key")) keyAll(editor, root);
+            ui::tooltip("Keeps everything animated as it is now, at the playhead");
             ImGui::SameLine();
             if (ImGui::Button(isPlaying_ ? "Pause" : "Play")) {
                 isPlaying_ = !isPlaying_;
@@ -339,25 +367,26 @@ private:
         }
         // Which clip.
         ImGui::SetNextItemWidth(220);
-        std::string shown = editing_.empty() ? std::string("No clip") : std::filesystem::path(editing_).stem().string();
+        std::string shown = editing_.empty() ? std::string("No animation") : std::filesystem::path(editing_).stem().string();
         if (ImGui::BeginCombo("##clip", shown.c_str())) {
             for (const std::string& clip : clips) {
                 if (ImGui::Selectable(clip.c_str(), clip == editing_)) open(editor, clip);
             }
             if (!clips.empty()) ImGui::Separator();
-            if (ImGui::Selectable("Create New Clip...")) wantsNewClip_ = true;
+            if (ImGui::Selectable("Create Animation...")) wantsNewClip_ = true;
+            if (ImGui::Selectable("Create Procedural Animation")) createClip(editor, root, true);
             ImGui::EndCombo();
         }
         if (editing_.empty()) {
             ImGui::SameLine();
-            if (ImGui::Button("Create Clip")) wantsNewClip_ = true;
+            if (ImGui::Button("Create Animation")) wantsNewClip_ = true;
         }
         if (wantsNewClip_) {
             ImGui::OpenPopup("new clip");
             wantsNewClip_ = false;
         }
         if (ImGui::BeginPopup("new clip")) {
-            ImGui::TextUnformatted("A new clip, in Animations");
+            ImGui::TextUnformatted("A new animation for this entity");
             if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
             bool entered = ImGui::InputTextWithHint("##name", "its name: Open, Idle, Flicker", &newName_, ImGuiInputTextFlags_EnterReturnsTrue);
             if (ImGui::Button("Create") || entered) {
@@ -382,7 +411,12 @@ private:
             ImGui::EndPopup();
         }
         ImGui::SameLine();
-        if (animator && !animator->controller.empty() && ImGui::Button("Open Animator")) editor.openPanel("Animator");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(130);
+        std::vector<std::string> floats = choicesFor(editor, root, "parameter");
+        if (pickFromList("timeBy", clip_.timeBy, floats, true, 130)) save(editor);
+        ui::tooltip("Time by: a parameter (0 to 1) that says how far through it is, instead of time: a door opened as much as \"open\" says. None: by time");
+        if (animator && ImGui::Button("Open Animator")) editor.openPanel("Animator");
     }
 
     void drawAddProperty(EditorContext& editor, Entity root) {
@@ -513,7 +547,13 @@ private:
             // The property, and its value at the playhead: changed here, it is a key there.
             ImGui::SetCursorScreenPos(ImVec2(origin.x + 4, top + 4));
             if (!entity.isValid()) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.55f, 0.4f, 1.0f));
-            ImGui::TextUnformatted(track.label().c_str());
+            ImGui::TextUnformatted((track.label() + (track.procedural.isOn() ? "  ~" : "")).c_str());
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) ImGui::OpenPopup("procedural");
+            if (ImGui::BeginPopup("procedural")) {
+                drawProcedural(editor, track);
+                ImGui::EndPopup();
+            }
+            ui::tooltip("Right click: make it move by itself (a wave, a wander, a parameter)");
             if (!entity.isValid()) {
                 ImGui::PopStyleColor();
                 ui::tooltip("There is no entity at this path under the one animated: renamed, or moved?");
@@ -624,6 +664,43 @@ private:
             ImGui::TextDisabled("Press Record and change something (move it, turn it, a light's intensity...), or Add Property.");
         } else {
             ImGui::TextDisabled("Double-click a track for a key there; drag keys; right-click a key or the ruler for more. Shift: off the frames.");
+        }
+    }
+
+    /// How a track moves by itself, over its keys.
+    void drawProcedural(EditorContext& editor, AnimationTrack& track) {
+        Procedural& p = track.procedural;
+        ImGui::TextDisabled("Moves by itself");
+        int kind = int(p.kind);
+        ImGui::SetNextItemWidth(180);
+        if (ImGui::Combo("##kind", &kind, "Only its keys\0Wave\0Wander (noise)\0By a parameter\0")) {
+            p.kind = Procedural::Kind(kind);
+            save(editor);
+        }
+        if (!p.isOn()) return;
+        ImGui::SetNextItemWidth(180);
+        if (ImGui::DragFloat(p.kind == Procedural::Kind::Parameter ? "For each 1" : "Amount", &p.amplitude, 0.01f)) save(editor);
+        if (p.kind == Procedural::Kind::Parameter) {
+            std::vector<std::string> parameters = choicesFor(editor, root_, "parameter");
+            ImGui::TextDisabled("Parameter (animator->setFloat)");
+            if (pickFromList("parameter", p.parameter, parameters, true, 180)) save(editor);
+        } else {
+            ImGui::SetNextItemWidth(180);
+            if (ImGui::DragFloat(p.kind == Procedural::Kind::Wave ? "Cycles a second" : "Speed", &p.frequency, 0.01f, 0.0f, 50.0f)) save(editor);
+            ImGui::SetNextItemWidth(180);
+            if (ImGui::SliderFloat("Phase", &p.phase, 0.0f, 1.0f)) save(editor);
+        }
+        if (track.width > 1) {
+            ImGui::TextDisabled("Which of its numbers");
+            const char* names[4] = {"x", "y", "z", "w"};
+            for (int i = 0; i < track.width; i++) {
+                if (i) ImGui::SameLine();
+                bool on = p.axes[size_t(i)] != 0;
+                if (ImGui::Checkbox(names[i], &on)) {
+                    p.axes[size_t(i)] = on ? 1.0f : 0.0f;
+                    save(editor);
+                }
+            }
         }
     }
 

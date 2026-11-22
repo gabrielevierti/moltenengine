@@ -27,5 +27,5 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
         fi
     done
 
-    echo "== done. Start the editor with: ./build/molten"
+    echo "== done. Start the editor: open \"build/Molten Metal Engine.app\" (or ./build/molten)"
 } 2>&1 | tee build.log

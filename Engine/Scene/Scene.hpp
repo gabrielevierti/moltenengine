@@ -20,6 +20,8 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <type_traits>
+#include <algorithm>
 #include <vector>
 
 namespace molten {
@@ -113,11 +115,17 @@ template <class T> struct Storage final : StorageBase {
         return dense.back();
     }
 
-    /// Removes by moving the last component into the hole, so `dense` stays packed.
+    /// Removes by moving the last component into the hole, so `dense` stays packed. Transforms
+    /// close the hole up instead: their order is the order of the scene's entities, which a
+    /// deletion should not shuffle.
     void remove(uint32_t entityIndex) override {
         if (!contains(entityIndex)) return;
         size_t hole = size_t(sparse[entityIndex]);
         size_t last = dense.size() - 1;
+        if constexpr (std::is_same_v<T, Transform>) {
+            moveTo(entityIndex, last);
+            hole = last;
+        }
         if (hole != last) {
             dense[hole] = std::move(dense[last]);
             owners[hole] = owners[last];
@@ -132,6 +140,22 @@ template <class T> struct Storage final : StorageBase {
         dense.clear();
         owners.clear();
         sparse.clear();
+    }
+
+    /// Puts the component at `position` in the order; the ones between move one place along.
+    void moveTo(uint32_t entityIndex, size_t position) {
+        if (!contains(entityIndex) || dense.empty()) return;
+        size_t from = size_t(sparse[entityIndex]);
+        position = std::min(position, dense.size() - 1);
+        if (from == position) return;
+        if (from < position) {
+            std::rotate(dense.begin() + long(from), dense.begin() + long(from) + 1, dense.begin() + long(position) + 1);
+            std::rotate(owners.begin() + long(from), owners.begin() + long(from) + 1, owners.begin() + long(position) + 1);
+        } else {
+            std::rotate(dense.begin() + long(position), dense.begin() + long(from), dense.begin() + long(from) + 1);
+            std::rotate(owners.begin() + long(position), owners.begin() + long(from), owners.begin() + long(from) + 1);
+        }
+        for (size_t i = std::min(from, position); i <= std::max(from, position); i++) sparse[owners[i]] = int32_t(i);
     }
 };
 
@@ -183,6 +207,16 @@ public:
     template <class T> void remove(Entity entity) {
         if (isAlive(entity)) storage<T>().remove(entity.index);
     }
+    /// Where the entity is in the scene's order (the order of the Hierarchy and of the file).
+    size_t orderOf(Entity entity) {
+        detail::Storage<Transform>& transforms = storage<Transform>();
+        return isAlive(entity) && transforms.contains(entity.index) ? size_t(transforms.sparse[entity.index]) : 0;
+    }
+    /// Moves the entity to that place in the scene's order.
+    void setOrder(Entity entity, size_t position) {
+        if (isAlive(entity)) storage<Transform>().moveTo(entity.index, position);
+    }
+
     template <class T> size_t count() const {
         const detail::Storage<T>* found = findStorage<T>();
         return found ? found->dense.size() : 0;
@@ -207,6 +241,9 @@ public:
     /// Recomputes Transform::world for every entity, parents before children.
     void updateTransforms();
 
+    /// Everything destroy() was called for and everything under it, while it is all still there:
+    /// for whoever has a last word to say to them. flushDestroyed() then removes exactly these.
+    const std::vector<Entity>& doomedEntities();
     /// Actually removes the entities passed to destroy(). Called by the engine once per frame.
     void flushDestroyed();
 

@@ -1,0 +1,46 @@
+molten-scene 1
+settings
+  skyZenith 0.05 0.15 0.42
+  skyHorizon 0.38 0.52 0.72
+  skyGround 0.11 0.14 0.19
+  skyIntensity 1
+  environmentIntensity 1
+  fog 0.38 0.52 0.72 0
+  shadows 1 60
+  rayTracedShadows 0 4
+  rayTracedLighting 0 1 0 0 1
+  rayTracedReflections 0.3 1
+  fogShape 0 0
+  wind 0 0 0 0.4
+  ambientOcclusion 1 0.6 1
+  bloom 1 0.06 1
+  exposure 1
+  resolution 1 1 0 60 0.6
+  toneMapper 2
+  vignette 0.25
+  clouds 0 1 1500 1200
+  volumetrics 0 0
+  lens 0 0 0
+  lensFlare 0.6
+entity "Burst"
+  transform 0 0 0 0 0 0 1 1 1 1
+  light point 1 0.6 0.25 26 10 0.34906584 0.5235988 0 1 2 1
+  particles 0 0.35 1 2.5 10 0 1 0 3.1415927 0.25 0 -3 0 2.4
+  particleLook 0.6 0 4 1.8 0.45 1 1.6 0.15 0.02 0 1 1 160 0.2 110
+  component "Lifetime"
+    field seconds "1.4"
+  component "Explosion"
+    field radius "3"
+    field force "5"
+    field damage "0"
+    field flashSeconds "0.35"
+  component "AudioSource"
+    field clip "Audio/down.wav"
+    field volume "1"
+    field pitch "1"
+    field loops "0"
+    field playsOnStart "1"
+    field group "Effects"
+    field comesFromHere "1"
+    field fullWithin "12"
+    field silentBeyond "60"

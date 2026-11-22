@@ -159,7 +159,7 @@ static bool drawShaderProperties(EditorContext& editor, Material& material) {
         kept.first = time;
     }
     const SurfaceShader& shader = kept.second;
-    if (!ui::section(std::filesystem::path(material.shader).stem().string().c_str())) return false;
+    ui::subheading(std::filesystem::path(material.shader).stem().string().c_str());
     ImGui::PushID("shader-properties");
     for (const SurfaceProperty& property : shader.properties) {
         const Vec4* said = material.shaderValue(property.name);
@@ -167,7 +167,7 @@ static bool drawShaderProperties(EditorContext& editor, Material& material) {
         bool edited = false;
         if (property.kind == SurfaceProperty::Kind::Float) {
             float number = value.x;
-            edited = property.hasRange ? ui::sliderFloat(property.name.c_str(), number, property.min, property.max, "%.3f") : ui::dragFloat(property.name.c_str(), number, 0.01f);
+            edited = property.hasRange ? ui::sliderFloat(property.name.c_str(), number, property.min, property.max, ui::kNumberFormat) : ui::dragFloat(property.name.c_str(), number, 0.01f);
             value.x = number;
         } else if (property.kind == SurfaceProperty::Kind::Color) {
             edited = ui::color(property.name.c_str(), value);
@@ -233,22 +233,39 @@ bool drawMaterialProperties(EditorContext& editor, Material& material) {
         material.isUnlit = shader == 1;
         material.isWater = shader == 2;
         if (material.isWater && material.baseColor.w > 0.95f) {
-            // What water starts as: blue-green, and partly seen through.
+            // What water starts as: blue-green, and a lake's clarity.
             material.baseColor = Vec4{0.03f, 0.2f, 0.26f, 0.8f};
             material.alphaMode = AlphaMode::Blend;
         }
         changed = true;
     }
-    if (material.isWater && ui::section("Waves")) {
+    ui::tooltip("Lit: a surface that light falls on, described by color, metal and roughness.\nUnlit: its own color and nothing else, for signs, glows and flat-shaded art.\n"
+                "Water: seen into, with waves, the sky mirrored in it and foam where it meets the shore.\n"
+                "Below them, the project's own shaders (.shader files): each is given the surface as the settings here make it, and changes it.");
+    if (material.isWater) {
+        ui::subheading("Water");
+        Vec3 deep{material.baseColor.x, material.baseColor.y, material.baseColor.z};
+        if (ui::color("Color", deep)) {
+            material.baseColor = Vec4{deep.x, deep.y, deep.z, material.baseColor.w};
+            changed = true;
+        }
+        ui::tooltip("The color of deep water: what is left of white light after a long way through it.\nShallow water is clear, and takes this color the deeper it gets.");
+        float murk = material.baseColor.w;
+        if (ui::sliderFloat("Murkiness", murk, 0.05f, 1.0f)) {
+            material.baseColor.w = murk;
+            changed = true;
+        }
+        ui::tooltip("How soon the bottom is lost from sight: 0.3 a clear sea that shows it ten meters down, 0.8 a lake, 1 a pond.");
+        ui::subheading("Waves");
         changed |= ui::dragFloat("Size", material.waveScale, 0.01f, 0.02f, 20.0f);
         ui::tooltip("Larger numbers make smaller waves");
         changed |= ui::sliderFloat("Height", material.waveHeight, 0.0f, 4.0f);
     }
-    ui::tooltip("Lit: a surface that light falls on, described by color, metal and roughness.\nUnlit: its own color and nothing else, for signs, glows and flat-shaded art.\n"
-                "Below them, the project's own shaders (.shader files): each is given the surface as the settings here make it, and changes it.");
     if (!material.shader.empty()) changed |= drawShaderProperties(editor, material);
 
-    if (ui::section("Surface")) {
+    if (material.isWater) return changed;          // water is its color, its murkiness and its waves: nothing else to set
+    {
+        ui::subheading("Surface");
         changed |= ui::color("Base Color", material.baseColor);
         if (!material.isUnlit) {
             changed |= ui::sliderFloat("Metallic", material.metallic, 0.0f, 1.0f);
@@ -259,7 +276,8 @@ bool drawMaterialProperties(EditorContext& editor, Material& material) {
         changed |= ui::dragFloat("Sway", material.sway, 0.005f, 0.0f, 3.0f);
         ui::tooltip("Moved by the scene's wind (Rendering > Wind), the more the higher above the model's base: 1 for grass, 0.1 for a tree. 0: still");
     }
-    if (ui::section("Textures")) {
+    {
+        ui::subheading("Textures");
         changed |= textureSlot(editor, "Base Color", material.baseColorTexture, TextureFormat::RGBA8_sRGB);
         if (!material.isUnlit) {
             changed |= textureSlot(editor, "Normal", material.normalTexture, TextureFormat::RGBA8);
@@ -270,7 +288,8 @@ bool drawMaterialProperties(EditorContext& editor, Material& material) {
         }
         changed |= textureSlot(editor, "Emissive", material.emissiveTexture, TextureFormat::RGBA8_sRGB);
     }
-    if (ui::section("Drawing")) {
+    {
+        ui::subheading("Drawing");
         int mode = int(material.alphaMode);
         if (ui::combo("Transparency", mode, {"Opaque", "Cut Out", "Blended"})) {
             material.alphaMode = AlphaMode(mode);

@@ -22,7 +22,9 @@
 
 #include "Assets/AssetDatabase.hpp"
 #include "Project/Project.hpp"
+#include "Commands.hpp"
 #include "SceneDocument.hpp"
+#include "Shortcuts.hpp"
 
 #include <imgui.h>
 
@@ -32,7 +34,7 @@
 #include <vector>
 
 /// Raised whenever something here changes in a way that breaks plugins built before.
-#define MOLTEN_EDITOR_API_VERSION 1
+#define MOLTEN_EDITOR_API_VERSION 2
 
 namespace molten::editor {
 
@@ -67,6 +69,8 @@ struct GizmoSettings {
     bool showSelection = true;          // the box around what is selected, and its colliders
     bool showPluginOverlays = true;     // what plugins draw in the view
     float flySpeed = 6.0f;              // of the camera, world units per second
+    float handleSize = 0.085f;          // of the move, rotate and scale handles: a share of the view's height
+    float iconSize = 0.85f;             // of the icons of lights, cameras, emitters and sounds: 1 is 23 points across
 };
 
 /// What a viewport overlay gets: where the 3D view is on screen and how to draw on it.
@@ -91,6 +95,8 @@ public:
     virtual ~Panel() = default;
     virtual void draw(EditorContext& editor) = 0;
     virtual ImGuiWindowFlags windowFlags() const { return 0; }
+    /// How large it is the first time it is opened, before it is docked or sized by hand.
+    virtual ImVec2 firstSize() const { return ImVec2(420, 520); }
 
     std::string title;                  // also its identity: unique among panels
     bool isOpen = true;
@@ -191,12 +197,17 @@ struct EditorContext {
     void editGraph(const std::string& path);
     /// Opens a panel (Window menu) and brings it to the front of its tabs: "Animator", "Animation".
     void openPanel(const std::string& title);
+    /// Opens Edit > Project Settings, on a page of it if one is named: "Game", "Quality", "Input", "Physics", "Tags and Layers".
+    void showProjectSettings(const std::string& page = {});
+    std::string projectSettingsPage;    // asked for by showProjectSettings; the window clears it
     std::string panelToFocus;           // asked for by openPanel; the editor clears it
     std::string graphToEdit;            // what the board has been asked to open; it clears this
 
     /// A panel that edits something of its own (the visual script board) sets this every
     /// frame it has the keyboard: Delete, Cmd+Z, Cmd+D and Cmd+A are then its, not the scene's.
     bool panelOwnsEditKeys = false;
+    /// The Explorer has the keyboard: Delete and the like are for its files, not the scene. Set each frame it does.
+    bool explorerHasKeys = false;
 
     std::vector<ConsoleMessage> console;
 
@@ -220,6 +231,23 @@ struct EditorContext {
     bool alignWithViewRequested = false;    // put the selection where the view's camera is, facing the same way
     bool wantsNewScript = false;            // a panel asked for the New Script window
     bool gameViewHasFocus = false;          // the Game window has the keyboard: while playing, keys are the game's
+
+    // ---- commands: what the menus, the keys and the search (Cmd+K) all do. See Commands.hpp.
+    Commands commands;
+    Shortcuts shortcuts;                    // the keys of the commands, as changed in Preferences
+    /// A command's keys as a menu shows them, "Cmd+D"; empty if it has none.
+    std::string keysOf(const std::string& commandId) const;
+    /// A row of a menu for a command, with its name, its keys and whether it may be done now:
+    /// what a panel's right-click menu is made of. Returns true if it was chosen (and has been done).
+    bool menuItem(const std::string& commandId, const char* label = nullptr);
+
+    // ---- asked for by a command; the panel that does it clears it
+    bool renameRequested = false;           // rename what is selected: the Hierarchy, or the Project window while it has the keys
+    bool hierarchySearchRequested = false;  // put the keyboard in the Hierarchy's search
+    bool addComponentRequested = false;     // open the Inspector's Add Component list
+    std::string assetRequest;               // for the Project window: "import", "rename", "delete", "reveal", "open"
+    std::string entityClipboard;            // what Copy took, as scene text (the system's clipboard has it too)
+    bool projectIsActive = false;           // files were chosen after anything of the scene: Edit's Rename, Delete... are about them
 };
 
 inline Scene& sceneOf(EditorContext& editor) { return editor.engine.scene; }

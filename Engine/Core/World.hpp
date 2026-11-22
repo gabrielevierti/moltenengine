@@ -15,8 +15,10 @@
 #include "Core/Time.hpp"
 #include "Input/Input.hpp"
 #include "Physics/Physics.hpp"
+#include "Project/GameSettings.hpp"
 #include "Rendering/Material.hpp"
 #include "Scene/Scene.hpp"
+#include "Scene/SceneAhead.hpp"
 
 #include <functional>
 #include <atomic>
@@ -286,6 +288,14 @@ public:
     virtual std::shared_ptr<Mesh> loadMesh(const std::string& name) { return nullptr; }
     /// A model read in the background, for loadMesh to use instead of reading its file.
     virtual void preloadMesh(const std::string& name, MeshData data) {}
+    /// A picture decoded in the background (four bytes a pixel, rows from the top), for the
+    /// materials that use it.
+    virtual void preloadPicture(const std::string& name, std::vector<uint8_t> pixels, int width, int height) {}
+    /// assetPath as something other threads may call while this one goes on: it holds copies
+    /// of the folders, and only reads the disk.
+    virtual std::function<std::string(const std::string&)> assetPathFinder() const {
+        return [root = assetRoot](const std::string& name) { return root + "/" + name; };
+    }
     /// Gives an entity that draws a mesh one of its own, made of these triangles: what an
     /// animated model shows each frame. A World that draws nothing does nothing.
     virtual void showMesh(Entity entity, const MeshData& data) {}
@@ -305,14 +315,44 @@ public:
     virtual std::shared_ptr<struct Font> loadFont(const std::string& name) { return nullptr; }
     /// This world as an Engine, if it is one.
     virtual Engine* asEngine() { return nullptr; }
+    // ---- the project's own settings
+
+    /// What the project decided for all of its scenes: tags, layers and which of them collide,
+    /// gravity, how often physics steps. See Project/GameSettings.hpp.
+    GameSettings settings;
+    /// Makes them so: physics gets the gravity and the layers, the clock its step.
+    void applySettings(const GameSettings& wanted);
+    /// Reads Game.settings from a project's Settings folder and applies it (none: as a new project has them).
+    void loadSettings(const std::string& settingsDirectory);
+
+    /// The line from the camera through a point of the screen (in points, as Input::mousePosition gives
+    /// it): what is under the mouse or a finger. A world without a screen looks straight down.
+    virtual Ray screenRay(Vec2 /*screenPoint*/) { return Ray{Vec3{0, 0, 0}, Vec3{0, -1, 0}}; }
     /// The folder assetPath() looks in, for a World that is not an Engine.
     std::string assetRoot = ".";
 
     // ---- running without an Engine
 
-    /// One frame of `realDelta` seconds: physics in fixed steps, then every component.
-    /// What Engine does each frame, minus the game object, the picture and the sound.
+    /// One frame of `realDelta` seconds, for a world that has no screen (a test, a tool): the
+    /// frame below, then the scene asked for is loaded and the input's frame ends.
     void advance(double realDelta);
+    /// The frame itself. There is one, here, and an Engine runs this same one: what a game does
+    /// in a test is what it does on the screen. In order:
+    ///   1. As many fixed steps as the time that passed holds (none, one, several). Each:
+    ///      onFixedUpdate, every component's fixedUpdate, physics, collisions and triggers
+    ///      told (onCollision, onTriggerEnter), the destroyed removed.
+    ///   2. Bodies are placed between their last two physics steps.
+    ///   3. onUpdate, every component's start (once) and update, then what was waiting:
+    ///      after(), every(), when() and coroutines. The destroyed are removed.
+    ///   4. Every component's lateUpdate, with everything where it will be drawn.
+    ///   5. Particles move, and the room the listener is in is heard.
+    /// A component whose entity goes hears onDestroy first, while everything is still there.
+    void simulateFrame(double realDelta);
+    /// What belongs to the game that is ending or to the scene that is leaving: its sounds stop,
+    /// what was waiting is forgotten, so are the pools and whoever was listening for an entity.
+    void endScene();
+    /// Removes what destroy() was called for, after its components heard onDestroy.
+    void removeDestroyed();
     /// Calls draw() on the components that have one. An Engine does this with its own canvas.
     void drawComponents(Canvas& canvas);
 
@@ -326,6 +366,14 @@ public:
     static float interfaceScaleFor(Vec2 screen, Vec2 reference, float match);
 
 protected:
+    /// What a World with a game object and a screen adds to the frame: an Engine calls its
+    /// Game and its Behaviors here, before the components.
+    virtual void onFixedUpdate(float /*dt*/) {}
+    virtual void onUpdate(float /*dt*/) {}
+    /// The wind particles are blown by: the scene's own, as the renderer has it in an Engine.
+    virtual const RenderSettings& effectSettings();
+    /// Every component hears onDestroy for these entities.
+    void tellDestroyed(const std::vector<Entity>& entities);
     void runComponents(bool isFixedStep, float dt, bool isLate = false);
     /// Tells components about the collisions and trigger overlaps of the last physics step.
     void dispatchPhysicsEvents();
@@ -389,15 +437,10 @@ protected:
     };
     std::vector<Listener> listeners_;
     std::vector<std::function<void()>> afterScene_;
-    struct LoadedInBackground {
-        std::string name, text;
-        std::vector<std::pair<std::string, MeshData>> meshes;
-        bool isRead = false;
-    };
-    std::future<LoadedInBackground> loading_;
+    std::future<SceneAhead> loading_;
     std::string loadingName_;
     bool loadingIsAdded_ = false;
-    std::shared_ptr<std::atomic<int>> loadingDone_, loadingTotal_;
+    std::shared_ptr<SceneAheadProgress> loadingProgress_;
     void finishBackgroundLoad();
     std::unordered_map<std::string, std::vector<Entity>> pools_;     // by prefab: those put back
     int nextListener_ = 1;

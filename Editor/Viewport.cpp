@@ -2,6 +2,7 @@
 // scales the selection (with snapping), and the lines and icons drawn over the scene.
 #include "Snapping.hpp"
 #include "Editor.hpp"
+#include "Theme.hpp"
 #include "Rendering/Particles.hpp"
 #include "Kit/Kit.hpp"
 #include "Kit/Vehicles.hpp"
@@ -247,7 +248,16 @@ void drawOutline(EditorContext& editor, Entity entity) {
     if (const Light* light = scene.get<Light>(entity)) {
         Vec4 color = vec4(light->color, 1);
         Vec3 forward = safeNormalize(transformDirection(transform->world, Vec3{0, 0, -1}));
-        if (light->type == LightType::Point) lines.sphere(position, light->range, color, 32);
+        if (light->type == LightType::Area) {
+            // Its rectangle, and which way it shines.
+            Vec3 right = transformDirection(transform->world, Vec3{light->areaSize.x * 0.5f, 0, 0});
+            Vec3 up = transformDirection(transform->world, Vec3{0, light->areaSize.y * 0.5f, 0});
+            lines.line(position - right - up, position + right - up, color);
+            lines.line(position + right - up, position + right + up, color);
+            lines.line(position + right + up, position - right + up, color);
+            lines.line(position - right + up, position - right - up, color);
+            lines.line(position, position + forward * 1.0f, color);
+        } else if (light->type == LightType::Point) lines.sphere(position, light->range, color, 32);
         else lines.line(position, position + forward * (light->type == LightType::Spot ? light->range : 3.0f), color);
     }
     if (scene.has<Camera>(entity)) lines.axes(transform->world, 1.0f);
@@ -278,10 +288,12 @@ void drawIcons(EditorContext& editor, const ViewportInfo& viewport) {
         bool isSelected = editor.scene.isSelected(entity);
         ImU32 fill = light ? IM_COL32(int(saturate(light->color.x) * 255), int(saturate(light->color.y) * 255), int(saturate(light->color.z) * 255), 255)
                            : IM_COL32(141, 150, 163, 255);
-        viewport.drawList->AddCircleFilled(at, 11.5f, isSelected ? IM_COL32(255, 122, 47, 255) : IM_COL32(20, 24, 31, 220), 24);
-        viewport.drawList->AddCircleFilled(at, 9.0f, fill, 24);
-        ImVec2 size = ImGui::CalcTextSize(letter);
-        viewport.drawList->AddText(ImVec2(at.x - size.x * 0.5f, at.y - size.y * 0.5f), IM_COL32(20, 24, 31, 255), letter);
+        float k = std::clamp(shown.iconSize, 0.3f, 3.0f);
+        viewport.drawList->AddCircleFilled(at, 11.5f * k, isSelected ? IM_COL32(255, 122, 47, 255) : IM_COL32(20, 24, 31, 220), 24);
+        viewport.drawList->AddCircleFilled(at, 9.0f * k, fill, 24);
+        float fontSize = ImGui::GetFontSize() * std::min(k, 1.2f);
+        ImVec2 size = ImGui::GetFont()->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, letter);
+        viewport.drawList->AddText(ImGui::GetFont(), fontSize, ImVec2(at.x - size.x * 0.5f, at.y - size.y * 0.5f), IM_COL32(20, 24, 31, 255), letter);
     }
 }
 
@@ -403,12 +415,74 @@ void drawShapes(EditorContext& editor) {
     }
 }
 
-/// A button that stays lit while its tool is the current one.
-bool toolButton(const char* label, bool isCurrent, const char* tooltip) {
-    if (isCurrent) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(1.0f, 0.48f, 0.18f, 0.85f));
-    bool pressed = ImGui::Button(label);
-    if (isCurrent) ImGui::PopStyleColor();
+/// One of the pictures on the Scene view's tool buttons, drawn in a box `s` across around `c`.
+void drawToolPicture(ImDrawList* d, ImVec2 c, float s, const char* kind, ImU32 color) {
+    const float h = s * 0.5f, t = 1.5f;
+    auto arrow = [&](ImVec2 from, ImVec2 to) {
+        d->AddLine(from, to, color, t);
+        ImVec2 dir(to.x - from.x, to.y - from.y);
+        float length = std::sqrt(dir.x * dir.x + dir.y * dir.y);
+        if (length < 0.01f) return;
+        dir.x /= length;
+        dir.y /= length;
+        ImVec2 side(-dir.y, dir.x);
+        const float head = s * 0.2f;
+        d->AddTriangleFilled(ImVec2(to.x + dir.x * head * 0.6f, to.y + dir.y * head * 0.6f), ImVec2(to.x - dir.x * head + side.x * head * 0.7f, to.y - dir.y * head + side.y * head * 0.7f),
+                             ImVec2(to.x - dir.x * head - side.x * head * 0.7f, to.y - dir.y * head - side.y * head * 0.7f), color);
+    };
+    std::string name = kind;
+    if (name == "move") {                   // four arrows from the middle
+        arrow(ImVec2(c.x, c.y), ImVec2(c.x, c.y - h * 0.82f));
+        arrow(ImVec2(c.x, c.y), ImVec2(c.x, c.y + h * 0.82f));
+        arrow(ImVec2(c.x, c.y), ImVec2(c.x - h * 0.82f, c.y));
+        arrow(ImVec2(c.x, c.y), ImVec2(c.x + h * 0.82f, c.y));
+    } else if (name == "rotate") {          // most of a circle, and an arrow where it ends
+        d->PathArcTo(c, h * 0.72f, -0.4f, 4.3f, 20);
+        d->PathStroke(color, ImDrawFlags_None, t);
+        ImVec2 end(c.x + std::cos(-0.4f) * h * 0.72f, c.y + std::sin(-0.4f) * h * 0.72f);
+        d->AddTriangleFilled(ImVec2(end.x + 1, end.y - s * 0.3f), ImVec2(end.x - s * 0.2f, end.y + 1), ImVec2(end.x + s * 0.22f, end.y + 2), color);
+    } else if (name == "scale") {           // a small box that becomes a large one
+        d->AddRectFilled(ImVec2(c.x - h * 0.8f, c.y), ImVec2(c.x - h * 0.05f, c.y + h * 0.78f), color, 1.5f);
+        d->AddRect(ImVec2(c.x - h * 0.8f, c.y - h * 0.78f), ImVec2(c.x + h * 0.8f, c.y + h * 0.78f), color, 2.0f, ImDrawFlags_None, t);
+        arrow(ImVec2(c.x + h * 0.05f, c.y - h * 0.05f), ImVec2(c.x + h * 0.5f, c.y - h * 0.5f));
+    } else if (name == "all") {             // the three at once: an arrow up, an arrow across, an arc between
+        arrow(ImVec2(c.x - h * 0.6f, c.y + h * 0.6f), ImVec2(c.x - h * 0.6f, c.y - h * 0.8f));
+        arrow(ImVec2(c.x - h * 0.6f, c.y + h * 0.6f), ImVec2(c.x + h * 0.8f, c.y + h * 0.6f));
+        d->PathArcTo(ImVec2(c.x - h * 0.6f, c.y + h * 0.6f), h * 0.95f, -1.35f, -0.22f, 10);
+        d->PathStroke(color, ImDrawFlags_None, t);
+    } else if (name == "magnet") {          // a horseshoe, its two ends marked
+        d->PathArcTo(ImVec2(c.x, c.y + h * 0.1f), h * 0.62f, 0.0f, 3.14159f, 14);
+        d->PathStroke(color, ImDrawFlags_None, s * 0.2f);
+        d->AddLine(ImVec2(c.x - h * 0.62f, c.y + h * 0.1f), ImVec2(c.x - h * 0.62f, c.y - h * 0.75f), color, s * 0.2f);
+        d->AddLine(ImVec2(c.x + h * 0.62f, c.y + h * 0.1f), ImVec2(c.x + h * 0.62f, c.y - h * 0.75f), color, s * 0.2f);
+    } else if (name == "grid") {
+        for (int i = 0; i < 3; i++) {
+            float o = (float(i) - 1.0f) * h * 0.62f;
+            d->AddLine(ImVec2(c.x - h * 0.8f, c.y + o), ImVec2(c.x + h * 0.8f, c.y + o), color, 1.2f);
+            d->AddLine(ImVec2(c.x + o, c.y - h * 0.8f), ImVec2(c.x + o, c.y + h * 0.8f), color, 1.2f);
+        }
+    } else {
+        ui::drawIcon(d, c, s, name, color);
+    }
+}
+
+/// A square button with a picture: lit while what it stands for is on. Several in a row with no
+/// space between make one control, as the tools are.
+bool toolButton(const char* id, const char* picture, bool isOn, const char* tooltip, const char* label = nullptr) {
+    const float height = 26, padding = 8;
+    float width = label ? ImGui::CalcTextSize(label).x + padding * 2 + (picture ? 20 : 0) : 30;
+    ImVec2 min = ImGui::GetCursorScreenPos(), max(min.x + width, min.y + height);
+    bool pressed = ImGui::InvisibleButton(id, ImVec2(width, height));
+    bool isHovered = ImGui::IsItemHovered(), isHeld = ImGui::IsItemActive();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s", tooltip);
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    unsigned accent = themeAccent();
+    ImU32 lit = IM_COL32((accent >> 16) & 0xFF, (accent >> 8) & 0xFF, accent & 0xFF, 235);
+    ImU32 back = isOn ? lit : isHeld ? ImGui::GetColorU32(ImGuiCol_ButtonActive) : isHovered ? ImGui::GetColorU32(ImGuiCol_ButtonHovered) : IM_COL32(30, 33, 38, 235);
+    draw->AddRectFilled(min, max, back, 5.0f);
+    ImU32 ink = isOn ? IM_COL32(20, 22, 26, 255) : ImGui::GetColorU32(ImGuiCol_Text);
+    if (picture) drawToolPicture(draw, ImVec2(label ? min.x + padding + 7 : (min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f), 15, picture, ink);
+    if (label) draw->AddText(ImVec2(min.x + padding + (picture ? 20 : 0), min.y + (height - ImGui::GetTextLineHeight()) * 0.5f), ink, label);
     return pressed;
 }
 
@@ -416,33 +490,38 @@ void arrangeSelection(EditorContext& editor, int axis, int how);
 
 void drawToolbar(EditorContext& editor) {
     GizmoSettings& gizmo = editor.gizmo;
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4, 4));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2, 4));
 
-    if (toolButton("Move", gizmo.operation == GizmoOperation::Move, "Move (W)")) gizmo.operation = GizmoOperation::Move;
+    // ---- the tools: one of them is the current one
+    if (toolButton("##move", "move", gizmo.operation == GizmoOperation::Move, "Move (W)")) gizmo.operation = GizmoOperation::Move;
     ImGui::SameLine();
-    if (toolButton("Rotate", gizmo.operation == GizmoOperation::Rotate, "Rotate (E)")) gizmo.operation = GizmoOperation::Rotate;
+    if (toolButton("##rotate", "rotate", gizmo.operation == GizmoOperation::Rotate, "Rotate (E)")) gizmo.operation = GizmoOperation::Rotate;
     ImGui::SameLine();
-    if (toolButton("Scale", gizmo.operation == GizmoOperation::Scale, "Scale (R)")) gizmo.operation = GizmoOperation::Scale;
+    if (toolButton("##scale", "scale", gizmo.operation == GizmoOperation::Scale, "Scale (R)")) gizmo.operation = GizmoOperation::Scale;
     ImGui::SameLine();
-    if (toolButton("All", gizmo.operation == GizmoOperation::Universal, "Move, rotate and scale at once (T)")) gizmo.operation = GizmoOperation::Universal;
+    if (toolButton("##all", "all", gizmo.operation == GizmoOperation::Universal, "Move, rotate and scale at once (T)")) gizmo.operation = GizmoOperation::Universal;
 
-    ImGui::SameLine(0, 14);
-    if (ImGui::Button(gizmo.space == GizmoSpace::World ? "World" : "Local")) {
+    // ---- where the handles are and which way they point
+    ImGui::SameLine(0, 12);
+    if (toolButton("##space", nullptr, false, "The handles follow the world's axes (World) or the entity's own (Local). X switches.",
+                   gizmo.space == GizmoSpace::World ? "World" : "Local")) {
         gizmo.space = gizmo.space == GizmoSpace::World ? GizmoSpace::Local : GizmoSpace::World;
     }
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("Handles follow the world's axes or the entity's own (X)");
     ImGui::SameLine();
-    if (ImGui::Button(gizmo.aroundCenter ? "Center" : "Pivot")) gizmo.aroundCenter = !gizmo.aroundCenter;
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) {
-        ImGui::SetTooltip("With several selected: the handles at the middle of them all, which they turn and scale around (Center),\nor on the last one chosen (Pivot)");
+    if (toolButton("##pivot", nullptr, false,
+                   "With several selected: the handles at the middle of them all, which they turn and scale around (Center),\nor on the last one chosen (Pivot)",
+                   gizmo.aroundCenter ? "Center" : "Pivot")) {
+        gizmo.aroundCenter = !gizmo.aroundCenter;
     }
 
-    ImGui::SameLine(0, 14);
-    if (toolButton("Snap", gizmo.snapEnabled, "Move, turn and scale in steps. Holding Cmd while dragging does the opposite.")) {
+    // ---- snapping, and its steps
+    ImGui::SameLine(0, 12);
+    if (toolButton("##snap", "magnet", gizmo.snapEnabled, "Snap: move, turn and scale in steps. Holding Cmd while dragging does the opposite.")) {
         gizmo.snapEnabled = !gizmo.snapEnabled;
     }
     ImGui::SameLine();
-    if (ImGui::ArrowButton("##snap-steps", ImGuiDir_Down)) ImGui::OpenPopup("##snap");
+    if (toolButton("##snap-steps", nullptr, false, "The steps, what moving snaps to, and arranging the selection", "Snapping")) ImGui::OpenPopup("##snap");
+    ImGui::SetNextWindowPos(ImVec2(ImGui::GetItemRectMin().x, ImGui::GetItemRectMax().y + 4), ImGuiCond_Appearing);
     if (ImGui::BeginPopup("##snap")) {
         ImGui::TextDisabled("Steps");
         ImGui::SetNextItemWidth(120);
@@ -470,7 +549,7 @@ void drawToolbar(EditorContext& editor) {
         gizmo.snapTo = GizmoSettings::SnapTo(snapTo);
         ui::tooltip("Corners: the nearest corner of another model. Holding V while moving does it too.");
         if (gizmo.snapTo == GizmoSettings::SnapTo::Surfaces) ImGui::Checkbox("Stands on the surface", &gizmo.standsOnSurface);
-        if (editor.scene.selection().size() > 1 || !editor.scene.selection().empty()) {
+        if (!editor.scene.selection().empty()) {
             ImGui::Separator();
             ImGui::TextDisabled("Arrange the selection");
             const char* axes[] = {"X", "Y", "Z"};
@@ -491,11 +570,21 @@ void drawToolbar(EditorContext& editor) {
             if (ImGui::SmallButton("Drop to the Ground")) arrangeSelection(editor, 1, 4);
             ui::tooltip("Each one down onto the first thing under it");
         }
-        ImGui::Separator();
+        ImGui::EndPopup();
+    }
+
+    // ---- what the view shows besides the scene (Unity's Gizmos)
+    ImGui::SameLine(0, 12);
+    if (toolButton("##grid", "grid", gizmo.showGrid, "The grid on the ground")) gizmo.showGrid = !gizmo.showGrid;
+    ImGui::SameLine();
+    if (toolButton("##gizmos", "eye", false, "What the view shows besides the scene: icons, outlines, colliders", "Gizmos")) ImGui::OpenPopup("##gizmos");
+    ImGui::SetNextWindowPos(ImVec2(ImGui::GetItemRectMin().x, ImGui::GetItemRectMax().y + 4), ImGuiCond_Appearing);
+    if (ImGui::BeginPopup("##gizmos")) {
         ImGui::TextDisabled("Shown in the view");
         ImGui::Checkbox("Grid", &gizmo.showGrid);
         ImGui::Checkbox("Selection outline", &gizmo.showSelection);
         ImGui::Checkbox("Colliders of everything", &gShowsAllColliders);
+        ui::tooltip("Outlines every collider of the scene in green (triggers in yellow). The selected object's, and its children's, are always shown.");
         ImGui::Checkbox("Lights", &gizmo.showLights);
         ImGui::Checkbox("Cameras", &gizmo.showCameras);
         ImGui::Checkbox("Particle effects", &gizmo.showEffects);
@@ -511,14 +600,28 @@ void drawToolbar(EditorContext& editor) {
             gShowsAllColliders = false;
         }
         ImGui::Separator();
-        ImGui::SetNextItemWidth(120);
-        ImGui::DragFloat("Fly Speed", &gizmo.flySpeed, 0.1f, 0.1f, 500.0f, "%.1f m/s", ImGuiSliderFlags_AlwaysClamp);
+        ImGui::TextDisabled("Sizes");
+        ImGui::SetNextItemWidth(150);
+        ImGui::SliderFloat("Handles", &gizmo.handleSize, 0.04f, 0.2f, "%.3f");
+        ui::tooltip("How large the move, rotate and scale handles are");
+        ImGui::SetNextItemWidth(150);
+        ImGui::SliderFloat("Icons", &gizmo.iconSize, 0.4f, 2.0f, "%.2f");
+        ui::tooltip("How large the icons of lights, cameras, effects and sounds are");
         ImGui::EndPopup();
     }
 
-    ImGui::SameLine(0, 14);
-    if (toolButton("Colliders", gShowsAllColliders, "Outlines every collider of the scene in green (triggers in yellow). The selected object's, and its children's, are always shown.")) {
-        gShowsAllColliders = !gShowsAllColliders;
+    // ---- the view's own camera
+    ImGui::SameLine();
+    if (toolButton("##camera", "camera", false, "The view's camera: how fast it flies (right mouse button and W A S D)")) ImGui::OpenPopup("##view-camera");
+    ImGui::SetNextWindowPos(ImVec2(ImGui::GetItemRectMin().x, ImGui::GetItemRectMax().y + 4), ImGuiCond_Appearing);
+    if (ImGui::BeginPopup("##view-camera")) {
+        ImGui::TextDisabled("Scene Camera");
+        ImGui::SetNextItemWidth(140);
+        ImGui::DragFloat("Fly Speed", &gizmo.flySpeed, 0.1f, 0.1f, 500.0f, "%.1f m/s", ImGuiSliderFlags_AlwaysClamp);
+        ui::tooltip("Hold the right mouse button and use W A S D, Q and E; Shift goes faster. The wheel changes this speed while flying.");
+        if (ImGui::Selectable("Frame Selected", false, editor.scene.selection().empty() ? ImGuiSelectableFlags_Disabled : 0)) editor.frameSelectionRequested = true;
+        if (ImGui::Selectable("Align View to Selected", false, editor.scene.selection().empty() ? ImGuiSelectableFlags_Disabled : 0)) editor.scene.alignViewWithSelection();
+        ImGui::EndPopup();
     }
 
     ImGui::PopStyleVar();
@@ -693,7 +796,7 @@ bool updateGizmo(EditorContext& editor, ViewportInfo& viewport) {
     GizmoSettings& settings = editor.gizmo;
     Entity primary = document.primary();
     Transform* transform = scene.get<Transform>(primary);
-    if (!transform) return false;
+    if (!transform || isInterfacePiece(scene, primary)) return false;      // a piece of interface is moved in the Game view
 
     ImGuizmo::OPERATION operation = settings.operation == GizmoOperation::Move ? ImGuizmo::TRANSLATE
                                   : settings.operation == GizmoOperation::Rotate ? ImGuizmo::ROTATE
@@ -734,6 +837,50 @@ bool updateGizmo(EditorContext& editor, ViewportInfo& viewport) {
     if (snapsToThings) snap = false;
     // "All" shows three tools at once; snapping there would need three kinds of step, so it is left free.
     const float* snapping = snap && settings.operation != GizmoOperation::Universal ? snapValues : nullptr;
+    ImGuizmo::SetGizmoSizeClipSpace(std::clamp(settings.handleSize, 0.02f, 0.4f));
+
+    // Inside the rotation handles, between their rings: turned freely, as a ball under the hand
+    // (a trackball): sideways about the view's up, up and down about its right.
+    static bool trackballing = false;
+    bool rotates = settings.operation == GizmoOperation::Rotate || settings.operation == GizmoOperation::Universal;
+    ImGuiIO& io = ImGui::GetIO();
+    ImVec2 center;
+    Vec3 pivot{before.columns[3].x, before.columns[3].y, before.columns[3].z};
+    bool canTrackball = rotates && viewport.worldToScreen(pivot, center);
+    float ballRadius = settings.handleSize * viewport.size.y * 0.5f;
+    if (canTrackball) {
+        float dx = io.MousePos.x - center.x, dy = io.MousePos.y - center.y;
+        bool inside = dx * dx + dy * dy < ballRadius * ballRadius * 0.8f;
+        bool hovering = inside && !ImGuizmo::IsOver() && !ImGuizmo::IsUsing() && ImGui::IsWindowHovered();
+        if (hovering || trackballing) {
+            viewport.drawList->AddCircleFilled(center, ballRadius * 0.9f, IM_COL32(255, 255, 255, trackballing ? 34 : 18), 48);
+        }
+        if (!trackballing && hovering && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) trackballing = true;
+    }
+    if (trackballing) {
+        if (!ImGui::IsMouseDown(ImGuiMouseButton_Left) || !canTrackball) {
+            trackballing = false;
+        } else if (io.MouseDelta.x != 0 || io.MouseDelta.y != 0) {
+            Mat4 cameraWorld = simd::inverse(viewport.view);
+            Vec3 up = safeNormalize(Vec3{cameraWorld.columns[1].x, cameraWorld.columns[1].y, cameraWorld.columns[1].z}, Vec3{0, 1, 0});
+            Vec3 right = safeNormalize(Vec3{cameraWorld.columns[0].x, cameraWorld.columns[0].y, cameraWorld.columns[0].z}, Vec3{1, 0, 0});
+            float perPixel = kPi / std::max(ballRadius * 2.0f, 40.0f);
+            Quat turn = axisAngle(up, io.MouseDelta.x * perPixel) * axisAngle(right, io.MouseDelta.y * perPixel);
+            Mat4 change = compose(pivot, Quat(0, 0, 0, 1), Vec3{1, 1, 1}) * compose(Vec3{0, 0, 0}, turn, Vec3{1, 1, 1}) * compose(-pivot, Quat(0, 0, 0, 1), Vec3{1, 1, 1});
+            for (Entity entity : document.selection()) {
+                const Transform* other = scene.get<Transform>(entity);
+                if (!other) continue;
+                bool movesWithParent = false;
+                for (Entity candidate : document.selection()) {
+                    if (candidate != entity && document.isDescendant(other->parent, candidate)) movesWithParent = true;
+                }
+                if (!movesWithParent) document.setWorldMatrix(entity, change * other->world);
+            }
+            scene.updateTransforms();
+            document.markChanged();
+        }
+        return true;
+    }
     bool moved = ImGuizmo::Manipulate(floats(viewport.view), floats(viewport.projection), operation, mode, floats(world), nullptr, snapping);
     if (moved) {
         // The rest of the selection follows: the same change, applied in the world.
@@ -792,6 +939,34 @@ void hideView(Engine& engine, size_t index) {
 constexpr size_t kSceneView = 0, kGameView = 1;
 
 }  // namespace
+
+RenderStats shownRenderStats(EditorContext& editor) {
+    Renderer& renderer = editor.engine.renderer();
+    for (size_t index : {kSceneView, kGameView}) {
+        if (index < renderer.views.size() && renderer.views[index].width > 0 && renderer.views[index].height > 0) return renderer.statsOfView(index);
+    }
+    return renderer.stats;
+}
+
+std::vector<std::string> renderStatsLines(const RenderStats& stats) {
+    auto plural = [](int count, const char* one, const char* many) { return std::to_string(count) + " " + (count == 1 ? one : many); };
+    std::vector<std::string> lines;
+    char text[160];
+    std::snprintf(text, sizeof(text), "Draw calls   %d   (%s, %.1fk triangles)", stats.drawCalls, plural(stats.instances, "mesh", "meshes").c_str(),
+                  double(stats.triangles) / 1000.0);
+    lines.push_back(text);
+    std::snprintf(text, sizeof(text), "Shadows   %s for %s", plural(stats.shadowDraws, "draw", "draws").c_str(), plural(stats.shadowCasters, "caster", "casters").c_str());
+    lines.push_back(stats.shadowDraws > 0 ? text : "Shadows   none drawn");
+    std::snprintf(text, sizeof(text), "Depth before the picture   %s", plural(stats.depthDraws, "draw", "draws").c_str());
+    lines.push_back(text);
+    std::snprintf(text, sizeof(text), "Full-screen passes   %d   (sky, occlusion, bloom, tone mapping)", stats.passes);
+    lines.push_back(text);
+    std::snprintf(text, sizeof(text), "Objects   %d drawn, %d out of view", stats.visibleObjects, stats.culledObjects);
+    lines.push_back(text);
+    std::snprintf(text, sizeof(text), "Lights   %d", stats.lights);
+    lines.push_back(text);
+    return lines;
+}
 
 void hideSceneAndGameViews(EditorContext& editor) {
     hideView(editor.engine, kSceneView);
@@ -965,6 +1140,25 @@ void arrangeInterface(EditorContext& editor, ImVec2 at, ImVec2 shown, Vec2 scree
             if (piece->radius) was.radius = *piece->radius;
             if (piece->letters) was.letters = *piece->letters;
             for (float* length : piece->lengths) was.lengths.push_back(*length);
+            before.push_back(was);
+        }
+        // The pieces a chosen one is made of (those under it, as a gauge's dial, needle and
+        // numbers) go with it.
+        for (const InterfacePiece& piece : pieces) {
+            bool isChosen = false, isPart = false;
+            for (const InterfacePiece* c : chosen) {
+                isChosen |= c->entity == piece.entity;
+                isPart |= editor.scene.isDescendant(piece.entity, c->entity);
+            }
+            if (isChosen || !isPart) continue;
+            Before was;
+            was.entity = piece.entity;
+            was.offset = *piece.offset;
+            was.place = piece.place(screen);
+            if (piece.size) was.size = *piece.size;
+            if (piece.radius) was.radius = *piece.radius;
+            if (piece.letters) was.letters = *piece.letters;
+            for (float* length : piece.lengths) was.lengths.push_back(*length);
             before.push_back(was);
         }
     };
@@ -1158,7 +1352,14 @@ void drawGameView(EditorContext& editor, bool takesCanvas) {
     bool isVisible = ImGui::Begin("Game", nullptr, flags);
     ImGui::PopStyleVar();
     keepViewAtLeast();
+    bool hadFocus = editor.gameViewHasFocus;
     editor.gameViewHasFocus = isVisible && ImGui::IsWindowFocused();
+    // The click that gives the game the keys is the game's too: a button, a text field to type
+    // in, are used on the first click, not the second. (It came while the game was not listening.)
+    if (editor.scene.isPlaying() && editor.gameViewHasFocus && !hadFocus && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+        engine.input.isListening = true;
+        engine.input.handleMouseButton(MouseButton::Left, true);
+    }
     ImVec2 position = ImGui::GetCursorScreenPos(), size = ImGui::GetContentRegionAvail();
     Entity camera = editor.scene.gameCamera();
     if (!isVisible || !camera.isValid()) {
@@ -1168,7 +1369,7 @@ void drawGameView(EditorContext& editor, bool takesCanvas) {
             ImGui::SetCursorScreenPos(ImVec2(position.x + 14, position.y + 12));
             ImGui::TextDisabled("The scene has no camera to see the game through.");
             ImGui::SetCursorScreenPos(ImVec2(position.x + 14, position.y + 12 + ImGui::GetTextLineHeightWithSpacing()));
-            ImGui::TextDisabled("Create > Camera makes one.");
+            ImGui::TextDisabled("Entity > Camera makes one.");
         }
         ImGui::End();
         return;
@@ -1219,6 +1420,38 @@ void drawGameView(EditorContext& editor, bool takesCanvas) {
         ImGui::SameLine(0, 10);
         ImGui::TextDisabled("interface at %.0f%%", double(scale * 100));
         ui::tooltip("The game's interface is laid out for 1280 x 720 and drawn larger or smaller on other screens, so it looks the same on all of them");
+    }
+    // Stats: the numbers of the frame, over the corner of the picture (as Unity's Game view has them).
+    static bool showsStats = false;
+    {
+        const float soundWidth = ImGui::CalcTextSize("Muted").x + ImGui::GetStyle().FramePadding.x * 2 + 34;
+        const float width = ImGui::CalcTextSize("Stats").x + ImGui::GetStyle().FramePadding.x * 2;
+        ImGui::SetCursorScreenPos(ImVec2(position.x + size.x - soundWidth - width - 14, position.y + 3));
+        const bool wasOn = showsStats;
+        if (wasOn) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(1.0f, 0.48f, 0.18f, 0.85f));
+        if (ImGui::Button("Stats##stats", ImVec2(width, 0))) showsStats = !showsStats;
+        if (wasOn) ImGui::PopStyleColor();
+        ui::tooltip("How fast the game is drawn and how much there is to draw. The Profiler window says where the time goes.");
+    }
+    if (showsStats && shown.x > 300 && shown.y > 180) {
+        // This picture's own numbers: the Scene view beside it has its own.
+        const RenderStats stats = engine.renderer().statsOfView(kGameView);
+        const float fps = engine.time.framesPerSecond;
+        char first[96];
+        std::snprintf(first, sizeof(first), "%.0f fps   %.1f ms   GPU %.1f ms", double(fps), fps > 0 ? 1000.0 / double(fps) : 0.0, double(engine.renderer().lastGpuMilliseconds()));
+        std::vector<std::string> lines = renderStatsLines(stats);
+        lines.insert(lines.begin(), first);
+        lines.push_back("Entities   " + std::to_string(editor.scene.entities().size()));
+        float boxWidth = 0;
+        for (const std::string& line : lines) boxWidth = std::max(boxWidth, ImGui::CalcTextSize(line.c_str()).x);
+        boxWidth += 22;
+        const float lineHeight = ImGui::GetTextLineHeightWithSpacing(), boxHeight = lineHeight * float(lines.size()) + 14;
+        ImVec2 corner(at.x + shown.x - boxWidth - 10, at.y + 10);
+        ImDrawList* ink = ImGui::GetWindowDrawList();
+        ink->AddRectFilled(corner, ImVec2(corner.x + boxWidth, corner.y + boxHeight), IM_COL32(14, 15, 18, 215), 6.0f);
+        for (size_t i = 0; i < lines.size(); i++) {
+            ink->AddText(ImVec2(corner.x + 10, corner.y + 7 + float(i) * lineHeight), i == 0 ? IM_COL32(255, 255, 255, 255) : IM_COL32(200, 205, 214, 255), lines[i].c_str());
+        }
     }
     // The game's sound, on or off: at the right end of the bar. Only here, in the editor: the
     // game itself is not changed, and its own volume settings go on working under it.
@@ -1282,6 +1515,14 @@ void drawGameView(EditorContext& editor, bool takesCanvas) {
         ImVec2 corner(at.x + (shown.x - size.x) * 0.5f, at.y + 10);
         ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(corner.x - 10, corner.y - 5), ImVec2(corner.x + size.x + 10, corner.y + size.y + 5), IM_COL32(20, 22, 27, 210), 6.0f);
         ImGui::GetWindowDrawList()->AddText(corner, IM_COL32(235, 238, 244, 255), note);
+    }
+    // The game has taken the pointer to look about with: how to get it back is said, since nothing else on the screen can be reached.
+    if (isPlaying && editor.gameViewHasFocus && isVisible && engine.input.isPointerCaptured()) {
+        const char* note = "Esc gives the pointer back; Esc again stops the game";
+        ImVec2 size = ImGui::CalcTextSize(note);
+        ImVec2 corner(at.x + (shown.x - size.x) * 0.5f, at.y + 10);
+        ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(corner.x - 10, corner.y - 5), ImVec2(corner.x + size.x + 10, corner.y + size.y + 5), IM_COL32(20, 22, 27, 150), 6.0f);
+        ImGui::GetWindowDrawList()->AddText(corner, IM_COL32(235, 238, 244, 190), note);
     }
     // A line around it while the keys go to the game.
     if (editor.scene.isPlaying() && editor.gameViewHasFocus) {

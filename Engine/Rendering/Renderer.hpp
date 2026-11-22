@@ -20,6 +20,7 @@
 #include <MetalFX/MetalFX.hpp>
 #include "Rendering/Canvas.hpp"
 #include "Rendering/Cascades.hpp"
+#include "Rendering/CloudNoise.hpp"
 #include "Rendering/DebugDraw.hpp"
 #include "Rendering/Environment.hpp"
 #include "Rendering/FrameAllocator.hpp"
@@ -32,6 +33,7 @@
 #include <atomic>
 
 #include <functional>
+#include <future>
 #include <memory>
 #include <vector>
 
@@ -50,12 +52,17 @@ struct SkySettings {
     bool cloudsHaveDepth = false;               // clouds as volumes one looks through, lit from the sun's side, instead of a flat layer
     float cloudScale = 1.0f;                    // larger numbers make smaller clouds
     Vec2 cloudSpeed{0.012f, 0.004f};            // how fast the wind carries them
-    /// The sky worked out from how sunlight scatters in the air: blue by day, red and gold as
-    /// the sun goes down, dark at night, all from the sun's height; the three colors above are
-    /// then not used (the ground's still is).
-    bool isPhysical = false;
-    float haze = 0.3f;                          // 0 clear mountain air, 1 a hazy summer day
+    float cloudHeight = 1500.0f;                // meters: the base of the clouds with depth, which a camera can fly into
+    float cloudThickness = 1200.0f;             // meters from their base to their tops
+    /// Clouds with depth are walked through along each line of sight: in so many steps (32 is
+    /// coarse, 64 fine), into a picture this share of the scene's size (they are soft: half
+    /// the size shows no loss and costs a quarter). The project's quality level sets both.
+    int cloudSteps = 48;
+    float cloudResolution = 0.5f;
     float stars = 0.0f;                         // at night: 0 none, 1 a clear night far from any town
+    /// At night (with sunset colors), the moon: across the sky from the sun, it lights the scene
+    /// with a cold, dim light and casts its shadows. 0 a night with no moon; 1 a full moon.
+    float moon = 1.0f;
     /// The colors of sunrise and sunset by themselves: as the sun nears the horizon its light
     /// goes gold, orange and red through the thicker air, the sky around it glows, the clouds
     /// are lit from below, and when it has set the sky darkens into night.
@@ -77,7 +84,7 @@ inline Vec3 sunlightThroughAir(float height) {
 }
 
 struct RenderSettings {
-    int sampleCount = 4;                        // multisampling: 1 (off), 2 or 4
+    int sampleCount = 2;                        // multisampling: 1 (off), 2 or 4
     float renderScale = 1.0f;                   // below 1 renders the scene smaller and stretches it
     bool metalFXUpscaling = true;               // with renderScale below 1: stretched by MetalFX, sharp, where the GPU has it
     // Dynamic resolution: the scene drawn smaller while the GPU cannot keep up with `targetFrameRate`,
@@ -102,11 +109,16 @@ struct RenderSettings {
     /// softer away from it. Used only where the GPU can trace rays (Renderer::canTraceRays);
     /// elsewhere the shadow maps stay.
     bool rayTracedShadows = false;
-    int shadowRayCount = 4;                     // rays per pixel: more is smoother and slower
+    /// The most rays a pixel sends toward the sun. One answers for nearly every pixel; the rest
+    /// are sent only along the edges of shadows, where part of the sun's disk shows, and make
+    /// those edges smooth. So more costs little.
+    int shadowRayCount = 4;
     /// With traced sun shadows on: the light of the sky is also hidden by what is really in
-    /// the way (corners, the underside of a car), found with short rays from every pixel.
+    /// the way (corners, the underside of a car), found with short rays. They are sent before
+    /// the scene is drawn, for one pixel in four, and smoothed (Shaders/Traced.metal): one or
+    /// two a pixel are enough.
     bool rayTracedOcclusion = false;
-    int occlusionRayCount = 4;
+    int occlusionRayCount = 1;
     /// And smooth surfaces stop mirroring the sky where something stands between them and it.
     bool rayTracedReflections = false;
     /// Global illumination, one bounce: the rays of the ambient light also bring back the
@@ -139,7 +151,15 @@ struct RenderSettings {
     float bloomKnee = 0.5f;
 
     float exposure = 1.0f;
-    int toneMapper = 0;                         // 0 ACES, 1 Reinhard, 2 none
+    int toneMapper = 2;                         // 0 ACES, 1 Reinhard, 2 none
+    float contrast = 1.0f, saturation = 1.0f;   // 1 as it is
+    float temperature = 0.0f, tint = 0.0f;      // -1 to 1: cooler or warmer; greener or more magenta
+    float sharpen = 0.0f;                       // 0 to 1
+    float lensFlare = 0.6f;                     // the sun's light scattered in the camera's glass; 0 none
+    /// Smudges and specks on the camera's glass (a picture of Assets, mostly black): lit up where
+    /// bright light falls on them, by the bloom and the flare. Empty: a clean lens.
+    std::string lensDirt;
+    float lensDirtAmount = 1.0f;
     float vignette = 0.25f;
 
     // The camera's lens and video signal: what makes a picture look filmed, not computed.
@@ -175,14 +195,49 @@ struct RenderSettings {
 /// light and reflections of smooth things; Ultra more rays, rougher reflections, bounced light.
 enum class LightingQuality { Low, Medium, High, Ultra, Custom };
 
+///
+/// What each costs, in rays for each pixel of the picture: Medium about 0.7 (one toward the
+/// sun from what faces it); High about 1 (one more for each four pixels, for the sky's light,
+/// and one from each smooth pixel for what it mirrors); Ultra about 1.3 to 1.5.
 inline void applyLightingQuality(RenderSettings& settings, LightingQuality quality) {
     settings.rayTracedShadows = quality != LightingQuality::Low;
-    settings.shadowRayCount = quality == LightingQuality::Ultra ? 4 : quality == LightingQuality::High ? 2 : 1;
+    settings.shadowRayCount = quality == LightingQuality::Ultra ? 6 : quality == LightingQuality::High ? 4 : 3;
     settings.rayTracedOcclusion = quality == LightingQuality::High || quality == LightingQuality::Ultra;
-    settings.occlusionRayCount = quality == LightingQuality::Ultra ? 4 : 2;
+    settings.occlusionRayCount = quality == LightingQuality::Ultra ? 2 : 1;
     settings.rayTracedReflections = settings.rayTracedOcclusion;
-    settings.reflectionMaxRoughness = quality == LightingQuality::Ultra ? 0.5f : 0.25f;
+    settings.reflectionMaxRoughness = quality == LightingQuality::Ultra ? 0.4f : 0.25f;
     settings.rayTracedBounce = quality == LightingQuality::Ultra;
+}
+
+/// A scene saved when the levels sent several times the rays (up to version 1.1: four toward
+/// the sun and four for the sky's light from every pixel at Ultra) is given the level it was
+/// at, as that level is now. True if the settings were one of those levels and were changed.
+inline bool bringLightingQualityUpToDate(RenderSettings& settings) {
+    if (!settings.rayTracedShadows) return false;
+    bool wasMedium = !settings.rayTracedOcclusion && !settings.rayTracedReflections && settings.shadowRayCount == 1;
+    bool wasHigh = settings.rayTracedOcclusion && settings.rayTracedReflections && !settings.rayTracedBounce && settings.shadowRayCount == 2 &&
+                   settings.occlusionRayCount == 2 && settings.reflectionMaxRoughness == 0.25f;
+    bool wasUltra = settings.rayTracedOcclusion && settings.rayTracedReflections && settings.rayTracedBounce && settings.shadowRayCount == 4 &&
+                    settings.occlusionRayCount == 4 && settings.reflectionMaxRoughness == 0.5f;
+    if (!wasMedium && !wasHigh && !wasUltra) return false;
+    applyLightingQuality(settings, wasUltra ? LightingQuality::Ultra : wasHigh ? LightingQuality::High : LightingQuality::Medium);
+    return true;
+}
+
+/// The settings with no more ray tracing than `most` allows: what a project's quality level
+/// does to what a scene asks for. Low: none; Medium: the sun's shadows; High: and the sky's
+/// light and reflections; Ultra: everything the scene asks.
+inline void limitLightingQuality(RenderSettings& settings, LightingQuality most) {
+    if (most == LightingQuality::Custom || most == LightingQuality::Ultra) return;
+    RenderSettings level = settings;
+    applyLightingQuality(level, most);
+    settings.rayTracedShadows = settings.rayTracedShadows && level.rayTracedShadows;
+    settings.shadowRayCount = std::min(settings.shadowRayCount, level.shadowRayCount);
+    settings.rayTracedOcclusion = settings.rayTracedOcclusion && level.rayTracedOcclusion;
+    settings.occlusionRayCount = std::min(settings.occlusionRayCount, level.occlusionRayCount);
+    settings.rayTracedReflections = settings.rayTracedReflections && level.rayTracedReflections;
+    settings.reflectionMaxRoughness = std::min(settings.reflectionMaxRoughness, level.reflectionMaxRoughness);
+    settings.rayTracedBounce = settings.rayTracedBounce && level.rayTracedBounce;
 }
 
 /// The level the settings are at, or Custom if they were set one by one.
@@ -200,13 +255,42 @@ inline LightingQuality lightingQualityOf(const RenderSettings& settings) {
     return LightingQuality::Custom;
 }
 
+/// What drawing a frame took. The GPU is asked for much more than the scene's own meshes, and
+/// one number for all of it says little: a cube on a floor is two draw calls, but its shadows,
+/// the depth the ambient occlusion reads and the dozen full-screen passes of the bloom and the
+/// tone mapping would make it look like twenty-six. So each kind is counted on its own.
 struct RenderStats {
+    /// What the scene itself is drawn with: one call for each mesh with each material, however
+    /// many copies of it there are, one for each emitter of particles, one for each decal.
     int drawCalls = 0;
+    int shadowDraws = 0;        // the same meshes drawn again into the sun's shadow maps
+    int depthDraws = 0;         // and again before the picture, for what needs to know how far things are (ambient occlusion, water, depth of field)
+    int passes = 0;             // full-screen passes: the sky, ambient occlusion, the bloom's chain, tone mapping
+    int overlayDraws = 0;       // over the scene: the game's interface, the editor's grid and outlines
     int instances = 0;
     int triangles = 0;
     int visibleObjects = 0;
     int culledObjects = 0;
     int lights = 0;
+    int shadowCasters = 0;      // things whose shadow reaches the view: drawn into at least one cascade
+
+    /// Everything the GPU was asked to draw.
+    int total() const { return drawCalls + shadowDraws + depthDraws + passes + overlayDraws; }
+    /// What was added since `before` was read: the cost of what was drawn in between.
+    RenderStats since(const RenderStats& before) const {
+        RenderStats added = *this;
+        added.drawCalls -= before.drawCalls;
+        added.shadowDraws -= before.shadowDraws;
+        added.depthDraws -= before.depthDraws;
+        added.passes -= before.passes;
+        added.overlayDraws -= before.overlayDraws;
+        added.instances -= before.instances;
+        added.triangles -= before.triangles;
+        added.visibleObjects -= before.visibleObjects;
+        added.culledObjects -= before.culledObjects;
+        added.shadowCasters -= before.shadowCasters;
+        return added;
+    }
 };
 
 /// Where the finished frame goes: a drawable's texture, or any texture when rendering off screen.
@@ -226,7 +310,10 @@ public:
     /// Reads a picture of the project by its name: for decals and the color grading table. Set by the Engine.
     std::function<std::shared_ptr<Texture>(const std::string&, TextureFormat)> loadPicture;
     RenderSettings settings;
-    RenderStats stats;                          // of the last frame
+    RenderStats stats;                          // of the last frame: every picture drawn in it, together
+    /// What one of `views` took in the last frame (an editor shows the scene and the game side
+    /// by side: each has its own numbers). Nothing for a view that was not drawn.
+    RenderStats statsOfView(size_t index) const { return index < viewStats_.size() ? viewStats_[index] : RenderStats{}; }
     Profiler* profiler = nullptr;               // sections of the frame on the CPU, if someone keeps them
     /// What the GPU took for the last frame it finished (a frame or two behind the CPU), in milliseconds.
     float lastGpuMilliseconds() const { return lastGpuMilliseconds_.load(std::memory_order_relaxed); }
@@ -279,6 +366,9 @@ public:
 
     /// Draws the scene and the canvas into `target`. `time` is in seconds, for shaders.
     void render(Scene& scene, const Canvas& canvas, const RenderTarget& target, double time);
+    /// The project's quality (Settings/Quality.settings), put over the scene's settings as each
+    /// view is drawn; none: the scene's as they are.
+    const struct GameQuality* quality = nullptr;
 
     /// Draws a frame into memory instead: `width` x `height` pixels, four bytes each (red,
     /// green, blue, alpha), rows from the top. For screenshots and for running without a window.
@@ -291,6 +381,9 @@ public:
     /// True if this GPU traces rays and the ray tracing shaders are in use.
     /// True if the shaders compiled with the extras: water, fog with height, traced ambient light.
     bool hasExtras() const { return shaders_.hasExtras(); }
+    /// Not empty when the engine is drawing with less than its full shaders, because those did
+    /// not compile here: what the compiler said. An editor shows it; a game goes on without.
+    const std::string& shaderProblem() const { return shaders_.degradedError(); }
     /// The hand-written surface shaders in use (materials name them: Material::shader).
     /// Set `surfaceShaders().pathOf` to say where their files are.
     SurfaceShaderSet& surfaceShaders() { return surfaceShaders_; }
@@ -345,7 +438,19 @@ private:
     void drawParticles(MTL::RenderCommandEncoder* encoder, Scene& scene, const View& view);
     void drawDebugLines(MTL::RenderCommandEncoder* encoder);
     void drawCanvas(MTL::RenderCommandEncoder* encoder, const Canvas& canvas, MTL::Texture* target);
-    void renderShadows(MTL::CommandBuffer* commandBuffer, const std::vector<DrawItem>& items, const Cascades& cascades);
+    /// A thing that casts a shadow into the view, and the cascades its shadow reaches (a bit each).
+    struct ShadowCaster {
+        const DrawItem* item = nullptr;
+        uint32_t cascades = 0;
+    };
+    /// What casts into which cascade: only where its shadow can fall on something seen (Cascades::reaches).
+    std::vector<ShadowCaster> findShadowCasters(const std::vector<DrawItem>& items, const Cascades& cascades);
+    /// The sun's shadow maps, every cascade in one pass (see Mesh.metal): a draw for each mesh
+    /// with each material, however many cascades it reaches. Where that pass cannot be made
+    /// (shaders without the extras), a pass for each cascade as before.
+    void renderShadows(MTL::CommandBuffer* commandBuffer, std::vector<ShadowCaster>& casters, const Cascades& cascades,
+                       const FrameAllocator::Allocation& passUniforms, const FrameAllocator::Allocation& frameUniforms);
+    void renderShadowsEachCascade(MTL::CommandBuffer* commandBuffer, const std::vector<ShadowCaster>& casters, const Cascades& cascades);
     void renderOcclusion(MTL::CommandBuffer* commandBuffer, const std::vector<Batch>& opaque, const View& view,
                          const FrameAllocator::Allocation& passUniforms);
     /// Depth and normals of everything opaque, without multisampling: for ambient occlusion,
@@ -354,12 +459,43 @@ private:
     void drawDecals(MTL::RenderCommandEncoder* encoder, Scene& scene, const View& view);
     /// Depth of field, motion blur and the scene's brightness, between the scene and the bloom.
     void renderEffects(MTL::CommandBuffer* commandBuffer, const View& view, float deltaTime);
-    bool wantsDepth() const { return settings.ambientOcclusionEnabled || settings.depthOfField || settings.motionBlur || hasDecals_; }
+    /// True where water can be drawn as something seen into: the shaders have the extras, and
+    /// the GPU hands a fragment function the color already drawn at its pixel (every Apple GPU).
+    bool readsBehindWater() const { return shaders_.hasExtras() && device_.supportsFramebufferRead(); }
+    bool wantsDepth() const {
+        return settings.ambientOcclusionEnabled || settings.depthOfField || settings.motionBlur || hasDecals_ || waterLastFrame_ || particlesWantDepth_ ||
+               wantsTracedAmbient();
+    }
+    /// The light around things is asked to be found with rays: done before the scene, at half
+    /// the size, from the depth and the normals drawn first (renderTracedAmbient).
+    bool wantsTracedAmbient() const {
+        return settings.shadowsEnabled && settings.rayTracedShadows && settings.rayTracedOcclusion && canTraceRays() && shaders_.hasExtras();
+    }
+    /// True if the shaders have the functions of that pass (Shaders/Traced.metal).
+    bool canTraceAmbientFirst();
+    /// The light around each pixel, traced at half the size and smoothed: the picture the
+    /// scene's pass reads it from, or nothing if it could not be drawn.
+    MTL::Texture* renderTracedAmbient(MTL::CommandBuffer* commandBuffer, const View& view, int width, int height, double time,
+                                      const FrameAllocator::Allocation& frameUniforms, bool withBounce);
     void renderScene(MTL::CommandBuffer* commandBuffer, Scene& scene, const std::vector<Batch>& opaque,
                      const std::vector<Batch>& transparent, const View& view, const FrameAllocator::Allocation& passUniforms,
                      const FrameAllocator::Allocation& frameUniforms, const FrameAllocator::Allocation& lights);
     bool buildSceneAccelerationStructure(MTL::CommandBuffer* commandBuffer, const std::vector<DrawItem>& items);
     void renderBloom(MTL::CommandBuffer* commandBuffer);
+    /// Clouds with depth (Clouds.metal): walked through into a picture smaller than the scene's,
+    /// before the scene, for the sky to read. True if they were drawn.
+    bool renderClouds(MTL::CommandBuffer* commandBuffer, const View& view, int width, int height, double time, const FrameAllocator::Allocation& frameUniforms);
+    /// The blocks of noise the clouds are made of are worked out on another thread while the
+    /// engine starts: taken here once they are done, and sent to the GPU.
+    void takeCloudNoise();
+    /// True when clouds with depth can be drawn now: asked for, some of them in the sky, the
+    /// noise ready, the shaders with the extras.
+    bool marchesClouds() const {
+        return cloudShape_ && cloudDetail_ && shaders_.hasExtras() && settings.sky.cloudsHaveDepth && settings.sky.cloudCoverage > 0;
+    }
+    /// The bloom's chain of passes (eleven of them) is drawn only when it adds something to
+    /// the picture: on, and with some strength.
+    bool hasBloom() const { return settings.bloomEnabled && !bloom_.empty() && settings.bloomIntensity > 0; }
     void renderFinal(MTL::CommandBuffer* commandBuffer, const Canvas& canvas, const RenderTarget& target, bool withOverlay);
     /// One whole picture of the scene into `target`: everything from shadows to tone mapping.
     void renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const Canvas& canvas, const RenderTarget& target, double time,
@@ -406,11 +542,16 @@ private:
     NS::SharedPtr<MTL::Texture> postColor_, luminance_, adapted_[2];
     int adaptIndex_ = 0;
     Mat4 previousViewProjection_ = identity();
+    Mat4 flareViewProjection_ = identity();      // the last view drawn, and the sun then: for the lens flare
+    Vec3 flareSunDirection_{0, -1, 0};
+    Vec3 flareSunColor_{0, 0, 0};
     bool hasPreviousView_ = false;
     double lastViewTime_ = -1;
     bool hasDecals_ = false;
     std::shared_ptr<Texture> lut_;
     std::string lutName_;
+    std::shared_ptr<Texture> lensDirt_;
+    std::string lensDirtName_;
     // The sea's waves, as a picture water materials read: slope across, slope along, foam, height.
     void prepareOcean(MTL::CommandBuffer* commandBuffer, double time);
     NS::SharedPtr<MTL::Texture> oceanTextures_[kFramesInFlight];
@@ -419,12 +560,24 @@ private:
     int oceanSize_ = 0;
     float oceanPatch_ = 0;
     Vec2 oceanOrigin_{0, 0};
-    bool oceanFed_ = false, waterSeen_ = false;
+    bool oceanFed_ = false, waterSeen_ = false, waterLastFrame_ = false;
+    bool particlesWantDepth_ = false;       // some particles are soft: they read how far the opaque scene is
+    std::unordered_map<std::string, std::shared_ptr<Texture>> particlePictures_;     // the pictures of particles, by name
+    /// A fine grid in place of a plane with a water material, made once for each such mesh.
+    Mesh* waterGridFor(Mesh* mesh) const;
+    mutable std::unordered_map<const Mesh*, std::unique_ptr<Mesh>> waterGrids_;
     std::shared_ptr<class Ocean> defaultOcean_;
     Vec3 defaultOceanWind_{0, 0, 0};
     MTL::Texture* upscaleLUT_ = nullptr;            // what renderFinal hands to the tone mapping before MetalFX
     MTL::Texture* upscaleAdapted_ = nullptr;
+    MTL::Texture* upscaleDirt_ = nullptr;
     NS::SharedPtr<MTL::Texture> prepassDepth_, prepassNormal_, occlusionRaw_, occlusion_;
+    NS::SharedPtr<MTL::Texture> tracedLight_[2], tracedSurface_;       // the light around things traced before the scene, half its size
+    MTL::Texture* tracedLightDrawn_ = nullptr;      // which of the two holds it, smoothed, for the picture being drawn; nothing if it was not traced
+    NS::SharedPtr<MTL::Texture> cloudColor_;        // the clouds of this picture: their light, and how much shows through them
+    bool cloudsDrawn_ = false;                      // into cloudColor_, for the picture being drawn
+    std::future<CloudNoise> cloudNoiseMaking_;
+    NS::SharedPtr<MTL::Texture> cloudShape_, cloudDetail_;      // the two blocks of noise, on the GPU
     std::vector<NS::SharedPtr<MTL::Texture>> bloom_;
     NS::SharedPtr<MTL::Texture> shadowMap_;
     int shadowMapSize_ = 0, shadowMapSlices_ = 0;
@@ -444,7 +597,7 @@ private:
         int width = 0, height = 0, samples = 0;
         bool hasOcclusion = false;
         NS::SharedPtr<MTL::Texture> colorMultisample, depth, color, prepassDepth, prepassNormal, occlusionRaw, occlusion;
-        NS::SharedPtr<MTL::Texture> postColor, luminance, adapted[2];
+        NS::SharedPtr<MTL::Texture> postColor, luminance, adapted[2], cloudColor, tracedLight[2], tracedSurface;
         int adaptIndex = 0;
         Mat4 previousViewProjection = identity();
         bool hasPreviousView = false;
@@ -453,6 +606,7 @@ private:
         Upscaler upscaler;
     };
     std::vector<TargetSet> targetSets_;                             // one per picture drawn in a frame
+    std::vector<RenderStats> viewStats_;                            // what each of `views` took, last frame
     std::vector<NS::SharedPtr<MTL::Texture>> viewColors_;           // the finished pictures of `views`
     std::vector<NS::SharedPtr<MTL::Texture>> retiredTextures_;      // replaced this frame; someone may still draw with them
     bool drawsDebugLines_ = true;                                   // in the picture being drawn

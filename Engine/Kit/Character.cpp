@@ -179,7 +179,8 @@ void CharacterMover::fixedUpdate(World& world, Entity self, float dt) {
     float x = world.input.axis("moveX"), z = world.input.axis("moveZ");     // W is -1 along moveZ
     Vec3 wish = right * x - forward * z;
     if (simd::length(wish) > 1) wish = simd::normalize(wish);
-    bool runs = alwaysRuns || world.input.isDown("run") || world.input.isDown(Key::LeftShift);
+    // Shift (the action "run") is the other pace: running for one that walks, walking for one that always runs.
+    bool runs = alwaysRuns != (world.input.isDown("run") || world.input.isDown(Key::LeftShift));
     Vec3 target = wish * (runs ? runSpeed : walkSpeed);
 
     // Along the ground: toward what is wanted, at the rate it can change.
@@ -227,7 +228,7 @@ void CharacterMover::fixedUpdate(World& world, Entity self, float dt) {
     }
 
     // Facing where it goes.
-    if (simd::length_squared(wish) > 0.01f) {
+    if (turnsToFace && simd::length_squared(wish) > 0.01f) {
         Quat wanted = lookRotation(wish);
         transform->rotation = simd::normalize(simd::slerp(transform->rotation, wanted, std::min(turnSpeed * dt, 1.0f)));
     }
@@ -240,9 +241,10 @@ void OrbitCamera::lateUpdate(World& world, Entity self, float dt) {
     Entity followed = world.find(target);
     const Transform* subject = world.scene.get<Transform>(followed);
     if (!transform || !subject) return;
+    // Turned by the mouse (dragging, or all the time once the game has the pointer), or with the right stick.
+    bool turns = capturesMouse && mouseTurnsView(world, askedForPointer);
     const Input& input = world.input;
-    // Turned by dragging with the mouse, or with the right stick.
-    if (input.isDown(MouseButton::Left) || input.isDown(MouseButton::Right)) {
+    if (turns || input.isDown(MouseButton::Left) || input.isDown(MouseButton::Right)) {
         Vec2 delta = input.mouseDelta();
         yaw -= delta.x * mouseSensitivity;
         pitch += delta.y * mouseSensitivity;
@@ -269,21 +271,73 @@ void OrbitCamera::lateUpdate(World& world, Entity self, float dt) {
     transform->rotation = lookRotation(focus - eye);
 }
 
+// ---------------------------------------------------------------- FirstPersonLook
+
+bool mouseTurnsView(World& world, bool& asked) {
+    Input& input = world.input;
+    if (!asked) {
+        asked = true;
+        input.setPointerCaptured(true);
+    } else if (input.wasPressed("pause")) {
+        input.setPointerCaptured(false);
+    } else if (!input.wantsPointerCaptured() && input.wasPressed(MouseButton::Left)) {
+        input.setPointerCaptured(true);
+    }
+    return input.wantsPointerCaptured();
+}
+
+void FirstPersonLook::lateUpdate(World& world, Entity self, float dt) {
+    Transform* eye = world.scene.get<Transform>(self);
+    if (!eye) return;
+    Transform* body = world.scene.get<Transform>(eye->parent);
+    if (!hasStarted) {
+        hasStarted = true;
+        yaw = degrees(toEulerAngles(body ? body->rotation : eye->rotation).y);
+    }
+    const Input& input = world.input;
+    bool turns = takesPointer ? mouseTurnsView(world, askedForPointer) : input.isDown(MouseButton::Left) || input.isDown(MouseButton::Right);
+    if (turns) {
+        Vec2 delta = input.mouseDelta();
+        yaw -= delta.x * mouseSensitivity;
+        pitch -= delta.y * mouseSensitivity;
+    }
+    yaw -= input.axis(GamepadAxis::RightX) * stickSpeed * dt;
+    pitch += input.axis(GamepadAxis::RightY) * stickSpeed * dt;
+    pitch = std::clamp(pitch, minPitch, maxPitch);
+    yaw = std::fmod(yaw, 360.0f);
+    // A kick is taken back quickly at first, then gently.
+    float back = std::exp(-9.0f * dt);
+    kickPitch *= back, kickYaw *= back;
+    Quat aside(radians(yaw + kickYaw), Vec3{0, 1, 0}), up(radians(std::clamp(pitch + kickPitch, -89.0f, 89.0f)), Vec3{1, 0, 0});
+    if (body) {
+        body->rotation = aside;
+        eye->rotation = up;
+    } else {
+        eye->rotation = aside * up;
+    }
+}
+
 }  // namespace molten::kit
 
 namespace molten::kit {
 
+MOLTEN_COMPONENT(FirstPersonLook, MOLTEN_FIELD(mouseSensitivity).range(0, 2).help("Degrees for each point the mouse moves"),
+                 MOLTEN_FIELD(stickSpeed).range(0, 720).help("Degrees a second with the right stick pushed all the way"), MOLTEN_FIELD(minPitch).range(-89, 0),
+                 MOLTEN_FIELD(maxPitch).range(0, 89),
+                 MOLTEN_FIELD(takesPointer).help("The mouse turns it without a button held: Esc gives the pointer back, a click takes it again"))
 MOLTEN_COMPONENT(CharacterController, MOLTEN_FIELD(radius).range(0.05f, 3), MOLTEN_FIELD(height).range(0.2f, 6),
                  MOLTEN_FIELD(stepHeight).range(0, 1).help("Steps and curbs up to this are walked up"),
                  MOLTEN_FIELD(slopeLimit).range(0, 89).help("Degrees: steeper ground is slid down, not stood on"),
                  MOLTEN_FIELD(pushStrength).range(0, 10).help("How hard it shoves bodies that move"))
 MOLTEN_COMPONENT(CharacterMover, MOLTEN_FIELD(walkSpeed).range(0, 20), MOLTEN_FIELD(runSpeed).range(0, 30).help("With the action \"run\" or Shift held"),
-                 MOLTEN_FIELD(alwaysRuns), MOLTEN_FIELD(acceleration).range(0, 100), MOLTEN_FIELD(airControl).range(0, 1),
+                 MOLTEN_FIELD(alwaysRuns).help("It runs, and Shift walks"), MOLTEN_FIELD(acceleration).range(0, 100), MOLTEN_FIELD(airControl).range(0, 1),
                  MOLTEN_FIELD(jumpHeight).range(0, 10), MOLTEN_FIELD(gravity).range(0, 100), MOLTEN_FIELD(turnSpeed).range(0, 40),
+                 MOLTEN_FIELD(turnsToFace).help("Off for a body seen from its own eyes, which its view turns"),
                  MOLTEN_FIELD(camera).picks("entity").help("The camera whose view sets forward; empty for the active one"))
 MOLTEN_COMPONENT(OrbitCamera, MOLTEN_FIELD(target).picks("entity"), MOLTEN_FIELD(distance).range(0.5f, 50), MOLTEN_FIELD(height).range(-5, 10),
                  MOLTEN_FIELD(yaw).range(-360, 360), MOLTEN_FIELD(pitch).range(-89, 89), MOLTEN_FIELD(minPitch).range(-89, 89),
                  MOLTEN_FIELD(maxPitch).range(-89, 89), MOLTEN_FIELD(mouseSensitivity).range(0, 2), MOLTEN_FIELD(stickSpeed).range(0, 720),
-                 MOLTEN_FIELD(avoidsWalls), MOLTEN_FIELD(smoothness).range(0, 40))
+                 MOLTEN_FIELD(avoidsWalls), MOLTEN_FIELD(smoothness).range(0, 40),
+                 MOLTEN_FIELD(capturesMouse).help("The mouse turns it without a button held: Esc gives the pointer back, a click takes it again"))
 
 }  // namespace molten::kit

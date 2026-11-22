@@ -125,7 +125,13 @@ std::shared_ptr<Texture> Assets::texture(const std::string& name, TextureFormat 
         if (settings.use == ImportSettings::Use::Data) format = TextureFormat::RGBA8;
     }
     std::shared_ptr<Texture> texture;
-    if (format != TextureFormat::R8 && (settings.maxSize > 0 || settings.flipsVertically)) {
+    auto ahead = preloadedPictures_.find(name);
+    if (ahead != preloadedPictures_.end() && format != TextureFormat::R8) {
+        // Decoded already, while a scene was being read on other threads.
+        Pixels ready = std::move(ahead->second);
+        if (settings.maxSize > 0 || settings.flipsVertically) settings.apply(ready.pixels, ready.width, ready.height);
+        texture = Texture::fromPixels(device_, ready.pixels.data(), ready.width, ready.height, format, settings.mipmaps);
+    } else if (format != TextureFormat::R8 && (settings.maxSize > 0 || settings.flipsVertically)) {
         std::vector<uint8_t> pixels;
         int width = 0, height = 0;
         if (Texture::readPixels(file, pixels, width, height)) {
@@ -141,6 +147,9 @@ std::shared_ptr<Texture> Assets::texture(const std::string& name, TextureFormat 
         texture->name = name;
         texture->isPixelated = settings.isPixelated;
     }
+    // Once made (or once it failed), what was decoded ahead is not needed again: the same
+    // picture asked for as data after color is read from its file, as before.
+    if (ahead != preloadedPictures_.end()) preloadedPictures_.erase(name);
     textures_[key] = texture;           // a failed load is remembered too, so it is reported once
     return texture;
 }

@@ -1,0 +1,1810 @@
+molten-scene 1
+settings
+  skyZenith 0.06 0.2 0.52
+  skyHorizon 0.5 0.66 0.84
+  skyGround 0.16 0.17 0.16
+  skyIntensity 1
+  environmentIntensity 1
+  fog 0.62 0.72 0.84 0
+  shadows 1 80
+  rayTracedShadows 0 4
+  rayTracedLighting 0 1 0 0 1
+  rayTracedReflections 0.3 1
+  fogShape 0 0
+  wind 0 0 0 0.4
+  ambientOcclusion 1 0.6 1
+  bloom 1 0.06 1
+  exposure 1
+  resolution 1 1 0 60 0.6
+  toneMapper 2
+  vignette 0.25
+  clouds 0.25 1 1500 1200
+  volumetrics 1 0
+  lens 0 0 0
+  lensFlare 0.6
+entity "Sun"
+  transform 0 60 0 -0.33884355 -0.30394405 -0.116673194 0.8827176 1 1 1
+  light directional 1 0.95 0.86 4.2 10 0.34906584 0.5235988 1 1 2 1
+entity "Yard"
+  transform 0 0 0 0 0 0 1 1 1 1
+entity "Land"
+  transform 0 -0.52 0 0 0 0 1 240 1 240
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Grass.material"
+  collider box 120 0.5 120 0 0 0 0
+entity "Floor"
+  transform 0 -0.5 0 0 0 0 1 51 1.02 51
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Ground.material"
+  collider box 25.5 0.51 25.5 0 0 0 0
+entity "North Wall"
+  transform 0 1.75 -25.5 0 0 0 1 52 3.5 1
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Wall.material"
+  collider box 26 1.75 0.5 0 0 0 0
+entity "South Wall"
+  transform 0 1.75 25.5 0 0 0 1 52 3.5 1
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Wall.material"
+  collider box 26 1.75 0.5 0 0 0 0
+entity "East Wall"
+  transform 25.5 1.75 0 0 0 0 1 1 3.5 50
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Wall.material"
+  collider box 0.5 1.75 25 0 0 0 0
+entity "West Wall"
+  transform -25.5 1.75 0 0 0 0 1 1 3.5 50
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Wall.material"
+  collider box 0.5 1.75 25 0 0 0 0
+entity "Trees"
+  transform 0 0 0 0 0 0 1 1 1 1
+entity "Tree 1"
+  transform -59.5321 0 -28.12616 0 0.8467887 0 -0.53192943 1.2462496 1.2462496 1.2462496
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 9
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 9
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 2"
+  transform -29.870613 0 -48.269947 0 0.09896892 0 0.99509054 1.3168015 1.3168015 1.3168015
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 12
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 12
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 3"
+  transform 21.626976 0 -89.21708 0 0.95345366 0 0.30153963 1.2522442 1.2522442 1.2522442
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 15
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 15
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 4"
+  transform -77.07132 0 45.933014 0 0.7239668 0 -0.68983483 1.0568092 1.0568092 1.0568092
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 18
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 18
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 5"
+  transform 18.765839 0 -34.926723 0 0.6982632 0 -0.71584105 1.4514949 1.4514949 1.4514949
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 21
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 21
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 6"
+  transform -26.217999 0 -37.951508 0 0.6195643 0 0.7849459 1.3700008 1.3700008 1.3700008
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 24
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 24
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 7"
+  transform -75.464096 0 -87.65813 0 0.43734527 0 0.89929366 1.2925562 1.2925562 1.2925562
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 27
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 27
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 8"
+  transform -70.26198 0 -61.441154 0 0.48723426 0 0.8732713 1.4510655 1.4510655 1.4510655
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 30
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 30
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 9"
+  transform -47.124825 0 -28.503399 0 0.18801078 0 -0.98216695 1.4300163 1.4300163 1.4300163
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 33
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 33
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 10"
+  transform 23.313599 0 -51.213444 0 0.9110518 0 0.4122919 1.1105781 1.1105781 1.1105781
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 36
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 36
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 11"
+  transform -5.888031 0 73.43153 0 0.8312825 0 0.55585015 0.9683881 0.9683881 0.9683881
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 39
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 39
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 12"
+  transform 9.81897 0 45.51042 0 0.060971703 0 0.9981395 0.8696517 0.8696517 0.8696517
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 42
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 42
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 13"
+  transform -29.936676 0 -59.367138 0 0.4983239 0 0.8669909 1.4385252 1.4385252 1.4385252
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 45
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 45
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 14"
+  transform -58.10549 0 52.753693 0 0.007564385 0 -0.9999714 1.0417999 1.0417999 1.0417999
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 48
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 48
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 15"
+  transform 40.88344 0 45.02603 0 0.8508095 0 -0.52547425 1.4134634 1.4134634 1.4134634
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 51
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 51
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 16"
+  transform 34.809814 0 62.98024 0 0.88597816 0 -0.46372697 0.9398941 0.9398941 0.9398941
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 54
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 54
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 17"
+  transform 37.585213 0 26.937508 0 0.9403599 0 0.34018126 1.2276165 1.2276165 1.2276165
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 57
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 57
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 18"
+  transform 69.19441 0 -49.015766 0 0.9979234 0 0.064412035 1.3979686 1.3979686 1.3979686
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 60
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 60
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 19"
+  transform -0.78588104 0 88.3613 0 0.6764834 0 -0.7364579 1.0282496 1.0282496 1.0282496
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 63
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 63
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 20"
+  transform 51.50638 0 35.383812 0 0.08499812 0 -0.9963811 1.0399265 1.0399265 1.0399265
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 66
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 66
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 21"
+  transform -67.082596 0 -33.195057 0 0.88597405 0 -0.46373478 0.88645875 0.88645875 0.88645875
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 69
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 69
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 22"
+  transform -71.03981 0 -17.88588 0 0.39852124 0 0.9171591 1.0916511 1.0916511 1.0916511
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 72
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 72
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 23"
+  transform -42.63523 0 -21.01725 0 0.99063355 0 -0.13654716 0.89322674 0.89322674 0.89322674
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 75
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 75
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 24"
+  transform 32.13781 0 5.359352 0 0.9934315 0 0.114428334 1.2441225 1.2441225 1.2441225
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 78
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 78
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 25"
+  transform 51.655167 0 85.74014 0 0.47644678 0 0.8792033 1.1104219 1.1104219 1.1104219
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 81
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 81
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 26"
+  transform 60.837936 0 7.2390747 0 0.94632703 0 0.32321072 1.4403234 1.4403234 1.4403234
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 84
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 84
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 27"
+  transform -39.649555 0 82.24736 0 0.71684134 0 -0.6972363 1.4817047 1.4817047 1.4817047
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 87
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 87
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 28"
+  transform 65.76068 0 64.07451 0 0.21283852 0 -0.9770874 1.497884 1.497884 1.497884
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 90
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 90
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 29"
+  transform 55.472534 0 -15.302216 0 0.9957548 0 -0.09204565 0.8280592 0.8280592 0.8280592
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 93
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 93
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 30"
+  transform 14.132149 0 -74.92656 0 0.31397387 0 0.9494316 1.2767498 1.2767498 1.2767498
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 96
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 96
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 31"
+  transform -43.8519 0 54.8051 0 0.51049453 0 -0.859881 0.9393419 0.9393419 0.9393419
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 99
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 99
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 32"
+  transform 9.296722 0 31.729431 0 0.9621377 0 0.27256382 1.2298732 1.2298732 1.2298732
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 102
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 102
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 33"
+  transform -39.750908 0 -38.96806 0 0.9228837 0 -0.38507876 1.1987159 1.1987159 1.1987159
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 105
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 105
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 34"
+  transform 47.039276 0 39.068665 0 0.66338366 0 -0.7482794 1.3188047 1.3188047 1.3188047
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 108
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 108
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 35"
+  transform 40.921524 0 -28.399231 0 0.5713649 0 0.8206961 0.8920083 0.8920083 0.8920083
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 111
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 111
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 36"
+  transform 80.995544 0 40.239014 0 0.29367596 0 -0.955905 1.2018168 1.2018168 1.2018168
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 114
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 114
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 37"
+  transform -58.525246 0 -7.6708374 0 0.98204666 0 -0.18863809 1.4909413 1.4909413 1.4909413
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 117
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 117
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 38"
+  transform -62.018753 0 69.031204 0 0.37366635 0 -0.9275632 1.2269776 1.2269776 1.2269776
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 120
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 120
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 39"
+  transform 50.87294 0 -52.06058 0 0.999227 0 -0.039311573 0.9250451 0.9250451 0.9250451
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 123
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 123
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Tree 40"
+  transform -49.2347 0 -32.79133 0 0.6089343 0 0.7932207 1.3480003 1.3480003 1.3480003
+  parent 8
+entity "Trunk"
+  transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
+  parent 126
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bark.material"
+entity "Crown"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 126
+  mesh "Models/Pine.obj" -1 1 1 1 1 1 1
+  materialAsset "Materials/Leaves.material"
+entity "Firing Line"
+  transform 0 0.5 14.5 0 0 0 1 11 1 0.5
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Cover.material"
+  collider box 5.5 0.5 0.25 0 0 0 0
+entity "Line Stripe"
+  transform 0 1.01 14.5 0 0 0 1 11 0.03 0.52
+  parent 1
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Stripe.material"
+entity "Cover 1"
+  transform -9 0.6 6 0 0 0 1 4 1.2 0.5
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Cover.material"
+  collider box 2 0.6 0.25 0 0 0 0
+entity "Cover 2"
+  transform 8 0.6 4.5 0 0 0 1 0.5 1.2 4
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Cover.material"
+  collider box 0.25 0.6 2 0 0 0 0
+entity "Cover 3"
+  transform -2.5 1.5 -3 0 0 0 1 0.6 3 5
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Cover.material"
+  collider box 0.3 1.5 2.5 0 0 0 0
+entity "Cover 4"
+  transform 4.5 1.5 -9 0 0 0 1 5 3 0.6
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Cover.material"
+  collider box 2.5 1.5 0.3 0 0 0 0
+entity "Cover 5"
+  transform -14 1.5 -8 0 0 0 1 5 3 0.6
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Cover.material"
+  collider box 2.5 1.5 0.3 0 0 0 0
+entity "Cover 6"
+  transform 16 0.6 -2 0 0 0 1 3.5 1.2 0.5
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Cover.material"
+  collider box 1.75 0.6 0.25 0 0 0 0
+entity "Cover 7"
+  transform -17 0.6 10 0 0 0 1 0.5 1.2 3.5
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Cover.material"
+  collider box 0.25 0.6 1.75 0 0 0 0
+entity "Deck"
+  transform -20.5 1 -20.5 0 0 0 1 9 2 9
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Cover.material"
+  collider box 4.5 1 4.5 0 0 0 0
+entity "Deck Ramp"
+  transform -12.541208 0.8557714 -22.5 -0 -0 -0.13870122 0.9903343 7.28011 0.3 3
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Crate.material"
+  collider box 3.640055 0.15 1.5 0 0 0 0
+entity "Room West"
+  transform 11 1.5 -20.5 0 0 0 1 0.6 3 5
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Wall.material"
+  collider box 0.3 1.5 2.5 0 0 0 0
+entity "Room South"
+  transform 19 1.5 -14 0 0 0 1 8 3 0.6
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Wall.material"
+  collider box 4 1.5 0.3 0 0 0 0
+entity "Room Middle"
+  transform 17 1.5 -19.5 0 0 0 1 0.6 3 5
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Wall.material"
+  collider box 0.3 1.5 2.5 0 0 0 0
+entity "Big Crate"
+  transform -6 0.75 1 0 0 0 1 1.5 1.5 1.5
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Crate.material"
+  collider box 0.75 0.75 0.75 0 0 0 0
+entity "Big Crate"
+  transform -6 0.75 -0.6 0 0 0 1 1.5 1.5 1.5
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Crate.material"
+  collider box 0.75 0.75 0.75 0 0 0 0
+entity "Big Crate"
+  transform 11.5 0.75 9 0 0 0 1 1.5 1.5 1.5
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Crate.material"
+  collider box 0.75 0.75 0.75 0 0 0 0
+entity "Big Crate"
+  transform 2 0.75 7.5 0 0 0 1 1.5 1.5 1.5
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Crate.material"
+  collider box 0.75 0.75 0.75 0 0 0 0
+entity "Big Crate"
+  transform -19 0.75 -1 0 0 0 1 1.5 1.5 1.5
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Crate.material"
+  collider box 0.75 0.75 0.75 0 0 0 0
+entity "Big Crate"
+  transform 20.5 0.75 -8 0 0 0 1 1.5 1.5 1.5
+  parent 1
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Crate.material"
+  collider box 0.75 0.75 0.75 0 0 0 0
+entity "Loose"
+  transform 0 0 0 0 0 0 1 1 1 1
+entity "Crate"
+  transform -6 1.9 0.2 -0 -0.86602545 -0 0.49999997 0.8 0.8 0.8
+  parent 149
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Crate.material"
+  collider box 0.4 0.4 0.4 0 0 0 0
+  body dynamic 8 0.1 0.6 0.05 1 1 0.08
+entity "Crate"
+  transform 11.5 1.9 9 0 0.90630776 0 -0.42261833 0.8 0.8 0.8
+  parent 149
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Crate.material"
+  collider box 0.4 0.4 0.4 0 0 0 0
+  body dynamic 8 0.1 0.6 0.05 1 1 0.08
+entity "Crate"
+  transform 3.6 0.4 7.2 0 0.58778524 0 0.809017 0.8 0.8 0.8
+  parent 149
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Crate.material"
+  collider box 0.4 0.4 0.4 0 0 0 0
+  body dynamic 8 0.1 0.6 0.05 1 1 0.08
+entity "Crate"
+  transform -12.5 0.4 12 -0 -0.819152 -0 -0.57357645 0.8 0.8 0.8
+  parent 149
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Crate.material"
+  collider box 0.4 0.4 0.4 0 0 0 0
+  body dynamic 8 0.1 0.6 0.05 1 1 0.08
+entity "Crate"
+  transform 17.5 0.4 3 0 0.08715588 0 -0.99619466 0.8 0.8 0.8
+  parent 149
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Crate.material"
+  collider box 0.4 0.4 0.4 0 0 0 0
+  body dynamic 8 0.1 0.6 0.05 1 1 0.08
+entity "Barrel"
+  transform 9 0.55 -1 0 0 0 1 0.7 1.1 0.7
+  parent 149
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Barrel.material"
+  collider box 0.33 0.55 0.33 0 0 0 0
+  body dynamic 14 0.1 0.5 0.05 1 1 0.08
+entity "Barrel"
+  transform 9.9 0.55 -1.5 0 0 0 1 0.7 1.1 0.7
+  parent 149
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Barrel.material"
+  collider box 0.33 0.55 0.33 0 0 0 0
+  body dynamic 14 0.1 0.5 0.05 1 1 0.08
+entity "Barrel"
+  transform -15.5 0.55 3 0 0 0 1 0.7 1.1 0.7
+  parent 149
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Barrel.material"
+  collider box 0.33 0.55 0.33 0 0 0 0
+  body dynamic 14 0.1 0.5 0.05 1 1 0.08
+entity "Barrel"
+  transform 0.8 0.55 -11.5 0 0 0 1 0.7 1.1 0.7
+  parent 149
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Barrel.material"
+  collider box 0.33 0.55 0.33 0 0 0 0
+  body dynamic 14 0.1 0.5 0.05 1 1 0.08
+entity "Targets"
+  transform 0 0 0 0 0 0 1 1 1 1
+entity "Target 1"
+  transform -11 0 4 0 1 0 -4.371139e-08 1 1 1
+  parent 159
+  component "ShootingTarget"
+    field counter "score"
+    field points "1"
+    field standsAfter "0"
+    field fallAngle "86"
+    field sound "Audio/hit.wav"
+entity "Post"
+  transform 0 0.5 0.02 0 0 0 1 0.07 1 0.05
+  parent 160
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Steel.material"
+entity "Plate"
+  transform 0 1.3 0 0.70710677 0 0 0.70710677 0.72 0.04 0.72
+  parent 160
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Target White.material"
+  collider box 0.36 0.03 0.36 0 0 0 0
+entity "Ring"
+  transform 0 1.3 -0.012 0.70710677 0 0 0.70710677 0.5 0.03 0.5
+  parent 160
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target Red.material"
+entity "Inner"
+  transform 0 1.3 -0.02 0.70710677 0 0 0.70710677 0.28 0.03 0.28
+  parent 160
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target White.material"
+entity "Middle"
+  transform 0 1.3 -0.028 0.70710677 0 0 0.70710677 0.1 0.03 0.1
+  parent 160
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target Red.material"
+entity "Target 2"
+  transform 6 0 1 0 1 0 -4.371139e-08 1 1 1
+  parent 159
+  component "ShootingTarget"
+    field counter "score"
+    field points "1"
+    field standsAfter "0"
+    field fallAngle "86"
+    field sound "Audio/hit.wav"
+entity "Post"
+  transform 0 0.5 0.02 0 0 0 1 0.07 1 0.05
+  parent 166
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Steel.material"
+entity "Plate"
+  transform 0 1.3 0 0.70710677 0 0 0.70710677 0.72 0.04 0.72
+  parent 166
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Target White.material"
+  collider box 0.36 0.03 0.36 0 0 0 0
+entity "Ring"
+  transform 0 1.3 -0.012 0.70710677 0 0 0.70710677 0.5 0.03 0.5
+  parent 166
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target Red.material"
+entity "Inner"
+  transform 0 1.3 -0.02 0.70710677 0 0 0.70710677 0.28 0.03 0.28
+  parent 166
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target White.material"
+entity "Middle"
+  transform 0 1.3 -0.028 0.70710677 0 0 0.70710677 0.1 0.03 0.1
+  parent 166
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target Red.material"
+entity "Target 3"
+  transform -5 0 -8 0 1 0 -4.371139e-08 1 1 1
+  parent 159
+  component "ShootingTarget"
+    field counter "score"
+    field points "1"
+    field standsAfter "0"
+    field fallAngle "86"
+    field sound "Audio/hit.wav"
+entity "Post"
+  transform 0 0.5 0.02 0 0 0 1 0.07 1 0.05
+  parent 172
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Steel.material"
+entity "Plate"
+  transform 0 1.3 0 0.70710677 0 0 0.70710677 0.72 0.04 0.72
+  parent 172
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Target White.material"
+  collider box 0.36 0.03 0.36 0 0 0 0
+entity "Ring"
+  transform 0 1.3 -0.012 0.70710677 0 0 0.70710677 0.5 0.03 0.5
+  parent 172
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target Red.material"
+entity "Inner"
+  transform 0 1.3 -0.02 0.70710677 0 0 0.70710677 0.28 0.03 0.28
+  parent 172
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target White.material"
+entity "Middle"
+  transform 0 1.3 -0.028 0.70710677 0 0 0.70710677 0.1 0.03 0.1
+  parent 172
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target Red.material"
+entity "Target 4"
+  transform 2 0 -16 0 1 0 -4.371139e-08 1 1 1
+  parent 159
+  component "ShootingTarget"
+    field counter "score"
+    field points "1"
+    field standsAfter "0"
+    field fallAngle "86"
+    field sound "Audio/hit.wav"
+entity "Post"
+  transform 0 0.5 0.02 0 0 0 1 0.07 1 0.05
+  parent 178
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Steel.material"
+entity "Plate"
+  transform 0 1.3 0 0.70710677 0 0 0.70710677 0.72 0.04 0.72
+  parent 178
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Target White.material"
+  collider box 0.36 0.03 0.36 0 0 0 0
+entity "Ring"
+  transform 0 1.3 -0.012 0.70710677 0 0 0.70710677 0.5 0.03 0.5
+  parent 178
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target Red.material"
+entity "Inner"
+  transform 0 1.3 -0.02 0.70710677 0 0 0.70710677 0.28 0.03 0.28
+  parent 178
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target White.material"
+entity "Middle"
+  transform 0 1.3 -0.028 0.70710677 0 0 0.70710677 0.1 0.03 0.1
+  parent 178
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target Red.material"
+entity "Target 5"
+  transform 12.6 0 -6 0 1 0 -4.371139e-08 1 1 1
+  parent 159
+  component "ShootingTarget"
+    field counter "score"
+    field points "1"
+    field standsAfter "0"
+    field fallAngle "86"
+    field sound "Audio/hit.wav"
+entity "Post"
+  transform 0 0.5 0.02 0 0 0 1 0.07 1 0.05
+  parent 184
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Steel.material"
+entity "Plate"
+  transform 0 1.3 0 0.70710677 0 0 0.70710677 0.72 0.04 0.72
+  parent 184
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Target White.material"
+  collider box 0.36 0.03 0.36 0 0 0 0
+entity "Ring"
+  transform 0 1.3 -0.012 0.70710677 0 0 0.70710677 0.5 0.03 0.5
+  parent 184
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target Red.material"
+entity "Inner"
+  transform 0 1.3 -0.02 0.70710677 0 0 0.70710677 0.28 0.03 0.28
+  parent 184
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target White.material"
+entity "Middle"
+  transform 0 1.3 -0.028 0.70710677 0 0 0.70710677 0.1 0.03 0.1
+  parent 184
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target Red.material"
+entity "Target 6"
+  transform -14 3 -8 0 1 0 -4.371139e-08 1 1 1
+  parent 159
+  component "ShootingTarget"
+    field counter "score"
+    field points "1"
+    field standsAfter "0"
+    field fallAngle "86"
+    field sound "Audio/hit.wav"
+entity "Post"
+  transform 0 0.5 0.02 0 0 0 1 0.07 1 0.05
+  parent 190
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Steel.material"
+entity "Plate"
+  transform 0 1.3 0 0.70710677 0 0 0.70710677 0.72 0.04 0.72
+  parent 190
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Target White.material"
+  collider box 0.36 0.03 0.36 0 0 0 0
+entity "Ring"
+  transform 0 1.3 -0.012 0.70710677 0 0 0.70710677 0.5 0.03 0.5
+  parent 190
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target Red.material"
+entity "Inner"
+  transform 0 1.3 -0.02 0.70710677 0 0 0.70710677 0.28 0.03 0.28
+  parent 190
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target White.material"
+entity "Middle"
+  transform 0 1.3 -0.028 0.70710677 0 0 0.70710677 0.1 0.03 0.1
+  parent 190
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target Red.material"
+entity "Target 7"
+  transform 4.5 3 -9 0 1 0 -4.371139e-08 1 1 1
+  parent 159
+  component "ShootingTarget"
+    field counter "score"
+    field points "1"
+    field standsAfter "0"
+    field fallAngle "86"
+    field sound "Audio/hit.wav"
+entity "Post"
+  transform 0 0.5 0.02 0 0 0 1 0.07 1 0.05
+  parent 196
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Steel.material"
+entity "Plate"
+  transform 0 1.3 0 0.70710677 0 0 0.70710677 0.72 0.04 0.72
+  parent 196
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Target White.material"
+  collider box 0.36 0.03 0.36 0 0 0 0
+entity "Ring"
+  transform 0 1.3 -0.012 0.70710677 0 0 0.70710677 0.5 0.03 0.5
+  parent 196
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target Red.material"
+entity "Inner"
+  transform 0 1.3 -0.02 0.70710677 0 0 0.70710677 0.28 0.03 0.28
+  parent 196
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target White.material"
+entity "Middle"
+  transform 0 1.3 -0.028 0.70710677 0 0 0.70710677 0.1 0.03 0.1
+  parent 196
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target Red.material"
+entity "Target 8"
+  transform 14 0 -21 0 1 0 -4.371139e-08 1 1 1
+  parent 159
+  component "ShootingTarget"
+    field counter "score"
+    field points "1"
+    field standsAfter "0"
+    field fallAngle "86"
+    field sound "Audio/hit.wav"
+entity "Post"
+  transform 0 0.5 0.02 0 0 0 1 0.07 1 0.05
+  parent 202
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Steel.material"
+entity "Plate"
+  transform 0 1.3 0 0.70710677 0 0 0.70710677 0.72 0.04 0.72
+  parent 202
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Target White.material"
+  collider box 0.36 0.03 0.36 0 0 0 0
+entity "Ring"
+  transform 0 1.3 -0.012 0.70710677 0 0 0.70710677 0.5 0.03 0.5
+  parent 202
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target Red.material"
+entity "Inner"
+  transform 0 1.3 -0.02 0.70710677 0 0 0.70710677 0.28 0.03 0.28
+  parent 202
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target White.material"
+entity "Middle"
+  transform 0 1.3 -0.028 0.70710677 0 0 0.70710677 0.1 0.03 0.1
+  parent 202
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target Red.material"
+entity "Target 9"
+  transform 21 0 -18.5 0 0.9238795 0 0.38268343 1 1 1
+  parent 159
+  component "ShootingTarget"
+    field counter "score"
+    field points "1"
+    field standsAfter "0"
+    field fallAngle "86"
+    field sound "Audio/hit.wav"
+entity "Post"
+  transform 0 0.5 0.02 0 0 0 1 0.07 1 0.05
+  parent 208
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Steel.material"
+entity "Plate"
+  transform 0 1.3 0 0.70710677 0 0 0.70710677 0.72 0.04 0.72
+  parent 208
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Target White.material"
+  collider box 0.36 0.03 0.36 0 0 0 0
+entity "Ring"
+  transform 0 1.3 -0.012 0.70710677 0 0 0.70710677 0.5 0.03 0.5
+  parent 208
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target Red.material"
+entity "Inner"
+  transform 0 1.3 -0.02 0.70710677 0 0 0.70710677 0.28 0.03 0.28
+  parent 208
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target White.material"
+entity "Middle"
+  transform 0 1.3 -0.028 0.70710677 0 0 0.70710677 0.1 0.03 0.1
+  parent 208
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target Red.material"
+entity "Target 10"
+  transform -21 2 -22 0 0.9659258 0 -0.25881904 1 1 1
+  parent 159
+  component "ShootingTarget"
+    field counter "score"
+    field points "1"
+    field standsAfter "0"
+    field fallAngle "86"
+    field sound "Audio/hit.wav"
+entity "Post"
+  transform 0 0.5 0.02 0 0 0 1 0.07 1 0.05
+  parent 214
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Steel.material"
+entity "Plate"
+  transform 0 1.3 0 0.70710677 0 0 0.70710677 0.72 0.04 0.72
+  parent 214
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Target White.material"
+  collider box 0.36 0.03 0.36 0 0 0 0
+entity "Ring"
+  transform 0 1.3 -0.012 0.70710677 0 0 0.70710677 0.5 0.03 0.5
+  parent 214
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target Red.material"
+entity "Inner"
+  transform 0 1.3 -0.02 0.70710677 0 0 0.70710677 0.28 0.03 0.28
+  parent 214
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target White.material"
+entity "Middle"
+  transform 0 1.3 -0.028 0.70710677 0 0 0.70710677 0.1 0.03 0.1
+  parent 214
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target Red.material"
+entity "Carriage 1"
+  transform -6 0 -21.5 0 0 0 1 1 1 1
+  parent 159
+  component "Shuttle"
+    field offset "9 0 0"
+    field seconds "6.5"
+    field waits "0"
+    field eases "1"
+entity "Trolley"
+  transform 0 0.08 0.05 0 0 0 1 0.7 0.16 0.4
+  parent 220
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Steel.material"
+entity "Target 11"
+  transform 0 0.1 0 0 1 0 -4.371139e-08 1 1 1
+  parent 220
+  component "ShootingTarget"
+    field counter "score"
+    field points "1"
+    field standsAfter "0"
+    field fallAngle "86"
+    field sound "Audio/hit.wav"
+entity "Post"
+  transform 0 0.5 0.02 0 0 0 1 0.07 1 0.05
+  parent 222
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Steel.material"
+entity "Plate"
+  transform 0 1.3 0 0.70710677 0 0 0.70710677 0.72 0.04 0.72
+  parent 222
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Target White.material"
+  collider box 0.36 0.03 0.36 0 0 0 0
+entity "Ring"
+  transform 0 1.3 -0.012 0.70710677 0 0 0.70710677 0.5 0.03 0.5
+  parent 222
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target Red.material"
+entity "Inner"
+  transform 0 1.3 -0.02 0.70710677 0 0 0.70710677 0.28 0.03 0.28
+  parent 222
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target White.material"
+entity "Middle"
+  transform 0 1.3 -0.028 0.70710677 0 0 0.70710677 0.1 0.03 0.1
+  parent 222
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target Red.material"
+entity "Carriage 2"
+  transform 6 0 -23 0 0 0 1 1 1 1
+  parent 159
+  component "Shuttle"
+    field offset "-9 0 0"
+    field seconds "5"
+    field waits "0"
+    field eases "1"
+entity "Trolley"
+  transform 0 0.08 0.05 0 0 0 1 0.7 0.16 0.4
+  parent 228
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Steel.material"
+entity "Target 12"
+  transform 0 0.1 0 0 1 0 -4.371139e-08 1 1 1
+  parent 228
+  component "ShootingTarget"
+    field counter "score"
+    field points "1"
+    field standsAfter "0"
+    field fallAngle "86"
+    field sound "Audio/hit.wav"
+entity "Post"
+  transform 0 0.5 0.02 0 0 0 1 0.07 1 0.05
+  parent 230
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Steel.material"
+entity "Plate"
+  transform 0 1.3 0 0.70710677 0 0 0.70710677 0.72 0.04 0.72
+  parent 230
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Target White.material"
+  collider box 0.36 0.03 0.36 0 0 0 0
+entity "Ring"
+  transform 0 1.3 -0.012 0.70710677 0 0 0.70710677 0.5 0.03 0.5
+  parent 230
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target Red.material"
+entity "Inner"
+  transform 0 1.3 -0.02 0.70710677 0 0 0.70710677 0.28 0.03 0.28
+  parent 230
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target White.material"
+entity "Middle"
+  transform 0 1.3 -0.028 0.70710677 0 0 0.70710677 0.1 0.03 0.1
+  parent 230
+  mesh "cylinder" -1 1 1 1 1 0 1
+  materialAsset "Materials/Target Red.material"
+entity "Hunter 1"
+  transform -18 1.6 -3 0 1 0 -4.371139e-08 0.8 0.7 0.8
+  mesh "sphere" -1 1 1 1 1 1 1
+  materialAsset "Materials/Hunter.material"
+  collider sphere 0.42 0 0 0 0
+  component "Health"
+    field amount "3"
+    field counter ""
+    field scoreCounter "score"
+    field points "1"
+    field effect "Prefabs/Burst.prefab"
+    field restartsSceneOnDeath "0"
+  component "Hunter"
+    field prey "Player"
+    field sightDistance "24"
+    field speed "3.6"
+    field hoverHeight "1.5"
+    field reach "1.7"
+    field damage "8"
+    field every "0.8"
+    field forgetsAfter "6"
+    field attackSound "Audio/hurt.wav"
+entity "Eye"
+  transform 0 0.02 -0.44 0 0 0 1 0.3 0.34 0.2
+  parent 236
+  mesh "sphere" -1 1 1 1 1 0 1
+  materialAsset "Materials/Hunter Eye.material"
+entity "Mast"
+  transform 0 0.58 0 0 0 0 1 0.08 0.3 0.08
+  parent 236
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Steel.material"
+entity "Rotor"
+  transform 0 0.74 0 0 0 0 1 2.1 0.03 0.16
+  parent 236
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Steel.material"
+  component "Spin"
+    field axis "0 1 0"
+    field degreesPerSecond "1400"
+entity "Rotor Across"
+  transform 0 0 0 0 0 0 1 0.076 1 13.1
+  parent 239
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Steel.material"
+entity "Hunter 2"
+  transform 19 1.6 6 0 1 0 -4.371139e-08 0.8 0.7 0.8
+  mesh "sphere" -1 1 1 1 1 1 1
+  materialAsset "Materials/Hunter.material"
+  collider sphere 0.42 0 0 0 0
+  component "Health"
+    field amount "3"
+    field counter ""
+    field scoreCounter "score"
+    field points "1"
+    field effect "Prefabs/Burst.prefab"
+    field restartsSceneOnDeath "0"
+  component "Hunter"
+    field prey "Player"
+    field sightDistance "24"
+    field speed "3.6"
+    field hoverHeight "1.5"
+    field reach "1.7"
+    field damage "8"
+    field every "0.8"
+    field forgetsAfter "6"
+    field attackSound "Audio/hurt.wav"
+entity "Eye"
+  transform 0 0.02 -0.44 0 0 0 1 0.3 0.34 0.2
+  parent 241
+  mesh "sphere" -1 1 1 1 1 0 1
+  materialAsset "Materials/Hunter Eye.material"
+entity "Mast"
+  transform 0 0.58 0 0 0 0 1 0.08 0.3 0.08
+  parent 241
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Steel.material"
+entity "Rotor"
+  transform 0 0.74 0 0 0 0 1 2.1 0.03 0.16
+  parent 241
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Steel.material"
+  component "Spin"
+    field axis "0 1 0"
+    field degreesPerSecond "1400"
+entity "Rotor Across"
+  transform 0 0 0 0 0 0 1 0.076 1 13.1
+  parent 244
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Steel.material"
+entity "Hunter 3"
+  transform -2.5 1.6 -20 0 1 0 -4.371139e-08 0.8 0.7 0.8
+  mesh "sphere" -1 1 1 1 1 1 1
+  materialAsset "Materials/Hunter.material"
+  collider sphere 0.42 0 0 0 0
+  component "Health"
+    field amount "3"
+    field counter ""
+    field scoreCounter "score"
+    field points "1"
+    field effect "Prefabs/Burst.prefab"
+    field restartsSceneOnDeath "0"
+  component "Hunter"
+    field prey "Player"
+    field sightDistance "24"
+    field speed "3.6"
+    field hoverHeight "1.5"
+    field reach "1.7"
+    field damage "8"
+    field every "0.8"
+    field forgetsAfter "6"
+    field attackSound "Audio/hurt.wav"
+entity "Eye"
+  transform 0 0.02 -0.44 0 0 0 1 0.3 0.34 0.2
+  parent 246
+  mesh "sphere" -1 1 1 1 1 0 1
+  materialAsset "Materials/Hunter Eye.material"
+entity "Mast"
+  transform 0 0.58 0 0 0 0 1 0.08 0.3 0.08
+  parent 246
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Steel.material"
+entity "Rotor"
+  transform 0 0.74 0 0 0 0 1 2.1 0.03 0.16
+  parent 246
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Steel.material"
+  component "Spin"
+    field axis "0 1 0"
+    field degreesPerSecond "1400"
+entity "Rotor Across"
+  transform 0 0 0 0 0 0 1 0.076 1 13.1
+  parent 249
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Steel.material"
+entity "Hunter 4"
+  transform 19.5 1.6 -21 0 1 0 -4.371139e-08 0.8 0.7 0.8
+  mesh "sphere" -1 1 1 1 1 1 1
+  materialAsset "Materials/Hunter.material"
+  collider sphere 0.42 0 0 0 0
+  component "Health"
+    field amount "3"
+    field counter ""
+    field scoreCounter "score"
+    field points "1"
+    field effect "Prefabs/Burst.prefab"
+    field restartsSceneOnDeath "0"
+  component "Hunter"
+    field prey "Player"
+    field sightDistance "24"
+    field speed "3.6"
+    field hoverHeight "1.5"
+    field reach "1.7"
+    field damage "8"
+    field every "0.8"
+    field forgetsAfter "6"
+    field attackSound "Audio/hurt.wav"
+entity "Eye"
+  transform 0 0.02 -0.44 0 0 0 1 0.3 0.34 0.2
+  parent 251
+  mesh "sphere" -1 1 1 1 1 0 1
+  materialAsset "Materials/Hunter Eye.material"
+entity "Mast"
+  transform 0 0.58 0 0 0 0 1 0.08 0.3 0.08
+  parent 251
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Steel.material"
+entity "Rotor"
+  transform 0 0.74 0 0 0 0 1 2.1 0.03 0.16
+  parent 251
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Steel.material"
+  component "Spin"
+    field axis "0 1 0"
+    field degreesPerSecond "1400"
+entity "Rotor Across"
+  transform 0 0 0 0 0 0 1 0.076 1 13.1
+  parent 254
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Steel.material"
+entity "Supplies"
+  transform 0 0 0 0 0 0 1 1 1 1
+entity "Rounds"
+  transform -20.5 2.2 -18.5 0 0 0 1 0.42 0.26 0.28
+  parent 256
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Rounds.material"
+  collider sphere 0.8 0 0 0 1
+  component "Supply"
+    field collector "Player"
+    field rounds "30"
+    field health "0"
+    field mostHealth "100"
+    field sound "Audio/pickup.wav"
+entity "Lid"
+  transform 0 0.52 0 0 0 0 1 1.02 0.1 1.02
+  parent 257
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Stripe.material"
+entity "Rounds"
+  transform 14 0.2 -17 0 0 0 1 0.42 0.26 0.28
+  parent 256
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Rounds.material"
+  collider sphere 0.8 0 0 0 1
+  component "Supply"
+    field collector "Player"
+    field rounds "30"
+    field health "0"
+    field mostHealth "100"
+    field sound "Audio/pickup.wav"
+entity "Lid"
+  transform 0 0.52 0 0 0 0 1 1.02 0.1 1.02
+  parent 259
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Stripe.material"
+entity "Rounds"
+  transform -9 0.2 7.2 0 0 0 1 0.42 0.26 0.28
+  parent 256
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Rounds.material"
+  collider sphere 0.8 0 0 0 1
+  component "Supply"
+    field collector "Player"
+    field rounds "30"
+    field health "0"
+    field mostHealth "100"
+    field sound "Audio/pickup.wav"
+entity "Lid"
+  transform 0 0.52 0 0 0 0 1 1.02 0.1 1.02
+  parent 261
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Stripe.material"
+entity "Bandages"
+  transform 15.5 0.2 -1 0 0 0 1 0.36 0.26 0.36
+  parent 256
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bandage.material"
+  collider sphere 0.8 0 0 0 1
+  component "Supply"
+    field collector "Player"
+    field rounds "0"
+    field health "40"
+    field mostHealth "100"
+    field sound "Audio/pickup.wav"
+entity "Cross"
+  transform 0 0.51 0 0 0 0 1 0.7 0.04 0.22
+  parent 263
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Bandage Cross.material"
+entity "Cross Across"
+  transform 0 0.51 0 0 0 0 1 0.22 0.04 0.7
+  parent 263
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Bandage Cross.material"
+entity "Bandages"
+  transform -19 0.2 11.5 0 0 0 1 0.36 0.26 0.36
+  parent 256
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Bandage.material"
+  collider sphere 0.8 0 0 0 1
+  component "Supply"
+    field collector "Player"
+    field rounds "0"
+    field health "40"
+    field mostHealth "100"
+    field sound "Audio/pickup.wav"
+entity "Cross"
+  transform 0 0.51 0 0 0 0 1 0.7 0.04 0.22
+  parent 266
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Bandage Cross.material"
+entity "Cross Across"
+  transform 0 0.51 0 0 0 0 1 0.22 0.04 0.7
+  parent 266
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Bandage Cross.material"
+entity "Player"
+  transform 0 0.05 19.5 0 0 0 1 1 1 1
+  tag "Player" 0
+  collider capsule 0.35 0.55 0 0.9 0 1
+  component "CharacterController"
+    field radius "0.32"
+    field height "1.8"
+    field stepHeight "0.35"
+    field slopeLimit "50"
+    field pushStrength "1"
+  component "CharacterMover"
+    field walkSpeed "3.6"
+    field runSpeed "6.4"
+    field alwaysRuns "0"
+    field acceleration "34"
+    field airControl "0.35"
+    field jumpHeight "0.9"
+    field gravity "22"
+    field turnSpeed "12"
+    field turnsToFace "0"
+    field camera ""
+  component "Health"
+    field amount "100"
+    field counter "health"
+    field scoreCounter ""
+    field points "0"
+    field effect ""
+    field restartsSceneOnDeath "1"
+entity "Camera"
+  transform 0 1.62 0 0 0 0 1 1 1 1
+  parent 269
+  camera 1.2566371 0.04 400 0 10 1
+  component "FirstPersonLook"
+    field mouseSensitivity "0.12"
+    field stickSpeed "150"
+    field minPitch "-85"
+    field maxPitch "85"
+    field takesPointer "1"
+entity "Rifle"
+  transform 0.165 -0.165 -0.34 0 0 0 1 1 1 1
+  parent 270
+  component "Weapon"
+    field damage "1"
+    field range "150"
+    field fireRate "10"
+    field isAutomatic "1"
+    field magazineSize "30"
+    field reserve "90"
+    field reloadTime "1.45"
+    field spread "0.25"
+    field movingSpread "1.5"
+    field kick "0.9"
+    field push "3"
+    field muzzle "Muzzle"
+    field hitEffect "Prefabs/Impact.prefab"
+    field shotSound "Audio/shot.wav"
+    field emptySound "Audio/empty.wav"
+    field reloadSound "Audio/reload.wav"
+    field counter "ammo"
+    field showsSights "1"
+    field needsPointer "1"
+entity "Receiver"
+  transform 0 0 0 0 0 0 1 0.05 0.078 0.3
+  parent 271
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Gunmetal.material"
+entity "Guard"
+  transform 0 -0.004 -0.265 0 0 0 1 0.046 0.062 0.235
+  parent 271
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Rifle Accent.material"
+entity "Barrel"
+  transform 0 0.008 -0.47 0 0 0 1 0.02 0.02 0.2
+  parent 271
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Gunmetal.material"
+entity "Magazine"
+  transform 0 -0.09 -0.055 -0.104528464 -0 -0 0.9945219 0.036 0.135 0.066
+  parent 271
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Gunmetal.material"
+entity "Grip"
+  transform 0 -0.072 0.088 0.15643448 0 0 0.98768836 0.034 0.095 0.046
+  parent 271
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Gunmetal.material"
+entity "Stock"
+  transform 0 -0.012 0.245 0 0 0 1 0.04 0.064 0.2
+  parent 271
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Rifle Accent.material"
+entity "Rear Sight"
+  transform 0 0.05 0.07 0 0 0 1 0.014 0.024 0.02
+  parent 271
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Gunmetal.material"
+entity "Front Sight"
+  transform 0 0.046 -0.37 0 0 0 1 0.008 0.032 0.012
+  parent 271
+  mesh "cube" -1 1 1 1 1 0 1
+  materialAsset "Materials/Gunmetal.material"
+entity "Muzzle"
+  transform 0 0.008 -0.61 0 0 0 1 1 1 1
+  parent 271
+  light point 1 0.74 0.38 16 8 0.34906584 0.5235988 0 0 2 1
+entity "Flash"
+  transform 0 0 0 0 0 0 1 0.17 0.035 0.01
+  parent 280
+  mesh "cube" -1 1 1 1 1 0 0
+  materialAsset "Materials/Muzzle Flash.material"
+entity "Flash Across"
+  transform 0 0 0 0 0 0.70710677 0.70710677 0.17 0.035 0.01
+  parent 280
+  mesh "cube" -1 1 1 1 1 0 0
+  materialAsset "Materials/Muzzle Flash.material"
+entity "Interface"
+  transform 0 0 0 0 0 0 1 1 1 1
+entity "Count Panel"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 283
+  component "UIPanel"
+    field anchor "0.5 0"
+    field offset "0 40"
+    field size "230 52"
+    field color "0.04 0.045 0.055 0.62"
+    field border "1.5"
+    field borderColor "1 1 1 0.16"
+entity "Count Label"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 283
+  component "HudText"
+    field text "DOWN"
+    field anchor "0.5 0"
+    field offset "-52 30"
+    field font ""
+    field size "13"
+    field color "1 1 1 0.6"
+entity "Count"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 283
+  component "HudText"
+    field text "{score} / 16"
+    field anchor "0.5 0"
+    field offset "46 24"
+    field font ""
+    field size "26"
+    field color "1 0.62 0.28 1"
+entity "Help 1"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 283
+  component "HudText"
+    field text "W A S D   move"
+    field anchor "0 1"
+    field offset "63.399998 -109"
+    field font ""
+    field size "12"
+    field color "1 1 1 0.62"
+entity "Help 2"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 283
+  component "HudText"
+    field text "Shift   run"
+    field anchor "0 1"
+    field offset "54.1 -92"
+    field font ""
+    field size "12"
+    field color "1 1 1 0.62"
+entity "Help 3"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 283
+  component "HudText"
+    field text "Space   jump"
+    field anchor "0 1"
+    field offset "57.199997 -75"
+    field font ""
+    field size "12"
+    field color "1 1 1 0.62"
+entity "Help 4"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 283
+  component "HudText"
+    field text "Mouse   look, fire"
+    field anchor "0 1"
+    field offset "75.8 -58"
+    field font ""
+    field size "12"
+    field color "1 1 1 0.62"
+entity "Help 5"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 283
+  component "HudText"
+    field text "R   load"
+    field anchor "0 1"
+    field offset "44.8 -41"
+    field font ""
+    field size "12"
+    field color "1 1 1 0.62"
+entity "Help 6"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 283
+  component "HudText"
+    field text "Esc   free the pointer"
+    field anchor "0 1"
+    field offset "88.2 -24"
+    field font ""
+    field size "12"
+    field color "1 1 1 0.62"
+entity "Restart"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 283
+  component "UIButton"
+    field label "Restart"
+    field anchor "1 0"
+    field offset "-70 40"
+    field size "104 36"
+    field color "1 1 1 0.16"
+    field textColor "1 1 1 1"
+    field action ""
+    field isRound "0"
+    field radius "50"
+    field onlyOnTouchScreens "0"
+    field scene ""
+    field value ""
+    field amount "1"
+    field font ""
+  component "WhenThen"
+    field when "It is clicked"
+    field who ""
+    field message "doorOpened"
+    field value "score"
+    field atLeast "10"
+    field seconds "0"
+    field once "0"
+    field action1 "Restart scene"
+    field target1 ""
+    field amount1 "1"
+    field action2 "Nothing"
+    field target2 ""
+    field amount2 "1"
+    field action3 "Nothing"
+    field target3 ""
+    field amount3 "1"
+    field action4 "Nothing"
+    field target4 ""
+    field amount4 "1"
+entity "Goal"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 283
+  component "Goal"
+    field counter "score"
+    field target "16"
+    field message "Yard cleared!"
+    field nextScene ""
+    field delay "4"
+entity "Rounds Panel"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 283
+  component "UIPanel"
+    field anchor "1 1"
+    field offset "-112 -62"
+    field size "184 76"
+    field color "0.04 0.045 0.055 0.62"
+    field border "1.5"
+    field borderColor "1 1 1 0.16"
+entity "Rounds"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 283
+  component "HudText"
+    field text "{ammo}"
+    field anchor "1 1"
+    field offset "-146 -88"
+    field font ""
+    field size "40"
+    field color "1 0.62 0.28 1"
+entity "Rounds Besides"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 283
+  component "HudText"
+    field text "/ {ammoReserve}"
+    field anchor "1 1"
+    field offset "-74 -76"
+    field font ""
+    field size "20"
+    field color "1 1 1 0.7"
+entity "Loading"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 283
+  component "UIBar"
+    field value "ammoLoading"
+    field most "1"
+    field anchor "1 1"
+    field offset "-112 -34"
+    field size "160 5"
+    field color "1 0.62 0.28 1"
+    field backColor "1 1 1 0.1"
+entity "Health"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 283
+  component "UIBar"
+    field value "health"
+    field most "100"
+    field anchor "0.5 1"
+    field offset "0 -34"
+    field size "280 12"
+    field color "0.36 0.82 0.42 1"
+    field backColor "0 0 0 0.5"
+entity "Hurt"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 283
+  component "DamageFlash"
+    field value "health"
+    field color "0.9 0.05 0.03"
+    field seconds "0.6"
+    field sound "Audio/hurt.wav"

@@ -49,7 +49,9 @@ Before any pass, the renderer walks the scene once and builds plain arrays: the 
 
 | | Pass | Draws into | Notes |
 |---|---|---|---|
-| 0 | Environment | sky cubemap, irradiance cubemap, prefiltered cubemap, BRDF table | Only when the sky changes. One small pass per cube face and mip level. |
+| 0 | Environment | sky cubemap, irradiance cubemap, prefiltered cubemap, BRDF table | Only when the sky changes, and then at most every sixth frame it is asked (`skyBarelyChanged`). One small pass per cube face and mip level. With clouds that have depth, the clouds are in it. |
+| 0b | Clouds | a color texture at part of the screen's size | Only with clouds that have depth: marched through two noise textures made once on another thread (`Rendering/CloudNoise`), at the steps and size the quality allows. The sky reads it. |
+| 0c | Traced ambient | light and surface, at half size; then two or three smoothing passes | Only when ambient occlusion or bounced light is ray traced: see Ray tracing. It then stands in for passes 2 and 3. |
 | 1 | Shadow maps | one slice of a depth array per cascade | Depth only. Depth clamping keeps casters that are in front of the cascade's box. |
 | 2 | Depth and normals | depth + view-space normals | Only if ambient occlusion is on. Not multisampled. |
 | 3 | Ambient occlusion, blur | one-channel textures | Twelve samples per pixel in a hemisphere, then a 4 x 4 blur. |
@@ -60,6 +62,12 @@ Before any pass, the renderer walks the scene once and builds plain arrays: the 
 The scene is drawn **forward**: one fragment function computes a pixel completely. That suits Apple GPUs, which determine the visible surface of every pixel before running any fragment function, and it works with multisampling and transparency without special cases.
 
 **Shadows.** The view distance is cut into four slices, and each gets its own shadow map fitted around it (`Rendering/Cascades`). Each cascade is a sphere around its slice, snapped to whole texels, so shadows do not shimmer as the camera moves or turns. The lookup is offset along the surface normal by two texels, which removes self-shadowing without pushing shadows away from their casters.
+
+Where the GPU allows it, the four are drawn in one pass into the four layers of the array: each caster is drawn once for every cascade its shadow reaches (`Cascades::reaches`), as copies that name their layer (`vertex_shadow`), instead of four passes over everything. A frame in which nothing casts a shadow into the view has no shadow pass.
+
+**What it cost.** `RenderStats` counts by kind, because one number says little: the scene's own draw calls (one for each mesh with each material, however many copies), the same meshes drawn again for shadows and for depth, the full-screen passes (sky, ambient occlusion, the bloom's chain, tone mapping), and what is drawn over the scene (the interface, the editor's grid). The editor's status bar shows the first and tells the rest when asked.
+
+**Water** is drawn after everything opaque and reads the picture behind it in its own fragment function (the color already in the target, where the GPU gives it; a copy otherwise): what is under the surface is seen through it, bent by the waves and dimmed with depth, with the sky's reflection over it.
 
 **Image-based lighting.** The sky is a few lines of shader code. It is rendered into a cubemap, and that cubemap is filtered into the two maps of the split-sum approximation. Reflections and ambient light therefore always agree with the sky the player sees, and changing the sky's colors relights the scene.
 
@@ -96,6 +104,8 @@ On a GPU that can trace rays (`GraphicsDevice::supportsRayTracing`), every `Mesh
 
 Ray-traced sun shadows (`RenderSettings::rayTracedShadows`) are computed in the forward pass itself: the fragment function sends a few rays from the pixel toward different points of the sun's disk and counts how many arrive (`sunVisibilityTraced` in `Shaders/Lighting.metal`). The spread of the rays is turned by a different angle in every pixel, which trades banding for fine grain.
 
+What a ray costs decides the rest. A sun shadow is one ray a pixel, and more only where the first rays of neighboring pixels disagree (`fwidth` of what they found: the edge of a shadow), so that the middle of a lit wall and the middle of a shadow cost the same one ray. Ambient occlusion and bounced light are not traced in the forward pass at all: before it, `fragment_traced_ambient` (`Shaders/Traced.metal`) traces them at half the size into two textures (the light, and the depth and normal it was traced for), which are then smoothed two or three times across pixels of the same surface only (`sameSurface`: the same plane, near enough). The forward pass reads the result (`tracedAmbientAt`) when the frame says it is there (`tracedAmbientReady`), and falls back to tracing per pixel when it is not. At the highest setting that is about 1.3 rays a pixel where it used to be eleven.
+
 Two decisions keep this from ever breaking a frame that does not use it:
 
 - The ray tracing code is inside `#if MOLTEN_RAYTRACING`, and the shaders are compiled with it only on a GPU that supports it. If that compilation fails, the engine compiles again without it and says so.
@@ -120,7 +130,21 @@ Two decisions keep this from ever breaking a frame that does not use it:
 
 Components hear about physics through `onCollision` and `onTriggerEnter`: the physics step collects the contacts and triggers that began, and `World::dispatchPhysicsEvents` tells both entities of each pair afterwards, so the code is free to destroy and spawn. `loadScene` and `reloadScene` only note what was asked; the scene is replaced at the end of the frame. A reload returns to the text the scene was loaded from (or that the editor handed over when Play was pressed), not to a file.
 
-`Engine/Kit` is gameplay written on top of this and nothing else: the ready-made components (`Kit.cpp`) and the effect presets (`Effects.cpp`). The templates in `Templates/` are scenes that use them.
+`Engine/Kit` is gameplay written on top of this and nothing else: the ready-made components (`Kit.cpp`), vehicles, characters (`Character.cpp`: the capsule, the mover, the cameras behind and from the eyes), shooting (`Shooting.cpp`), navigation, the interface's pieces, the effect presets (`Effects.cpp`), and playing together (`Network.cpp`). The templates in `Templates/` are scenes that use them and nothing else: no template has code of its own. They are made by code in the tests (`Tests/StarterGames.cpp`, and `Tests/StarterFigure.cpp` for the animated figure), which also plays each of them to its end without a screen.
+
+## What the picture costs: quality
+
+A scene says what it wants (shadows this far, ray traced reflections, clouds with depth); the project's quality says how much of that this game gives (`Rendering/Quality`, Project Settings > Quality). `GameQuality` is four levels (Low to Ultra, or Custom) over seven groups (resolution, anti-aliasing, shadows, ray tracing, effects, sky, detail); the renderer takes the lesser of the two for every number: a shadow distance is `min(scene, quality)`, a render scale multiplies, what is on must be on in both. `applyLightingQuality` turns a level into ray counts; `bringLightingQualityUpToDate` reads older scenes' presets as the nearest of them.
+
+Dynamic resolution belongs to the quality too: `adjustDynamicScale` compares the GPU's time for the last frames with the time a frame may take at the target rate, and `nextDynamicScale` goes straight down to the scale that fits and back up a twentieth at a time.
+
+## Machines that play together
+
+`Engine/Net` is two layers, neither of which knows what a game is. A `NetTransport` sends and receives packets: UDP (`Udp.cpp`, the sockets every Unix has), or the ends of a `MemoryNetwork`, which is nothing but memory, with loss and delay to ask for. A `NetHost` is one end of a game on a transport: it listens and numbers those who join, or joins one that listens. Every packet says which packets of the other side have arrived (the newest, and a bit for each of the 32 before it); what was sent as reliable is sent again until a packet that carried it is heard of, and is handed over in the order it was sent; the rest goes once. Who is silent for eight seconds is gone.
+
+`Kit/Network` is what a game uses. `NetworkSession` (one in a scene) decides who is in, gives each player a copy of the player prefab and passes messages on; `Networked` makes an entity the same thing on every machine. Things of the scene get their numbers from the path of their names, which is the same wherever the same scene file was read, so nothing has to be agreed in advance; what is spawned gets the server's next number. Ownership is the whole model: the server owns the scene and runs its rules, each player owns their own object and moves it, and `ownerOnly` strips from every other machine's copy what only the owner needs. A copy is drawn a tenth of a second behind what it is told, between the last two words, which is what makes it move smoothly on a line that delivers them unevenly.
+
+The tests run three or four `World`s in one program on a `MemoryNetwork` (`Tests/NetworkTests.cpp`): the same code as over UDP, without a network, a clock or a second machine.
 
 ## Visual scripts
 
@@ -145,6 +169,8 @@ It is an arcade model on purpose. Bodies do not spin from impacts, there are no 
 ## The window layer
 
 `Platform/Window` is the only code that talks to the window system: GLFW, plus one Objective-C++ function that gives the window a `CAMetalLayer`. It translates events into calls on `Input`.
+
+A game that looks about with the mouse asks `Input` for the pointer (`setPointerCaptured`); the window gives it while it is the one in use, hiding the pointer and reporting only how it moves. The editor allows it only while the game runs and its Game view has the keys, and tells its own interface that there is no mouse for as long (`ImGuiConfigFlags_NoMouse`), so that a pointer nobody sees cannot click a panel. A menu drawn by the game can hold the pointer out however many views want it (`setPointerFree`).
 
 With `--capture` no window is created at all: the engine renders into an ordinary texture, copies it to memory and writes a PNG.
 

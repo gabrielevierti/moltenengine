@@ -47,7 +47,7 @@ class AnimatorPanel final : public Panel {
 public:
     AnimatorPanel() {
         title = "Animator";
-        isOpen = false;                 // Window > Animator, or Open Animator on an Animator
+        isOpen = false;                 // Window > Animation > Animator, or Open Animator on an Animator
     }
 
     void draw(EditorContext& editor) override {
@@ -81,8 +81,8 @@ public:
             ImGui::SameLine();
             ImGui::TextDisabled("  on %s", editor.scene.nameOf(owner).c_str());
             ImGui::SameLine();
-            if (ImGui::SmallButton("Open Animation")) editor.openPanel("Animation");
-            ui::tooltip("Its clips made in the editor, to key");
+            if (ImGui::SmallButton("Open Timeline")) editor.openPanel("Timeline");
+            ui::tooltip("Its animations, to key");
         }
 
         float height = ImGui::GetContentRegionAvail().y;
@@ -597,6 +597,43 @@ private:
         }
         if (ImGui::MenuItem("Blend Tree")) make("Blend Tree", "", true);
         ui::tooltip("Several clips mixed by a number: idle, walk and run by speed");
+        Animator* animator = editor.engine.scene.get<Animator>(owner_);
+        if (ImGui::MenuItem("Procedural Animation", nullptr, false, animator != nullptr)) {
+            // A new animation of the entity that moves by itself, driven by a parameter of this
+            // controller: a float "amount" (made if missing) that code or a script sets.
+            std::string parameterName = "amount";
+            if (!controller_.findParameter(parameterName)) {
+                Parameter amount;
+                amount.name = parameterName;
+                amount.value = 1;
+                controller_.parameters.push_back(amount);
+            }
+            std::string ownerName = editor.scene.nameOf(owner_);
+            std::string path = editor.assets.uniquePath("Animations/" + ownerName, "Procedural", ".anim");
+            std::filesystem::create_directories(std::filesystem::path(editor.assets.absolutePath(path)).parent_path());
+            AnimationClip clip;
+            clip.owner = ownerName;
+            AnimationTrack track;
+            track.component = "Transform";
+            track.field = "rotation";
+            track.width = 3;
+            std::array<float, 4> now{};
+            readProperty(editor.engine.scene, owner_, "Transform", "rotation", now);
+            track.setKey(0, now);
+            track.procedural.kind = Procedural::Kind::Parameter;
+            track.procedural.amplitude = 90;
+            track.procedural.parameter = parameterName;
+            track.procedural.axes = {0, 1, 0, 0};
+            clip.tracks.push_back(track);
+            if (text::writeFile(editor.assets.absolutePath(path), clip.toText())) {
+                editor.assets.refresh();
+                animator->animations += (animator->animations.empty() ? "" : ", ") + path;
+                editor.scene.markChanged();
+                make("Procedural", path, false);
+                editor.notify("Turned by \"amount\": animator->setFloat(\"amount\", v). Change what it moves in the Timeline (right click its track)");
+            }
+        }
+        ui::tooltip("An animation that moves by itself as a parameter says: turned, moved or scaled as the game sets a number");
     }
 
     void drawNodeMenu(EditorContext& editor) {
@@ -669,6 +706,10 @@ private:
             save(editor);
         }
         if (ImGui::Checkbox("Loops", &state.loops)) save(editor);
+        ImGui::TextDisabled("Time by");
+        ImGui::SameLine();
+        if (pickFromList("timeBy", state.timeBy, floatParameters(), false, 120)) save(editor);
+        ui::tooltip("A float parameter (0 to 1) that says how far through it is, instead of time. None: by time");
         ImGui::SetNextItemWidth(120);
         if (ImGui::DragFloat("Speed", &state.speed, 0.01f, -4, 4)) save(editor);
 

@@ -1,0 +1,1 @@
+A speedboat on open water, islands, and ten buoys to round. Drive with W A S D. The sea, the boat and the buoys that bob on it are all parts in the Inspector: no code.

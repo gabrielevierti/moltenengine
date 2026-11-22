@@ -1,7 +1,7 @@
 // SceneWeight.hpp
 // What a scene weighs, object by object: the triangles each draws, the draw calls it costs, and
 // the memory of its model and its pictures. Models and pictures several objects share are
-// counted once in the totals, and each row says how many share them. Window > Scene Weight
+// counted once in the totals, and each row says how many share them. The Profiler's Memory page
 // shows it; the editor fills in the parts from the scene, this sums and sorts them.
 #pragma once
 

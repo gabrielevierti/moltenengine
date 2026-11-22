@@ -1,5 +1,5 @@
 // Shortcuts.hpp
-// The editor's keyboard shortcuts, each one changeable (Edit > Editor Settings > Shortcuts) and
+// The editor's keyboard shortcuts, each one changeable (Edit > Preferences > Shortcuts) and
 // kept between runs. Written as people read them: "Shift+Cmd+S".
 #pragma once
 
@@ -32,6 +32,8 @@ public:
 
     Shortcuts();
     const std::vector<Action>& actions() const { return actions_; }
+    /// True if there is a shortcut by this name (set or not).
+    bool has(const std::string& id) const;
     const KeyChord& chord(const std::string& id) const;
     /// For a menu: "Cmd+S", or "" for none.
     std::string text(const std::string& id) const;

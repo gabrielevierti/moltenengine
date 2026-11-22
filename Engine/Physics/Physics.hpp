@@ -19,6 +19,7 @@
 #include "Physics/Collision.hpp"
 #include "Scene/Scene.hpp"
 
+#include <array>
 #include <functional>
 #include <optional>
 #include <unordered_map>
@@ -150,6 +151,15 @@ class Physics {
 public:
     Vec3 gravity{0, -9.81f, 0};
     int solverIterations = 6;
+    /// Which layers collide with which: bit b of layerMeets[a] says things on layer a meet things on
+    /// layer b. Everything meets everything until the project says otherwise (GameSettings). A
+    /// collider's own mask still counts: both must agree.
+    std::array<uint32_t, 32> layerMeets = allLayersMeet();
+    static std::array<uint32_t, 32> allLayersMeet() {
+        std::array<uint32_t, 32> all;
+        all.fill(0xFFFFFFFFu);
+        return all;
+    }
 
     /// A collider as a shape placed in the world: for code that tests against colliders itself.
     static ShapeInstance makeShape(const Collider& collider, Vec3 position, Quat rotation);
@@ -195,6 +205,7 @@ public:
         contactProxies_.clear();
         touching_.clear();
         triggering_.clear();
+        lastPlaces_.clear();
     }
 
     /// Every solid shape whose box overlaps `box`, except the one ignored and everything under
@@ -239,6 +250,7 @@ private:
         AABB bounds;
         float inverseMass = 0;
         Vec3 inverseInertia{0, 0, 0};   // about its own axes; zero does not turn
+        bool movedItself = false;       // no body, yet not where it was at the last step: a character, a thing a script or an animation moves
     };
     void solveJoints(Scene& scene, float dt);
 
@@ -252,6 +264,10 @@ private:
     std::vector<Contact> contacts_;
     std::vector<std::pair<uint32_t, uint32_t>> contactProxies_;
     std::unordered_map<uint64_t, std::pair<Entity, Entity>> touching_, triggering_;
+    /// Where each collider that has no body was at the last step, by entity: one that is somewhere
+    /// else now moved by other means (a CharacterController, a script, an animation), and triggers
+    /// must hear of it as they hear of bodies.
+    std::unordered_map<uint64_t, Vec3> lastPlaces_;
 };
 
 }  // namespace molten

@@ -65,6 +65,7 @@ private:
     Input* input_ = nullptr;                // only while pollEvents runs
     Vec2 lastMousePosition_{0, 0};
     bool hasMousePosition_ = false;
+    bool isCursorCaptured_ = false;
     bool isFullscreen_ = false;
     int windowedX_ = 0, windowedY_ = 0, windowedWidth_ = 1280, windowedHeight_ = 720;
 };

@@ -213,3 +213,50 @@ TEST(a_timeline_plays_a_clip_on_an_entity) {
     std::optional<Timeline> read = Timeline::parse(text::readFile(root + "/Scene.timeline").value());
     CHECK(read && read->tracks[0].kind == TimelineTrackKind::Clip && Timeline::parse(read->toText())->toText() == read->toText());
 }
+
+TEST(an_animator_plays_its_own_animations_by_name) {
+    Door door;
+    text::writeFile(door.world.assetRoot + "/Animations/Spin.anim",
+                    "molten-clip 1\nlength 1\nowner \"Door\"\ntrack \"\" Transform position\n  key 0 0 0 0\n  procedural wave 2 1 0.25 axes 0 1 0\n");
+    Animator animator;
+    animator.animations = "Animations/Door.anim, Animations/Spin.anim";
+    door.world.scene.add(door.door, animator);
+    Animator* playing = door.world.scene.get<Animator>(door.door);
+    CHECK(playing->animationNames() == std::vector<std::string>({"Door", "Spin"}));
+    playing->play("Spin");
+    door.play(0.02f);
+    CHECK(playing->isPlayingAnimation("Spin") && !playing->isPlayingAnimation("Door"));
+    // A wave of 2 up and down, a quarter turn in: at its top.
+    CHECK(std::abs(door.world.scene.get<Transform>(door.door)->position.y - 2) < 0.1f);
+    playing->stop();
+    CHECK(!playing->isPlaying && playing->time == 0);
+    std::optional<AnimationClip> read = AnimationClip::parse(text::readFile(door.world.assetRoot + "/Animations/Spin.anim").value());
+    CHECK(read && read->owner == "Door" && read->tracks[0].procedural.kind == Procedural::Kind::Wave && read->tracks[0].procedural.axes[0] == 0);
+    CHECK(AnimationClip::parse(read->toText())->toText() == read->toText());
+}
+
+TEST(a_parameter_says_how_far_through_an_animation_is) {
+    AnimationClip clip;
+    clip.length = 2;
+    clip.timeBy = "open";
+    AnimationTrack track;
+    track.component = "Transform";
+    track.field = "position";
+    track.width = 3;
+    track.setKey(0, {0, 0, 0, 0});
+    track.setKey(2, {0, 4, 0, 0});
+    track.keys[1].ease = AnimationKey::Ease::Linear;
+    clip.tracks.push_back(track);
+    AnimationTrack lever = track;
+    lever.field = "scale";
+    lever.keys.clear();
+    lever.procedural.kind = Procedural::Kind::Parameter;
+    lever.procedural.amplitude = 3;
+    lever.procedural.parameter = "open";
+    clip.tracks.push_back(lever);
+    std::unordered_map<std::string, float> parameters{{"open", 0.25f}};
+    ClipPose pose = ClipPose::of(clip, 99, &parameters);
+    CHECK(std::abs(pose.values.at(track.id()).value[1] - 1) < 1e-4f);
+    CHECK(std::abs(pose.values.at(lever.id()).value[0] - 0.75f) < 1e-4f);
+    CHECK(AnimationClip::parse(clip.toText())->timeBy == "open");
+}

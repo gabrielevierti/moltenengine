@@ -37,6 +37,7 @@ enum {
     MMBufferLights    = 5,   // LightData[]
     MMBufferAccelerationStructure = 6,   // the scene for ray tracing, when the GPU can trace rays
     MMBufferTracedSurfaces = 7,          // TracedSurface[], one for each instance of that scene: what a ray that hits it sees
+    MMBufferShadowCopies = 8,            // ShadowCopy[], indexed by instance_id in the pass that draws the sun's shadow maps
 };
 
 enum {
@@ -50,6 +51,10 @@ enum {
     MMTexturePrefiltered       = 7,   // cube with a roughness mip chain
     MMTextureBRDF              = 8,   // split-sum lookup table
     MMTextureAmbientOcclusion  = 9,   // screen-space ambient occlusion, or white
+    MMTextureSceneDepth        = 10,  // the depth of what is opaque (the prepass), for water: how deep it is under each pixel
+    MMTextureClouds            = 11,  // clouds with depth, walked through into a smaller picture: their light, and how much shows through them
+    MMTextureTracedLight       = 12,  // the light around each pixel, traced before the scene at half the size: rgb what is bounced to it, a how much of the sky's light arrives
+    MMTextureTracedSurface     = 13,  // and the surface each of those pixels was traced for: xyz which way it faces in the world, a how far it is
 };
 
 enum {
@@ -67,6 +72,7 @@ enum {
     MMLightDirectional = 0,
     MMLightPoint       = 1,
     MMLightSpot        = 2,
+    MMLightArea        = 3,   // a glowing rectangle (a window, a panel, a screen), facing `direction`
 };
 
 // ---------------------------------------------------------------- per pass
@@ -136,16 +142,21 @@ typedef struct {
     uint32_t tracesReflections;      // 1: smooth surfaces send a ray to see what they mirror
     float bounceIntensity;           // above zero: the rays for ambient light also bring back the light of what they hit
     uint32_t fogShaftSteps;          // above zero: the fog is walked through in this many steps, lit where the sun reaches it
-    uint32_t volumetricClouds;       // 1: clouds have depth, and are walked through too
+    uint32_t volumetricClouds;       // above zero: clouds have depth, walked through in this many steps
     float reflectionMaxRoughness;    // rougher surfaces send no reflection ray: the sky's blurred light is enough for them
     float reflectionStrength;        // how much of what a ray sees is mirrored: 1 as physics says
-    // A sky worked out from how sunlight scatters in the air, and the stars at night.
-    uint32_t physicalSky;            // 1: the sky's colors come from the sun's height, not the three colors above
-    float skyHaze;                   // 0 clear mountain air to 1 a hazy summer day
+    // The night: the moon, and the stars.
+    float moonBrightness;            // 0 no moon; 1 a full moon, which lights the scene once the sun has set
+    uint32_t tracedAmbientReady;     // 1: the light around each pixel was traced before the scene (MMTextureTracedLight): read there, no rays for it in the scene's pass
     float starBrightness;            // 0 none; 1 a clear night far from town
     float starTime;                  // seconds: the stars turn slowly, and twinkle
     uint32_t sunsetColors;           // 1: the sky glows gold and red around a low sun, and darkens when it has set
-    float padding0, padding1, padding2;
+    float cloudBase, cloudTop;       // meters: the layer of clouds with depth, flown through
+    float sceneDepthReady;           // 1: MMTextureSceneDepth holds the opaque depth this frame
+    // The sun's direction for the sky (its colors, its disk). `sunDirection` is the light the scene
+    // is lit by: the sun, or at night the moon.
+    simd_float3 skySunDirection;
+    simd_float3 cameraPosition;      // where the camera is: the clouds with depth are walked through from there
 } FrameUniforms;
 
 // What a ray sees of the thing it hits: its color and its glow. One for each instance of
@@ -163,6 +174,7 @@ typedef struct {
     simd_float3 color;               // linear color times intensity
     float spotScale;                 // 1 / (cos(inner) - cos(outer))
     float spotOffset;                // -cos(outer) * spotScale
+    float areaWidth, areaHeight;     // an area light's rectangle, in meters
 } LightData;
 
 // ---------------------------------------------------------------- per draw
@@ -172,6 +184,13 @@ typedef struct {
     simd_float4x4 normalMatrix;      // inverse transpose of model
     simd_float4 tint;                // multiplies the material's base color
 } InstanceData;
+
+// The sun's shadow maps are drawn in one pass: each copy of a mesh says which of its
+// instances it is, and which cascade's map it goes into.
+typedef struct {
+    uint32_t instance;               // an index into InstanceData[]
+    uint32_t cascade;                // the slice of the shadow map array
+} ShadowCopy;
 
 typedef struct {
     simd_float4 baseColor;
@@ -213,6 +232,17 @@ typedef struct {
     float lutAmount;                 // 0 the colors as they were, 1 as the table makes them
     uint32_t autoExposure;           // 1: the exposure follows how bright the scene is (texture 3)
     float exposureCompensation;      // in stops, on top of what the adapting exposure says
+    // Color, and the lens's flare.
+    float contrast;
+    float saturation;
+    float temperature;
+    float tint;
+    simd_float2 sunScreen;           // where the sun is on the picture, 0 to 1 (outside: not in view)
+    float lensFlare;                 // 0 none
+    float sharpen;
+    float sunInView;                 // 1 in front of the camera, 0 behind
+    float lensDirt;                  // how much the dirt on the glass (texture 4) lights up under the bloom and the flare; 0 none
+    simd_float3 sunColor;            // its light, for the flare's color
 } PostUniforms;
 
 // The effects between the scene and the bloom: depth of field, motion blur, how bright the
@@ -284,6 +314,8 @@ typedef struct {
     simd_float4 positionAndSize;     // xyz: world position of the center, w: edge length
     simd_float4 color;
     simd_float4 velocityAndStretch;  // xyz: its velocity, w: seconds of it drawn as a streak (0: a round dot)
+    simd_float4 look;                // x: its turn (radians), y: the frame of its sheet, z, w: the sheet's columns and rows (0: no picture)
+    simd_float4 shading;             // x: how lit by the sun and sky (0 glows), y: soft edge in meters (0 hard), z: render mode, w: unused
 } ParticleInstance;
 
 #endif

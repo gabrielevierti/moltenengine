@@ -14,6 +14,13 @@
 
 namespace molten::editor {
 
+/// Sizes a box, sphere or capsule collider to the mesh its entity draws, at the entity's scale
+/// (colliders ignore Transform::scale: the scale goes into their size). A flat mesh, a plane,
+/// gets a slab half a meter thick under it, with its top where the plane is.
+void fitColliderToMesh(Collider& collider, const AABB& meshBounds, Vec3 scale);
+/// True if the collider is the size fitColliderToMesh would give it at that scale.
+bool isColliderFitted(const Collider& collider, const AABB& meshBounds, Vec3 scale);
+
 enum class Primitive { Empty, Cube, Sphere, Plane, Cylinder, DirectionalLight, PointLight, SpotLight, Camera, ParticleEmitter };
 
 class SceneDocument {
@@ -36,6 +43,11 @@ public:
     bool saveAs(const std::string& absolutePath, std::string* error = nullptr);
     /// The scene differs from what was opened or last saved.
     bool isDirty() const { return current_ != saved_; }
+    /// The scene as text, as of the last finished edit: what Save would write. For the autosave.
+    const std::string& currentText() const { return current_; }
+    /// Replaces the scene with what an autosave kept: the file stays as it is, the scene has changes
+    /// to save, and Undo goes back to the scene as the file has it.
+    bool recover(const std::string& sceneText);
     /// "Main" for ".../Scenes/Main.scene", "Untitled" without a file.
     std::string displayName() const;
 
@@ -73,9 +85,41 @@ public:
     void duplicateSelection();
     /// Removes the selected entities and everything under them.
     void deleteSelection();
+
+    // ---- what the Edit and Entity menus do to the selection
+
+    /// The top of each selected tree: a selected child of a selected parent comes along with it anyway.
+    std::vector<Entity> selectionTops() const;
+    /// The selected trees as scene text, for the clipboard; empty with nothing selected.
+    std::string copySelection();
+    /// Adds what copySelection() wrote, beside `beside` (under its parent) or at the top of the
+    /// scene, and selects it. Empty if the text is not entities.
+    std::vector<Entity> paste(const std::string& text, Entity beside = Entity{});
+    /// True if a text is something paste() takes.
+    static bool isEntityText(const std::string& text);
+    /// Everything under what is selected joins the selection.
+    void selectChildren();
+    /// What was selected is not, and the rest is.
+    void invertSelection();
+    /// An empty entity in the middle of the selected trees, which become its children. It is selected.
+    Entity groupSelection();
+    /// The selected trees leave their parents and stay where they are in the world.
+    void clearParentOfSelection();
+    /// The selected trees go first, or last, among their siblings.
+    void moveSelectionInOrder(bool first);
+    /// Switches the selected on if any is off, off otherwise.
+    void toggleSelectionActive();
+    /// Puts the selection where the view looks: at its pivot, each thing keeping its place among the others.
+    void moveSelectionToView();
+    /// An asset was renamed or moved: the scene names it by its new path from now on. The file
+    /// moved on the disk, so this is not a step to undo, and it does not make the scene "changed".
+    void retargetAsset(const std::string& from, const std::string& to);
     /// Gives `child` another parent (an invalid entity for none) without moving it in the
     /// world. Refused if that would make a loop.
     bool reparent(Entity child, Entity newParent);
+    /// Puts the entity just before or just after `sibling`, under the same parent as it:
+    /// what dropping a row between two rows of the Hierarchy does.
+    bool moveBeside(Entity entity, Entity sibling, bool after);
     /// Sets where an entity is in the world, whatever its parent.
     void setWorldMatrix(Entity entity, const Mat4& world);
 
@@ -131,6 +175,9 @@ public:
 
     void beginFrame();
     void endFrame(bool interacting);
+    /// A collider that fits its mesh goes on fitting it while the entity is scaled, by the
+    /// handles or in the Inspector. One that was sized by hand is left as it is.
+    void keepCollidersFitted();
 
 private:
     static void populateDefaultScene(Scene& scene, Assets& assets, std::vector<NamedMaterial>& materials);
@@ -150,6 +197,11 @@ private:
 
     std::vector<std::string> undo_, redo_;
     std::string current_, saved_;
+    struct ScaleSeen {
+        Entity entity;
+        Vec3 scale;
+    };
+    std::vector<ScaleSeen> scaleSeen_;      // the selected entities' scales as of the last frame
     bool touched_ = false;
 
     bool isPlaying_ = false;

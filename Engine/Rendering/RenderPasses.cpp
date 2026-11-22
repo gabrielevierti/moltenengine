@@ -64,6 +64,7 @@ void Renderer::bindMaterial(MTL::RenderCommandEncoder* encoder, const Material& 
     };
     encoder->setFragmentTexture(textureOr(material.baseColorTexture, white_), gpu::MMTextureBaseColor);
     encoder->setFragmentTexture(readsOcean ? oceanTexture_ : textureOr(material.normalTexture, flatNormal_), gpu::MMTextureNormal);
+    encoder->setVertexTexture(readsOcean ? oceanTexture_ : flatNormal_->handle(), gpu::MMTextureNormal);     // water's waves rise in the vertex stage
     encoder->setFragmentTexture(textureOr(material.metallicRoughnessTexture, white_), gpu::MMTextureMetallicRoughness);
     encoder->setFragmentTexture(textureOr(material.occlusionTexture, white_), gpu::MMTextureOcclusion);
     encoder->setFragmentTexture(textureOr(material.emissiveTexture, white_), gpu::MMTextureEmissive);
@@ -96,10 +97,16 @@ void Renderer::drawBatches(MTL::RenderCommandEncoder* encoder, const std::vector
                 break;
             case MeshPass::Forward:
                 description.vertexFunction = "vertex_mesh";
+                if (material.isWater && readsBehindWater()) {
+                    // Water one sees into (Water.metal): it reads what is drawn under it from the
+                    // picture itself, and writes what water makes of it. Nothing is blended.
+                    description.fragmentFunction = tracesRaysThisFrame_ ? "fragment_water_traced" : "fragment_water";
+                    break;
+                }
                 if (material.isUnlit) description.fragmentFunction = "fragment_unlit";
                 else if (tracesRaysThisFrame_) description.fragmentFunction = isMasked ? "fragment_pbr_masked_traced" : "fragment_pbr_traced";
                 else description.fragmentFunction = isMasked ? "fragment_pbr_masked" : "fragment_pbr";
-                if (material.alphaMode == AlphaMode::Blend) description.blend = BlendMode::AlphaBlend;
+                if (material.isSeenThrough()) description.blend = BlendMode::AlphaBlend;
                 break;
         }
         MTL::RenderPipelineState* pipeline = shaders_.pipeline(description);
@@ -117,27 +124,124 @@ void Renderer::drawBatches(MTL::RenderCommandEncoder* encoder, const std::vector
         encoder->drawIndexedPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(batch.mesh->indexCount()), MTL::IndexTypeUInt32,
                                        batch.mesh->indexBuffer(), NS::UInteger(0), NS::UInteger(batch.count));
 
-        stats.drawCalls++;
         if (pass == MeshPass::Forward) {
+            stats.drawCalls++;
             stats.instances += int(batch.count);
             stats.triangles += int(batch.mesh->indexCount() / 3 * batch.count);
+        } else if (pass == MeshPass::Prepass) {
+            stats.depthDraws++;
+        } else {
+            stats.shadowDraws++;
         }
     }
 }
 
 // ---------------------------------------------------------------- 1. shadow maps
 
-void Renderer::renderShadows(MTL::CommandBuffer* commandBuffer, const std::vector<DrawItem>& items, const Cascades& cascades) {
-    for (int cascade = 0; cascade < cascades.count; cascade++) {
-        // Whatever touches this cascade's box, or stands between it and the sun.
-        Frustum frustum(cascades.viewProjection[cascade]);
-        std::vector<const DrawItem*> casters;
-        for (const DrawItem& item : items) {
-            if (item.castsShadows && item.material->alphaMode != AlphaMode::Blend && frustum.intersects(item.bounds, false)) {
-                casters.push_back(&item);
-            }
+std::vector<Renderer::ShadowCaster> Renderer::findShadowCasters(const std::vector<DrawItem>& items, const Cascades& cascades) {
+    std::vector<ShadowCaster> casters;
+    for (const DrawItem& item : items) {
+        // Glass and other blended materials let the light through.
+        if (!item.castsShadows || item.material->isSeenThrough()) continue;
+        uint32_t reached = 0;
+        for (int cascade = 0; cascade < cascades.count; cascade++) {
+            if (cascades.reaches(cascade, item.bounds)) reached |= 1u << cascade;
         }
-        std::vector<Batch> batches = makeBatches(casters, true);
+        if (reached) casters.push_back(ShadowCaster{&item, reached});
+    }
+    stats.shadowCasters += int(casters.size());
+    return casters;
+}
+
+void Renderer::renderShadows(MTL::CommandBuffer* commandBuffer, std::vector<ShadowCaster>& casters, const Cascades& cascades,
+                             const FrameAllocator::Allocation& passUniforms, const FrameAllocator::Allocation& frameUniforms) {
+    // Every cascade in one pass: the shadow map is an array of textures, and each copy of a
+    // mesh says which slice it goes into. One draw for each mesh with each material.
+    PipelineDescription plain;
+    plain.usesMeshVertices = true;
+    plain.isLayered = true;
+    plain.depthFormat = kDepthFormat;
+    plain.vertexFunction = "vertex_shadow";
+    PipelineDescription swaying = plain;        // the wind moves it: its shadow moves with it
+    swaying.vertexFunction = "vertex_shadow_detailed";
+    PipelineDescription masked = swaying;       // holes cut in it: they are holes in its shadow too
+    masked.fragmentFunction = "fragment_shadow_masked";
+    if (!device_.supportsLayeredRendering() || !shaders_.hasExtras() || !shaders_.pipeline(plain) || !shaders_.pipeline(swaying) || !shaders_.pipeline(masked)) {
+        renderShadowsEachCascade(commandBuffer, casters, cascades);
+        return;
+    }
+
+    // Things that share a material and a mesh next to each other: each run is one draw.
+    std::sort(casters.begin(), casters.end(), [](const ShadowCaster& a, const ShadowCaster& b) {
+        if (a.item->material != b.item->material) return std::less<const Material*>()(a.item->material, b.item->material);
+        return std::less<const Mesh*>()(a.item->mesh, b.item->mesh);
+    });
+
+    // No color attachment: a shadow map is only depth. Every slice is cleared, and drawn into.
+    auto pass = NS::TransferPtr(MTL::RenderPassDescriptor::alloc()->init());
+    MTL::RenderPassDepthAttachmentDescriptor* depth = pass->depthAttachment();
+    depth->setTexture(shadowMap_.get());
+    depth->setLoadAction(MTL::LoadActionClear);
+    depth->setClearDepth(1.0);
+    depth->setStoreAction(MTL::StoreActionStore);
+    pass->setRenderTargetArrayLength(NS::UInteger(shadowMapSlices_));
+
+    MTL::RenderCommandEncoder* encoder = commandBuffer->renderCommandEncoder(pass.get());
+    encoder->setLabel(label("Shadow cascades"));
+    encoder->setDepthStencilState(device_.depthWrite());
+    encoder->setFrontFacingWinding(MTL::WindingCounterClockwise);
+    // Casters in front of a cascade's box are flattened onto its near plane instead of being clipped away.
+    encoder->setDepthClipMode(MTL::DepthClipModeClamp);
+    // Push depths back in proportion to the surface's slope as the light sees it.
+    encoder->setDepthBias(0.0f, 1.5f, 0.0f);
+    encoder->setVertexBuffer(passUniforms.buffer, passUniforms.offset, gpu::MMBufferPass);      // the wind and the time, for what sways
+    encoder->setVertexBuffer(frameUniforms.buffer, frameUniforms.offset, gpu::MMBufferFrame);   // each cascade's view of the scene
+    encoder->setFragmentSamplerState(device_.materialSampler(), gpu::MMSamplerMaterial);
+
+    std::vector<gpu::InstanceData> instances;
+    std::vector<gpu::ShadowCopy> copies;
+    size_t first = 0;
+    while (first < casters.size()) {
+        const DrawItem& lead = *casters[first].item;
+        instances.clear();
+        copies.clear();
+        size_t next = first;
+        while (next < casters.size() && casters[next].item->mesh == lead.mesh && casters[next].item->material == lead.material) {
+            const DrawItem& item = *casters[next].item;
+            for (int cascade = 0; cascade < cascades.count; cascade++) {
+                if (casters[next].cascades & (1u << cascade)) copies.push_back(gpu::ShadowCopy{uint32_t(instances.size()), uint32_t(cascade)});
+            }
+            instances.push_back(gpu::InstanceData{item.world, normalMatrix(item.world), item.tint});
+            next++;
+        }
+        first = next;
+
+        const Material& material = *lead.material;
+        const bool isMasked = material.alphaMode == AlphaMode::Mask, sways = material.sway > 0;
+        MTL::RenderPipelineState* pipeline = shaders_.pipeline(isMasked ? masked : sways ? swaying : plain);
+        if (!pipeline || copies.empty()) continue;
+        encoder->setRenderPipelineState(pipeline);
+        encoder->setCullMode(material.isDoubleSided ? MTL::CullModeNone : MTL::CullModeBack);
+        if (isMasked || sways) bindMaterial(encoder, material);
+        FrameAllocator::Allocation instanceBuffer = allocator().copyArray(instances.data(), instances.size());
+        FrameAllocator::Allocation copyBuffer = allocator().copyArray(copies.data(), copies.size());
+        encoder->setVertexBuffer(lead.mesh->vertexBuffer(), 0, gpu::MMBufferVertices);
+        encoder->setVertexBuffer(instanceBuffer.buffer, instanceBuffer.offset, gpu::MMBufferInstances);
+        encoder->setVertexBuffer(copyBuffer.buffer, copyBuffer.offset, gpu::MMBufferShadowCopies);
+        encoder->drawIndexedPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(lead.mesh->indexCount()), MTL::IndexTypeUInt32,
+                                       lead.mesh->indexBuffer(), NS::UInteger(0), NS::UInteger(copies.size()));
+        stats.shadowDraws++;
+    }
+    encoder->endEncoding();
+}
+
+void Renderer::renderShadowsEachCascade(MTL::CommandBuffer* commandBuffer, const std::vector<ShadowCaster>& casters, const Cascades& cascades) {
+    for (int cascade = 0; cascade < cascades.count; cascade++) {
+        std::vector<const DrawItem*> inThisOne;
+        for (const ShadowCaster& caster : casters) {
+            if (caster.cascades & (1u << cascade)) inThisOne.push_back(caster.item);
+        }
+        std::vector<Batch> batches = makeBatches(inThisOne, true);
 
         gpu::PassUniforms uniforms{};
         uniforms.viewProjection = cascades.viewProjection[cascade];
@@ -214,6 +318,132 @@ void Renderer::renderOcclusion(MTL::CommandBuffer* commandBuffer, const std::vec
                    occlusionRaw_.get(), nullptr, nullptr);
 }
 
+// ---------------------------------------------------------------- the light around things, traced
+
+bool Renderer::canTraceAmbientFirst() {
+    if (!canTraceRays() || !shaders_.hasExtras()) return false;
+    PipelineDescription trace;
+    trace.vertexFunction = "vertex_fullscreen";
+    trace.fragmentFunction = "fragment_traced_ambient";
+    trace.colorFormat = kSceneFormat;
+    trace.secondColorFormat = kSceneFormat;
+    if (!shaders_.pipeline(trace)) return false;
+    for (const char* function : {"fragment_traced_ambient_smooth", "fragment_traced_ambient_smooth_wide", "fragment_traced_ambient_smooth_widest"}) {
+        PipelineDescription smooth;
+        smooth.vertexFunction = "vertex_fullscreen";
+        smooth.fragmentFunction = function;
+        smooth.colorFormat = kSceneFormat;
+        if (!shaders_.pipeline(smooth)) return false;
+    }
+    return true;
+}
+
+MTL::Texture* Renderer::renderTracedAmbient(MTL::CommandBuffer* commandBuffer, const View& view, int width, int height, double time,
+                                            const FrameAllocator::Allocation& frameUniforms, bool withBounce) {
+    // Half the scene's size each way: a quarter of the pixels, and of the rays.
+    int halfWidth = std::max(4, (width + 1) / 2), halfHeight = std::max(4, (height + 1) / 2);
+    for (NS::SharedPtr<MTL::Texture>* target : {&tracedLight_[0], &tracedLight_[1], &tracedSurface_}) {
+        if (!*target || int((*target)->width()) != halfWidth || int((*target)->height()) != halfHeight) {
+            *target = device_.makeRenderTarget(kSceneFormat, halfWidth, halfHeight);
+        }
+    }
+    PipelineDescription description;
+    description.vertexFunction = "vertex_fullscreen";
+    description.fragmentFunction = "fragment_traced_ambient";
+    description.colorFormat = kSceneFormat;
+    description.secondColorFormat = kSceneFormat;
+    MTL::RenderPipelineState* pipeline = shaders_.pipeline(description);
+    if (!pipeline || !tracedLight_[0] || !tracedLight_[1] || !tracedSurface_ || !sceneAccelerationStructure_) return nullptr;
+
+    // The camera of the scene's own picture: the pass finds where each of its pixels is in
+    // the world from the depth drawn for that picture.
+    gpu::PassUniforms uniforms = makePassUniforms(view.view, view.projection, view.position, width, height, view.nearPlane, view.farPlane, time);
+    FrameAllocator::Allocation passUniforms = allocator().copy(uniforms);
+
+    auto pass = NS::TransferPtr(MTL::RenderPassDescriptor::alloc()->init());
+    MTL::RenderPassColorAttachmentDescriptor* light = pass->colorAttachments()->object(0);
+    light->setTexture(tracedLight_[0].get());
+    light->setLoadAction(MTL::LoadActionDontCare);              // every pixel is written
+    light->setStoreAction(MTL::StoreActionStore);
+    MTL::RenderPassColorAttachmentDescriptor* surface = pass->colorAttachments()->object(1);
+    surface->setTexture(tracedSurface_.get());
+    surface->setLoadAction(MTL::LoadActionDontCare);
+    surface->setStoreAction(MTL::StoreActionStore);
+    MTL::RenderCommandEncoder* encoder = commandBuffer->renderCommandEncoder(pass.get());
+    encoder->setLabel(label("Traced ambient light"));
+    encoder->setRenderPipelineState(pipeline);
+    encoder->setFragmentBuffer(passUniforms.buffer, passUniforms.offset, gpu::MMBufferPass);
+    encoder->setFragmentBuffer(frameUniforms.buffer, frameUniforms.offset, gpu::MMBufferFrame);
+    encoder->setFragmentAccelerationStructure(sceneAccelerationStructure_.get(), gpu::MMBufferAccelerationStructure);
+    if (tracedSurfaces_.buffer) encoder->setFragmentBuffer(tracedSurfaces_.buffer, tracedSurfaces_.offset, gpu::MMBufferTracedSurfaces);
+    // Metal must be told that the pass also reads the structures the scene's one refers to.
+    for (const MTL::AccelerationStructure* meshStructure : tracedMeshes_) {
+        encoder->useResource(meshStructure, MTL::ResourceUsageRead, MTL::RenderStageFragment);
+    }
+    encoder->setFragmentTexture(prepassDepth_.get(), 0);
+    encoder->setFragmentTexture(prepassNormal_.get(), 1);
+    encoder->setFragmentTexture(environment_.irradianceMap(), gpu::MMTextureIrradiance);
+    encoder->setFragmentSamplerState(device_.pointClampSampler(), 0);
+    encoder->setFragmentSamplerState(device_.linearClampSampler(), gpu::MMSamplerLinearClamp);
+    encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0), NS::UInteger(3));
+    encoder->endEncoding();
+    stats.passes++;
+
+    // Smoothed across neighbors on the same surface: next to each other, two apart, and for
+    // the bounced light, which has the most grain, four apart. From one picture into the other, and back.
+    drawFullscreen(commandBuffer, tracedLight_[1].get(), "fragment_traced_ambient_smooth", BlendMode::Opaque, false, &uniforms, sizeof(uniforms),
+                   tracedLight_[0].get(), tracedSurface_.get(), nullptr);
+    drawFullscreen(commandBuffer, tracedLight_[0].get(), "fragment_traced_ambient_smooth_wide", BlendMode::Opaque, false, &uniforms, sizeof(uniforms),
+                   tracedLight_[1].get(), tracedSurface_.get(), nullptr);
+    if (!withBounce) return tracedLight_[0].get();
+    drawFullscreen(commandBuffer, tracedLight_[1].get(), "fragment_traced_ambient_smooth_widest", BlendMode::Opaque, false, &uniforms, sizeof(uniforms),
+                   tracedLight_[0].get(), tracedSurface_.get(), nullptr);
+    return tracedLight_[1].get();
+}
+
+// ---------------------------------------------------------------- clouds with depth
+
+bool Renderer::renderClouds(MTL::CommandBuffer* commandBuffer, const View& view, int width, int height, double time,
+                            const FrameAllocator::Allocation& frameUniforms) {
+    // A picture of their own, a share of the scene's size: clouds are soft, and the sky smooths it up.
+    float share = std::clamp(settings.sky.cloudResolution, 0.2f, 1.0f);
+    int cloudWidth = std::max(8, int(std::lround(float(width) * share))), cloudHeight = std::max(8, int(std::lround(float(height) * share)));
+    if (!cloudColor_ || int(cloudColor_->width()) != cloudWidth || int(cloudColor_->height()) != cloudHeight) {
+        cloudColor_ = device_.makeRenderTarget(kSceneFormat, cloudWidth, cloudHeight);
+    }
+    PipelineDescription description;
+    description.vertexFunction = "vertex_sky";
+    description.fragmentFunction = "fragment_clouds";
+    description.colorFormat = kSceneFormat;
+    MTL::RenderPipelineState* pipeline = shaders_.pipeline(description);
+    if (!pipeline || !cloudColor_) return false;
+
+    // The same camera, for a picture of this size: each pixel's line of sight comes from it.
+    FrameAllocator::Allocation passUniforms = allocator().copy(
+        makePassUniforms(view.view, view.projection, view.position, cloudWidth, cloudHeight, view.nearPlane, view.farPlane, time));
+    auto pass = NS::TransferPtr(MTL::RenderPassDescriptor::alloc()->init());
+    MTL::RenderPassColorAttachmentDescriptor* color = pass->colorAttachments()->object(0);
+    color->setTexture(cloudColor_.get());
+    color->setLoadAction(MTL::LoadActionDontCare);              // every pixel is written
+    color->setStoreAction(MTL::StoreActionStore);
+    MTL::RenderCommandEncoder* encoder = commandBuffer->renderCommandEncoder(pass.get());
+    encoder->setLabel(label("Clouds"));
+    encoder->setRenderPipelineState(pipeline);
+    encoder->setVertexBuffer(passUniforms.buffer, passUniforms.offset, gpu::MMBufferPass);
+    encoder->setFragmentBuffer(passUniforms.buffer, passUniforms.offset, gpu::MMBufferPass);
+    encoder->setFragmentBuffer(frameUniforms.buffer, frameUniforms.offset, gpu::MMBufferFrame);
+    encoder->setFragmentTexture(cloudShape_.get(), 0);
+    encoder->setFragmentTexture(cloudDetail_.get(), 1);
+    // Where something opaque hides the sky no cloud is walked: the depth drawn before the scene says where.
+    encoder->setFragmentTexture(wantsDepth() && prepassDepth_ ? prepassDepth_.get() : nullptr, 2);
+    encoder->setFragmentSamplerState(device_.noiseSampler(), 0);
+    encoder->setFragmentSamplerState(device_.pointClampSampler(), 1);
+    encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0), NS::UInteger(3));
+    encoder->endEncoding();
+    stats.passes++;
+    return true;
+}
+
 // ---------------------------------------------------------------- 4. the main pass
 
 void Renderer::renderScene(MTL::CommandBuffer* commandBuffer, Scene& scene, const std::vector<Batch>& opaque,
@@ -253,8 +483,15 @@ void Renderer::renderScene(MTL::CommandBuffer* commandBuffer, Scene& scene, cons
     encoder->setFragmentTexture(environment_.irradianceMap(), gpu::MMTextureIrradiance);
     encoder->setFragmentTexture(environment_.prefilteredMap(), gpu::MMTexturePrefiltered);
     encoder->setFragmentTexture(environment_.brdfLUT(), gpu::MMTextureBRDF);
-    encoder->setFragmentTexture(settings.ambientOcclusionEnabled ? occlusion_.get() : white_->handle(),
+    // The screen's own ambient occlusion, unless the light around things was traced for this picture.
+    encoder->setFragmentTexture(settings.ambientOcclusionEnabled && !tracedLightDrawn_ && occlusion_ ? occlusion_.get() : white_->handle(),
                                 gpu::MMTextureAmbientOcclusion);
+    encoder->setFragmentTexture(tracedLightDrawn_, gpu::MMTextureTracedLight);
+    encoder->setFragmentTexture(tracedLightDrawn_ ? tracedSurface_.get() : nullptr, gpu::MMTextureTracedSurface);
+    // What is opaque, how far: water reads it for how deep it is, and its foam round what stands in it.
+    encoder->setFragmentTexture(wantsDepth() && prepassDepth_ ? prepassDepth_.get() : nullptr, gpu::MMTextureSceneDepth);
+    // The clouds with depth, if this picture has them: the sky puts them in front of itself.
+    encoder->setFragmentTexture(cloudsDrawn_ && cloudColor_ ? cloudColor_.get() : nullptr, gpu::MMTextureClouds);
     encoder->setFragmentSamplerState(device_.materialSampler(), gpu::MMSamplerMaterial);
     encoder->setFragmentSamplerState(device_.shadowSampler(), gpu::MMSamplerShadow);
     encoder->setFragmentSamplerState(device_.linearClampSampler(), gpu::MMSamplerLinearClamp);
@@ -287,7 +524,7 @@ void Renderer::renderScene(MTL::CommandBuffer* commandBuffer, Scene& scene, cons
         encoder->setRenderPipelineState(pipeline);
         encoder->setCullMode(MTL::CullModeNone);
         encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0), NS::UInteger(3));
-        stats.drawCalls++;
+        stats.passes++;
     }
 
     // Transparent objects, already sorted from far to near.
@@ -302,14 +539,38 @@ void Renderer::renderScene(MTL::CommandBuffer* commandBuffer, Scene& scene, cons
 
 void Renderer::drawParticles(MTL::RenderCommandEncoder* encoder, Scene& scene, const View& view) {
     std::vector<gpu::ParticleInstance> instances;
+    // Soft particles read how far the opaque scene is: asked for next frame if some emitter wants it.
+    const bool hasDepth = wantsDepth() && prepassDepth_;
+    bool wantsSoftness = false;
     scene.each<ParticleEmitter, Transform>([&](Entity, ParticleEmitter& emitter, Transform& transform) {
         if (emitter.particles.empty() || !transform.isActiveInHierarchy) return;
+        wantsSoftness |= emitter.softness > 0;
+        // Its picture, read once.
+        MTL::Texture* picture = nullptr;
+        if (!emitter.texture.empty() && loadPicture) {
+            auto found = particlePictures_.find(emitter.texture);
+            if (found == particlePictures_.end()) found = particlePictures_.emplace(emitter.texture, loadPicture(emitter.texture, TextureFormat::RGBA8_sRGB)).first;
+            if (found->second) picture = found->second->handle();
+        }
+        int columns = std::max(emitter.sheetColumns, 1), rows = std::max(emitter.sheetRows, 1);
+        int frames = columns * rows;
+        const bool isStretched = emitter.renderMode == ParticleEmitter::RenderMode::Stretched;
+        const bool isLocal = emitter.space == ParticleEmitter::Space::Local;
+        const float mode = float(int(emitter.renderMode));
+        const Vec4 shading{saturate(emitter.lit), hasDepth ? std::max(emitter.softness, 0.0f) : 0.0f, mode, 0};
         instances.clear();
         for (const Particle& particle : emitter.particles) {
             float t = saturate(particle.age / particle.lifetime);
-            float size = particleSize(emitter, t);
+            float size = particleSize(emitter, t) * particle.sizeScale;
             Vec4 color = particleColor(emitter, t);
-            instances.push_back(gpu::ParticleInstance{vec4(particle.position, size), color, vec4(particle.velocity, emitter.stretch)});
+            color = Vec4{color.x * particle.shade, color.y * particle.shade, color.z * particle.shade, color.w};
+            // The frame of its sheet: so many a second, or the whole sheet over its life.
+            float frame = emitter.sheetFps > 0 ? std::fmod(std::floor(particle.age * emitter.sheetFps + particle.frame), float(frames))
+                                               : std::fmod(std::min(std::floor(t * float(frames)), float(frames - 1)) + particle.frame, float(frames));
+            Vec4 look{particle.rotation, frame, picture ? float(columns) : 0.0f, float(rows)};
+            Vec3 position = isLocal ? transformPoint(transform.world, particle.position) : particle.position;
+            Vec3 velocity = isLocal ? transformDirection(transform.world, particle.velocity) : particle.velocity;
+            instances.push_back(gpu::ParticleInstance{vec4(position, size), color, vec4(velocity, isStretched ? std::max(emitter.stretch, 0.001f) : 0.0f), look, shading});
         }
         if (!emitter.isAdditive) {
             // Ordinary blending depends on the order: far particles first.
@@ -333,10 +594,13 @@ void Renderer::drawParticles(MTL::RenderCommandEncoder* encoder, Scene& scene, c
         encoder->setRenderPipelineState(pipeline);
         encoder->setCullMode(MTL::CullModeNone);
         encoder->setVertexBuffer(buffer.buffer, buffer.offset, gpu::MMBufferInstances);
+        encoder->setFragmentTexture(picture ? picture : white_->handle(), 0);
+        encoder->setFragmentSamplerState(device_.linearClampSampler(), gpu::MMSamplerLinearClamp);
         // One instance per particle; the four vertices of the square come from the vertex index.
         encoder->drawPrimitives(MTL::PrimitiveTypeTriangleStrip, NS::UInteger(0), NS::UInteger(4), NS::UInteger(instances.size()));
         stats.drawCalls++;
     });
+    particlesWantDepth_ = wantsSoftness;
 }
 
 void Renderer::drawDebugLines(MTL::RenderCommandEncoder* encoder) {
@@ -357,13 +621,13 @@ void Renderer::drawDebugLines(MTL::RenderCommandEncoder* encoder) {
     encoder->setRenderPipelineState(pipeline);
     encoder->setVertexBuffer(buffer.buffer, buffer.offset, gpu::MMBufferVertices);
     encoder->drawPrimitives(MTL::PrimitiveTypeLine, NS::UInteger(0), NS::UInteger(vertices.size()));
-    stats.drawCalls++;
+    stats.overlayDraws++;
 }
 
 // ---------------------------------------------------------------- 5. bloom
 
 void Renderer::renderBloom(MTL::CommandBuffer* commandBuffer) {
-    if (!settings.bloomEnabled || bloom_.empty()) return;
+    if (!hasBloom()) return;
 
     gpu::PostUniforms uniforms{};
     uniforms.bloomThreshold = settings.bloomThreshold;
@@ -482,7 +746,7 @@ void Renderer::renderEffects(MTL::CommandBuffer* commandBuffer, const View& view
 // ---------------------------------------------------------------- 6. the final pass
 
 void Renderer::renderFinal(MTL::CommandBuffer* commandBuffer, const Canvas& canvas, const RenderTarget& target, bool withOverlay) {
-    bool hasBloom = settings.bloomEnabled && !bloom_.empty();
+    bool hasBloom = this->hasBloom();
     gpu::PostUniforms uniforms{};
     uniforms.exposure = settings.exposure;
     uniforms.bloomIntensity = hasBloom ? settings.bloomIntensity : 0.0f;
@@ -508,6 +772,25 @@ void Renderer::renderFinal(MTL::CommandBuffer* commandBuffer, const Canvas& canv
     MTL::Texture* adapted = settings.autoExposure && adapted_[adaptIndex_] ? adapted_[adaptIndex_].get() : nullptr;
     uniforms.autoExposure = adapted ? 1u : 0u;
     uniforms.exposureCompensation = settings.exposureCompensation;
+    uniforms.contrast = settings.contrast;
+    uniforms.saturation = settings.saturation;
+    uniforms.temperature = settings.temperature;
+    uniforms.tint = settings.tint;
+    uniforms.sharpen = settings.sharpen;
+    uniforms.lensFlare = settings.lensFlare;
+    // The dirt on the glass, read again when another is named.
+    if (settings.lensDirt != lensDirtName_) {
+        lensDirtName_ = settings.lensDirt;
+        lensDirt_ = !lensDirtName_.empty() && loadPicture ? loadPicture(lensDirtName_, TextureFormat::RGBA8_sRGB) : nullptr;
+    }
+    MTL::Texture* dirt = lensDirt_ ? lensDirt_->handle() : nullptr;
+    uniforms.lensDirt = dirt ? std::max(settings.lensDirtAmount, 0.0f) : 0.0f;
+    upscaleDirt_ = dirt;
+    // Where the sun is on the picture: its direction, as a point infinitely far.
+    Vec4 sun = flareViewProjection_ * Vec4{-flareSunDirection_.x, -flareSunDirection_.y, -flareSunDirection_.z, 0.0f};
+    uniforms.sunInView = sun.w > 1e-4f && flareSunColor_.x + flareSunColor_.y + flareSunColor_.z > 0.001f ? 1.0f : 0.0f;
+    if (uniforms.sunInView > 0) uniforms.sunScreen = Vec2{sun.x / sun.w * 0.5f + 0.5f, 0.5f - sun.y / sun.w * 0.5f};
+    uniforms.sunColor = flareSunColor_;
 
     // Drawn smaller (renderScale): tone mapped at that size, then made the target's size by
     // MetalFX, which keeps edges and detail sharp where plain stretching blurs them.
@@ -551,9 +834,10 @@ void Renderer::renderFinal(MTL::CommandBuffer* commandBuffer, const Canvas& canv
         encoder->setFragmentTexture(hasBloom ? bloom_[0].get() : white_->handle(), 1);
         encoder->setFragmentTexture(lut ? lut : white_->handle(), 2);
         encoder->setFragmentTexture(adapted ? adapted : white_->handle(), 3);
+        encoder->setFragmentTexture(dirt ? dirt : white_->handle(), 4);
         encoder->setFragmentSamplerState(device_.linearClampSampler(), gpu::MMSamplerLinearClamp);
         encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0), NS::UInteger(3));
-        stats.drawCalls++;
+        stats.passes++;
     }
 
     if (!coversTarget) {
@@ -625,10 +909,11 @@ MTL::Texture* Renderer::upscaleWithMetalFX(MTL::CommandBuffer* commandBuffer, co
     encoder->setFragmentTexture(hasBloom ? bloom_[0].get() : white_->handle(), 1);
     encoder->setFragmentTexture(upscaleLUT_ ? upscaleLUT_ : white_->handle(), 2);
     encoder->setFragmentTexture(upscaleAdapted_ ? upscaleAdapted_ : white_->handle(), 3);
+    encoder->setFragmentTexture(upscaleDirt_ ? upscaleDirt_ : white_->handle(), 4);
     encoder->setFragmentSamplerState(device_.linearClampSampler(), gpu::MMSamplerLinearClamp);
     encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0), NS::UInteger(3));
     encoder->endEncoding();
-    stats.drawCalls++;
+    stats.passes++;
     // Then made the target's size.
     up.scaler->setColorTexture(up.input.get());
     up.scaler->setOutputTexture(up.output.get());
@@ -695,7 +980,7 @@ void Renderer::drawCanvas(MTL::RenderCommandEncoder* encoder, const Canvas& canv
         encoder->setRenderPipelineState(pipeline);
         encoder->setFragmentTexture(batch.texture ? batch.texture->handle() : white_->handle(), 0);
         encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(batch.firstVertex), NS::UInteger(batch.vertexCount));
-        stats.drawCalls++;
+        stats.overlayDraws++;
     }
 }
 
@@ -729,7 +1014,7 @@ void Renderer::drawFullscreen(MTL::CommandBuffer* commandBuffer, MTL::Texture* t
     encoder->setFragmentSamplerState(device_.linearClampSampler(), gpu::MMSamplerLinearClamp);
     encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0), NS::UInteger(3));
     encoder->endEncoding();
-    stats.drawCalls++;
+    stats.passes++;
 }
 
 }  // namespace molten

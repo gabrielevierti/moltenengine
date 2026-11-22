@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synthesizes the sounds of the vehicle templates. An engine is built the way it makes
+"""Synthesizes the sounds of the templates: engines, weather, footsteps, a rifle. An engine is built the way it makes
 its noise: one pressure pulse per cylinder firing, a little different every time, sent
 through the pipes it rings in, with the hiss of air and the rattle of metal on top. Each
 engine is made at several speeds, because the pipes ring at the same notes whatever the
@@ -165,6 +165,13 @@ def write_all(folder, engines=None):
     chuff = noise(n, 180, 900, 53)
     chuff = chuff / (np.max(np.abs(chuff)) + 1e-9) * np.exp(-t / 0.05) * 0.6
     save(folder, "blowoff.wav", burst * envelope * flutter + chuff, peak=0.8)
+    # An outboard motor: a two-stroke twin, harsh and busy, over the water it churns behind the boat.
+    if wants("outboard"):
+        twin = [(0.0, 0), (0.5, 0)]
+        base = engine(3200, twin, [(120, 3, 1.3), (260, 4, 1.0), (620, 4, 0.8), (1700, 3, 0.5), (3400, 3, 0.3)], pulse_ms=(2.6, 0.4), roughness=0.14, hiss=0.3, clatter=0.16, seed=77)
+        churn = noise(len(base), 90, 700, 78)
+        churn = churn / (np.max(np.abs(churn)) + 1e-9) * (0.75 + 0.25 * np.sin(2 * np.pi * np.round(len(base) / RATE * 3.0) / (len(base) / RATE) * np.arange(len(base)) / RATE))
+        save(folder, "boat.wav", base / np.max(np.abs(base)) * 0.75 + churn * 0.45, peak=0.7)
     # A flat six behind a two-blade propeller: the blades slap the air twice a turn.
     six = [(i / 6.0, i % 2) for i in range(6)]
     for rpm in (() if not wants("propeller") else (1100, 2400)):
@@ -174,10 +181,84 @@ def write_all(folder, engines=None):
         slap = shaped(np.sign(np.sin(2 * np.pi * blades * t)) * np.abs(np.sin(2 * np.pi * blades * t)) ** 0.3, lambda f: 1.0 / (1 + (f / 900.0) ** 2))
         save(folder, "propeller_%d.wav" % rpm, base * 0.6 + slap / np.max(np.abs(slap)) * 0.8)
     # The stall warning: a reed horn, on and off.
-    if not wants("propeller"): return
-    t = np.arange(int(RATE * 0.6)) / RATE
-    horn = (np.sin(2 * np.pi * 620 * t) + 0.5 * np.sin(2 * np.pi * 1240 * t) + 0.3 * np.sin(2 * np.pi * 1860 * t)) * (t < 0.36)
-    save(folder, "stall.wav", horn * np.minimum(1, np.minimum(t, np.abs(0.36 - t)) / 0.01), peak=0.6)
+    if wants("propeller"):
+        t = np.arange(int(RATE * 0.6)) / RATE
+        horn = (np.sin(2 * np.pi * 620 * t) + 0.5 * np.sin(2 * np.pi * 1240 * t) + 0.3 * np.sin(2 * np.pi * 1860 * t)) * (t < 0.36)
+        save(folder, "stall.wav", horn * np.minimum(1, np.minimum(t, np.abs(0.36 - t)) / 0.01), peak=0.6)
+
+    def unit(signal):
+        return signal / (np.max(np.abs(signal)) + 1e-9)
+
+    def burst(seconds, low, high, seed, decay, attack=0.0):
+        """Noise between two frequencies that starts at once (or over `attack` seconds) and dies away."""
+        n = int(RATE * seconds)
+        t = np.arange(n) / RATE
+        return unit(noise(n, low, high, seed)) * np.exp(-t / decay) * (np.minimum(t / attack, 1.0) if attack > 0 else 1.0)
+
+    def placed(length, pieces):
+        """Sounds laid at their times (seconds) in a silence of `length` seconds."""
+        out = np.zeros(int(RATE * length))
+        for start, piece, gain in pieces:
+            at = int(RATE * start)
+            piece = piece[:max(len(out) - at, 0)]
+            out[at:at + len(piece)] += piece * gain
+        return out
+
+    # Someone on foot: what the Third Person Game's figure sounds like.
+    if wants("steps"):
+        # A step: the thud of the heel, and the sole's scuff a moment after it.
+        save(folder, "step.wav", placed(0.2, [(0, burst(0.18, 55, 240, 61, 0.024), 1.0), (0.004, burst(0.15, 900, 4200, 62, 0.03, 0.004), 0.3)]), peak=0.45)
+        # Leaving the ground: cloth and air, a breath that rises.
+        n = int(RATE * 0.3)
+        t = np.arange(n) / RATE
+        swell = np.sin(np.pi * t / t[-1]) ** 1.5
+        rise = unit(noise(n, 250, 900, 63)) * (1 - t / t[-1]) + unit(noise(n, 900, 3200, 64)) * (t / t[-1])
+        save(folder, "jump.wav", rise * swell, peak=0.32)
+        # Coming down: heavier than a step.
+        save(folder, "land.wav", placed(0.3, [(0, burst(0.28, 40, 180, 65, 0.045), 1.0), (0.006, burst(0.2, 600, 3000, 66, 0.04, 0.005), 0.35)]), peak=0.6)
+        # Something picked up: two glass notes a fifth apart, the second just after the first.
+        n = int(RATE * 0.6)
+        t = np.arange(n) / RATE
+        def bell(f, start):
+            since = np.maximum(t - start, 0)
+            ring = np.sin(2 * np.pi * f * since) + 0.35 * np.sin(2 * np.pi * 2.76 * f * since) + 0.18 * np.sin(2 * np.pi * 5.4 * f * since)
+            return ring * (t >= start) * np.exp(-since / 0.15) * np.minimum(since / 0.002, 1.0)
+        save(folder, "pickup.wav", bell(1318.5, 0) + 0.9 * bell(1975.5, 0.075), peak=0.45)
+
+    # A rifle and what it is shot at: the Shooter Game's.
+    if wants("gun"):
+        # A shot: the crack, the thump of the barrel under it, and the tail the yard gives back.
+        n = int(RATE * 0.55)
+        t = np.arange(n) / RATE
+        thump = np.sin(2 * np.pi * (55 * t + 140 * 0.03 * (1 - np.exp(-t / 0.03)))) * np.exp(-t / 0.05)
+        shot = 1.3 * burst(0.55, 1400, 9000, 71, 0.011) + 0.9 * burst(0.55, 110, 900, 72, 0.05) + 0.8 * thump + 0.28 * burst(0.55, 300, 2600, 73, 0.17, 0.01)
+        save(folder, "shot.wav", np.tanh(shot * 1.6), peak=0.85)
+        # Nothing in it: the hammer falls on an empty chamber.
+        n = int(RATE * 0.09)
+        t = np.arange(n) / RATE
+        save(folder, "empty.wav", burst(0.09, 2400, 9000, 74, 0.004) + 0.5 * np.sin(2 * np.pi * 2100 * t) * np.exp(-t / 0.009), peak=0.4)
+        # Loading: the magazine let go and pulled out, the new one pushed home, the bolt back and let forward.
+        def click(seed, low, high, decay, note, ring):
+            n = int(RATE * 0.12)
+            t = np.arange(n) / RATE
+            return burst(0.12, low, high, seed, decay) + ring * np.sin(2 * np.pi * note * t) * np.exp(-t / (decay * 2.5))
+        slide = burst(0.22, 500, 3500, 81, 0.12, 0.05)
+        save(folder, "reload.wav", placed(1.45, [(0.04, click(75, 1800, 7000, 0.006, 1500, 0.4), 0.7), (0.10, slide, 0.25), (0.62, slide[::-1].copy(), 0.2),
+                                                 (0.80, click(76, 600, 4000, 0.012, 700, 0.6), 1.0), (1.10, click(77, 1500, 8000, 0.005, 2300, 0.35), 0.8),
+                                                 (1.22, click(78, 900, 6000, 0.008, 1100, 0.5), 1.0)]), peak=0.6)
+        # A steel target struck: it rings, and stops.
+        n = int(RATE * 0.5)
+        t = np.arange(n) / RATE
+        ring = np.sin(2 * np.pi * 1730 * t) * np.exp(-t / 0.11) + 0.6 * np.sin(2 * np.pi * 2890 * t) * np.exp(-t / 0.07) + 0.35 * np.sin(2 * np.pi * 4410 * t) * np.exp(-t / 0.04)
+        save(folder, "hit.wav", ring + 0.8 * np.pad(burst(0.05, 2000, 9000, 79, 0.003), (0, n - int(RATE * 0.05))), peak=0.5)
+        # Being hit: a dull blow.
+        save(folder, "hurt.wav", placed(0.35, [(0, burst(0.3, 50, 260, 82, 0.06), 1.0), (0.0, burst(0.2, 400, 1600, 83, 0.03), 0.4)]), peak=0.7)
+        # A machine brought down: its motor winds down under a crackle.
+        n = int(RATE * 0.9)
+        t = np.arange(n) / RATE
+        wind_down = np.sin(2 * np.pi * (420 * 0.25 * (1 - np.exp(-t / 0.25)) + 60 * t)) * np.exp(-t / 0.3)
+        crackle = unit(noise(n, 800, 6000, 84)) * (np.abs(unit(noise(n, 8, 40, 85))) > 0.35) * np.exp(-t / 0.25)
+        save(folder, "down.wav", wind_down * 0.8 + crackle * 0.5 + 0.9 * np.pad(burst(0.3, 60, 500, 86, 0.06), (0, n - int(RATE * 0.3))), peak=0.7)
 
 if __name__ == "__main__":
     write_all(sys.argv[1] if len(sys.argv) > 1 else ".")

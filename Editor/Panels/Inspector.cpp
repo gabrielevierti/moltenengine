@@ -7,9 +7,11 @@
 #include "Rendering/Particles.hpp"
 #include "Panels/Widgets.hpp"
 #include "Panels/Pickers.hpp"
+#include "Kit/Foliage.hpp"
 #include "Platform.hpp"
 
 #include <algorithm>
+#include <unordered_map>
 #include <map>
 #include <functional>
 #include <filesystem>
@@ -36,38 +38,19 @@ public:
     InspectorPanel() { title = "Inspector"; }
 
     void draw(EditorContext& editor) override {
-        // The things of the scene above; under them, only while something of the Explorer is
-        // chosen, its viewer, as tall as the bar between them is dragged to.
-        const AssetInfo* asset = editor.selectedAsset.empty() ? nullptr : editor.assets.find(editor.selectedAsset);
-        if (!asset) {
-            drawScenePart(editor);
-            return;
-        }
-        float room = ImGui::GetContentRegionAvail().y;
-        float bar = 6.0f;
-        bool hasEntity = editor.engine.scene.isAlive(editor.scene.primary());
-        // With nothing of the scene chosen, the viewer has nearly all of it.
-        float viewer = hasEntity ? std::clamp(viewerShare_, 0.15f, 0.85f) * room : room - ImGui::GetFrameHeightWithSpacing() * 1.6f;
-        float top = std::max(room - viewer - bar, ImGui::GetFrameHeight());
-        if (ImGui::BeginChild("##scene-part", ImVec2(0, top))) drawScenePart(editor);
-        ImGui::EndChild();
-        // The bar: drag it to share the height between the two.
-        ImVec2 at = ImGui::GetCursorScreenPos();
-        float width = ImGui::GetContentRegionAvail().x;
-        ImGui::InvisibleButton("##viewer-bar", ImVec2(width, bar));
-        bool active = ImGui::IsItemActive(), hovered = ImGui::IsItemHovered();
-        if (hovered || active) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
-        if (active && hasEntity) viewerShare_ = std::clamp(viewerShare_ - ImGui::GetIO().MouseDelta.y / std::max(room, 1.0f), 0.15f, 0.85f);
-        ImGui::GetWindowDrawList()->AddLine(ImVec2(at.x, at.y + bar * 0.5f), ImVec2(at.x + width, at.y + bar * 0.5f),
-                                            ImGui::GetColorU32(active ? ImGuiCol_SeparatorActive : hovered ? ImGuiCol_SeparatorHovered : ImGuiCol_Separator), active || hovered ? 2.0f : 1.0f);
-        if (ImGui::BeginChild("##viewer", ImVec2(0, 0))) drawAssetViewer(editor);
-        ImGui::EndChild();
+        drawScenePart(editor);
     }
 
     /// What is chosen in the scene: the Inspector proper. Nothing of the Explorer is shown here.
     void drawScenePart(EditorContext& editor) {
         SceneDocument& scene = editor.scene;
         Entity entity = scene.primary();
+        // Remembered, for when nothing is chosen.
+        if (editor.engine.scene.isAlive(entity) && (recent_.empty() || recent_.front() != entity)) {
+            recent_.erase(std::remove(recent_.begin(), recent_.end(), entity), recent_.end());
+            recent_.insert(recent_.begin(), entity);
+            if (recent_.size() > 5) recent_.pop_back();
+        }
         if (editor.engine.scene.isAlive(entity)) {
             // Many selected: what is changed on this one is changed on all of them.
             const std::vector<Entity>& selected = scene.selection();
@@ -86,11 +69,11 @@ public:
             } else {
                 drawEntity(editor, entity);
             }
-        } else {
-            ImGui::TextDisabled("Nothing of the scene selected.");
-            if (editor.selectedAsset.empty()) ImGui::TextDisabled("Click something in the view or the hierarchy.");
         }
+        // With nothing chosen the Inspector is empty: it is for what is chosen.
     }
+
+    std::vector<Entity> recent_;
 
 private:
     // ---------------------------------------------------------------- parts of prefab copies
@@ -193,7 +176,8 @@ private:
             bool tagChanged = false;
             float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
             // The tags to choose from: the usual ones, and every other one the scene already uses.
-            std::vector<std::string> tags = {"Untagged", "Player", "Enemy", "Pickup", "Obstacle", "Ground", "MainCamera", "Finish"};
+            const GameSettings& settings = editor.engine.settings;
+            std::vector<std::string> tags = settings.allTags();
             scene.each<Tag>([&](Entity, Tag& used) {
                 if (std::find(tags.begin(), tags.end(), used.value) == tags.end()) tags.push_back(used.value);
             });
@@ -206,22 +190,30 @@ private:
                     }
                 }
                 ImGui::Separator();
-                ImGui::SetNextItemWidth(150);
+                ImGui::SetNextItemWidth(170);
                 if (ImGui::InputTextWithHint("##new-tag", "New tag, then Return", &newTag_, ImGuiInputTextFlags_EnterReturnsTrue) && !newTag_.empty()) {
                     current.value = newTag_;
+                    // A tag made here is the project's from now on, like one added in Project Settings.
+                    GameSettings added = settings;
+                    if (std::find(added.tags.begin(), added.tags.end(), newTag_) == added.tags.end() && newTag_ != "Untagged") {
+                        added.tags.push_back(newTag_);
+                        saveGameSettings(editor, added);
+                    }
                     newTag_.clear();
                     tagChanged = true;
                     ImGui::CloseCurrentPopup();
                 }
+                if (ImGui::Selectable("Edit Tags...")) editor.showProjectSettings("Tags and Layers");
                 ImGui::EndCombo();
             }
             ImGui::SameLine();
-            static const char* const kLayers[] = {"Default", "Transparent", "Ignore Raycast", "Water", "UI", "Player", "Enemy", "Scenery"};
-            std::string layerName = current.layer >= 0 && current.layer < 8 ? kLayers[current.layer] : "Layer " + std::to_string(current.layer);
+            std::string layerName = settings.layerName(current.layer);
             ImGui::SetNextItemWidth(half);
             if (ImGui::BeginCombo("##layer", ("Layer: " + layerName).c_str())) {
-                for (int layer = 0; layer < 32; layer++) {
-                    std::string label = layer < 8 ? std::string(kLayers[layer]) : "Layer " + std::to_string(layer);
+                for (int layer = 0; layer < GameSettings::kLayerCount; layer++) {
+                    // The layers that have a name, and the one it is on even if it has none.
+                    if (settings.layers[size_t(layer)].empty() && layer != current.layer) continue;
+                    std::string label = settings.layerName(layer);
                     if (ImGui::Selectable((std::to_string(layer) + "  " + label).c_str(), layer == current.layer)) {
                         current.layer = layer;
                         tagChanged = true;
@@ -229,6 +221,8 @@ private:
                         if (Collider* collider = scene.get<Collider>(entity)) collider->layer = 1u << uint32_t(layer);
                     }
                 }
+                ImGui::Separator();
+                if (ImGui::Selectable("Edit Layers...")) editor.showProjectSettings("Tags and Layers");
                 ImGui::EndCombo();
             }
             if (tagChanged) {
@@ -241,8 +235,14 @@ private:
         }
         ImGui::Spacing();
 
-        if (Transform* transform = scene.get<Transform>(entity)) {
-            if (ui::section("Transform")) {
+        // A piece of the interface lives on the screen, not in the world: no position, rotation
+        // and scale in 3D for it, only its place on the screen (anchor, offset, size), below.
+        bool isInterface = isInterfacePiece(scene, entity);
+        if (isInterface) {
+            ImGui::TextDisabled("On the screen: placed by its anchor and offset below, or dragged in the Game view.");
+        }
+        if (Transform* transform = isInterface ? nullptr : scene.get<Transform>(entity)) {
+            if (ui::componentSection("Transform", "Transform", "axes")) {
                 bool changed = ui::dragVec3("Position", transform->position, 0.02f);
                 // Angles are shown in degrees and remembered while the rotation stays the same:
                 // converting the rotation back to angles every frame would make the numbers jump.
@@ -280,7 +280,7 @@ private:
             if (!component.has(scene, entity)) continue;
             ImGui::PushID(component.name.c_str());
             float rightEdge = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
-            bool isOpen = ui::section(component.name.c_str());
+            bool isOpen = ui::componentSection(component.name.c_str(), component.name.c_str(), ui::iconKindOf(component.name));
             // On or off, for the components that can be: at the right of the header, before its menu.
             bool* enabled = nullptr;
             if (component.name == "Mesh Renderer") enabled = &scene.get<MeshRenderer>(entity)->isVisible;
@@ -296,7 +296,7 @@ private:
             }
             // A small button at the right end of the header: what can be done to the component.
             ImGui::SameLine(rightEdge - 30);
-            if (ImGui::SmallButton("...")) ImGui::OpenPopup("##component-menu");
+            if (ui::moreButton("##more")) ImGui::OpenPopup("##component-menu");
             bool removed = false;
             if (ImGui::BeginPopup("##component-menu")) {
                 if (ImGui::MenuItem("Reset")) {
@@ -325,7 +325,7 @@ private:
             if (!component) continue;
             ImGui::PushID(type.name.c_str());
             float rightEdge = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
-            bool isOpen = ui::section((ComponentRegistry::displayName(type.name) + "###" + type.name).c_str());
+            bool isOpen = ui::componentSection(ComponentRegistry::displayName(type.name).c_str(), type.name.c_str(), ui::iconKindOf(type.name, type.category));
             {
                 // On or off: a component switched off keeps its values and does nothing.
                 const DisabledComponents* disabled = scene.get<DisabledComponents>(entity);
@@ -344,7 +344,7 @@ private:
                 ui::tooltip("Enabled");
             }
             ImGui::SameLine(rightEdge - 30);
-            if (ImGui::SmallButton("...")) ImGui::OpenPopup("##component-menu");
+            if (ui::moreButton("##more")) ImGui::OpenPopup("##component-menu");
             bool removed = false;
             if (ImGui::BeginPopup("##component-menu")) {
                 if (ImGui::MenuItem("Reset")) {
@@ -380,15 +380,34 @@ private:
                 for (const Field& field : type.fields) {
                     if (drawField(editor, entity, type, field, component)) document.markChanged();
                 }
-                // Where an Animator's clips and states are made.
+                if (type.name == "Foliage") {
+                    // What foliage is: copies of this entity's mesh, painted on the ground.
+                    const kit::Foliage* foliage = static_cast<const kit::Foliage*>(component);
+                    ImGui::TextWrapped("%d copies of its mesh (grass, stones, trees), painted on whatever is under them. "
+                                       "Paint them in the Scene view with the brush that shows there while this is chosen: Paint, Erase, Size, Density.",
+                                       int(foliage->copies.size()));
+                }
+                if (type.name == "Spline") {
+                    if (ImGui::Button("Add Point")) addSplinePoint(editor);
+                    ui::tooltip("A point after the last (or after the one chosen), a little beyond it");
+                    // What a spline can be made into: a road along it (its surface made from the curve).
+                    if (const ComponentType* road = ComponentRegistry::instance().find("SplineRoad"); road && !road->get(scene, entity)) {
+                        ImGui::SameLine();
+                        if (ImGui::Button("Make It a Road")) {
+                            road->add(scene, entity);
+                            if (!scene.has<MeshRenderer>(entity)) scene.add(entity, MeshRenderer{});
+                            document.markChanged();
+                        }
+                        ui::tooltip("A road along the curve: its width, banking and texture in the Road component it adds");
+                    }
+                }
+                // Where an Animator's animations and states are made.
                 if (type.name == "Animator") {
-                    if (ImGui::Button("Open Animation")) editor.openPanel("Animation");
-                    ui::tooltip("Its clips: record and edit keys");
+                    if (ImGui::Button("Open Timeline")) editor.openPanel("Timeline");
+                    ui::tooltip("Its animations: create one, record and edit its keys");
                     ImGui::SameLine();
                     if (ImGui::Button("Open Animator")) editor.openPanel("Animator");
                     ui::tooltip("Its controller: states, transitions, parameters");
-                } else if (type.name == "TimelinePlayer") {
-                    if (ImGui::Button("Open Timeline")) editor.openPanel("Timeline");
                 }
             }
             ImGui::PopID();
@@ -397,8 +416,8 @@ private:
         // everything that uses the material.
         if (MeshRenderer* renderer = scene.get<MeshRenderer>(entity); renderer && renderer->material) {
             Material& material = *renderer->material;
-            std::string title = "Material: " + materialDisplayName(editor, renderer->material) + "###material";
-            if (ui::section(title.c_str())) {
+            std::string title = "Material: " + materialDisplayName(editor, renderer->material);
+            if (ui::componentSection(title.c_str(), "material", "material")) {
                 ImGui::PushID("material");
                 bool isAsset = !material.assetName.empty();
                 ImGui::TextDisabled(isAsset ? "An asset: shared by everything that uses it." : "Only in this scene. The Material menu above can save it as an asset.");
@@ -423,7 +442,8 @@ private:
         ImGui::Spacing();
         float width = std::min(ImGui::GetContentRegionAvail().x, 220.0f);
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (ImGui::GetContentRegionAvail().x - width) * 0.5f);
-        if (ImGui::Button("Add Component", ImVec2(width, 0))) ImGui::OpenPopup("##add-component");
+        if (ImGui::Button("Add Component", ImVec2(width, 0)) || editor.addComponentRequested) ImGui::OpenPopup("##add-component");
+        editor.addComponentRequested = false;        // Component > Add... (Shift+Cmd+A)
         ImGui::SetNextWindowSizeConstraints(ImVec2(260, 0), ImVec2(380, 460));
         if (ImGui::BeginPopup("##add-component")) {
             // Everything that can be added and is not there yet, each under its category.
@@ -525,13 +545,14 @@ private:
 
     /// One field of a game component, with the control that suits its type.
     static bool drawField(EditorContext& editor, Entity entity, const ComponentType& type, const Field& field, void* component) {
+        if (field.isHidden) return false;
         std::string label = field.label();
         void* at = field.address(component);
         bool hasRange = field.minimum < field.maximum;
         bool changed = false;
         switch (field.type) {
             case FieldType::Float:
-                changed = hasRange ? ui::sliderFloat(label.c_str(), *static_cast<float*>(at), field.minimum, field.maximum, "%.3f")
+                changed = hasRange ? ui::sliderFloat(label.c_str(), *static_cast<float*>(at), field.minimum, field.maximum, ui::kNumberFormat)
                                    : ui::dragFloat(label.c_str(), *static_cast<float*>(at), 0.01f);
                 break;
             case FieldType::Int:
@@ -591,7 +612,6 @@ private:
         return changed;
     }
 
-    float viewerShare_ = 0.42f;                                        // of the height, the viewer's
     Entity shownFor_;
     std::string newTag_;
     std::string addFilter_;                                             // what is typed in Add Component
@@ -602,6 +622,62 @@ private:
 };
 
 }  // namespace
+
+/// A piece of the game's interface: something of the UI category, drawn on the screen.
+bool isInterfacePiece(Scene& scene, Entity entity) {
+    for (const ComponentType& type : ComponentRegistry::instance().types()) {
+        if (type.category == "UI" && type.get && type.get(scene, entity)) return true;
+    }
+    return false;
+}
+
+void drawAddComponentMenu(EditorContext& editor) {
+    Scene& scene = editor.engine.scene;
+    std::vector<Entity> selected = editor.scene.selection();
+    // Each by category, in the order people look for things in: what is seen, then how it behaves.
+    struct Choice {
+        std::string category, name;
+        std::function<bool(Entity)> has;
+        std::function<void(Entity)> add;
+    };
+    std::vector<Choice> choices;
+    for (auto& item : editor.registry.components) {
+        const std::string& name = item.value.name;
+        const char* category = name == "Mesh Renderer" ? "Mesh" : name == "Camera" || name == "Light" ? "Rendering"
+                             : name.find("Collider") != std::string::npos || name == "Rigidbody" ? "Physics" : name == "Particle System" ? "Effects" : "Miscellaneous";
+        ComponentEditor* component = &item.value;
+        choices.push_back({category, name, [component, &scene](Entity entity) { return component->has(scene, entity); },
+                           [component, &scene](Entity entity) { component->add(scene, entity); }});
+    }
+    for (const ComponentType& type : ComponentRegistry::instance().types()) {
+        if (type.category == "Hidden") continue;
+        auto has = type.has;
+        auto add = type.add;
+        choices.push_back({type.category, ComponentRegistry::displayName(type.name), [has, &scene](Entity entity) { return has(scene, entity); },
+                           [add, &scene](Entity entity) { add(scene, entity); }});
+    }
+    std::vector<std::string> categories = {"Mesh", "Rendering", "Physics", "Audio", "Effects", "UI", "Vehicles", "Gameplay", "Scripts"};
+    for (const Choice& choice : choices) {
+        if (std::find(categories.begin(), categories.end(), choice.category) == categories.end()) categories.push_back(choice.category);
+    }
+    for (const std::string& category : categories) {
+        bool any = false;
+        for (const Choice& choice : choices) any = any || choice.category == category;
+        if (!any || !ImGui::BeginMenu(category.c_str())) continue;
+        for (const Choice& choice : choices) {
+            if (choice.category != category) continue;
+            // Offered while any of the selected lacks it.
+            bool isMissing = false;
+            for (Entity entity : selected) isMissing = isMissing || (scene.isAlive(entity) && !choice.has(entity));
+            if (!ImGui::MenuItem(choice.name.c_str(), nullptr, false, isMissing)) continue;
+            for (Entity entity : selected) {
+                if (scene.isAlive(entity) && !choice.has(entity)) choice.add(entity);
+            }
+            editor.scene.markChanged();
+        }
+        ImGui::EndMenu();
+    }
+}
 
 void registerInspectorPanel(EditorContext& editor) {
     editor.registry.addPanel(nullptr, std::make_unique<InspectorPanel>());
@@ -656,108 +732,246 @@ bool textureSlot(EditorContext& editor, const char* name, std::shared_ptr<Textur
 
 // ---------------------------------------------------------------- the engine's own components
 
-bool drawEmitterProperties(EditorContext& editor, ParticleEmitter& emitter, bool offersFiles) {
-    bool changed = false;
-    // Start from an effect that exists: one of the engine's, or a file of the project.
-    if (ImGui::Button("Start From...")) ImGui::OpenPopup("##presets");
-    if (ImGui::BeginPopup("##presets")) {
-        ImGui::TextDisabled("The engine's");
-        for (const std::string& name : effectPresets()) {
-            if (ImGui::MenuItem(name.c_str())) {
-                emitter = effectPreset(name);
-                changed = true;
-            }
-        }
-        bool any = false;
-        for (const AssetInfo& asset : editor.assets.assets()) {
-            if (asset.type != AssetType::Effect) continue;
-            if (!any) {
-                ImGui::Separator();
-                ImGui::TextDisabled("The project's");
-            }
-            any = true;
-            if (ImGui::MenuItem(asset.path.c_str())) {
-                std::optional<std::string> contents = text::readFile(editor.assets.absolutePath(asset.path));
-                if (contents && readEffect(*contents, emitter)) changed = true;
-            }
-        }
-        ImGui::EndPopup();
-    }
-    if (offersFiles) {
-        ImGui::SameLine();
-        if (ImGui::Button("Save as Effect")) {
-            // A file of its own, to put on other things and in other scenes.
-            std::error_code ignored;
-            std::filesystem::create_directories(editor.assets.absolutePath("Effects"), ignored);
-            std::string path = editor.assets.uniquePath("Effects", "Effect", ".effect");
-            if (text::writeFile(editor.assets.absolutePath(path), writeEffect(emitter))) {
-                editor.assets.refresh();
-                editor.notify("Saved " + path);
-            }
-        }
-    }
+namespace {
 
-    if (ui::section("Emission")) {
-        changed |= ui::checkbox("Emitting", emitter.isEmitting);
-        changed |= ui::dragFloat("Rate", emitter.rate, 0.5f, 0.0f, 5000.0f, "%.0f per second");
-        changed |= ui::dragInt("Most at Once", emitter.maxParticles, 4.0f, 1, 100000);
+/// A module of a particle system, as in Unity: a row that folds, with a box that switches it on
+/// when it is one that can be off. Returns whether it is open.
+bool particleModule(const char* title, bool* isOn, bool& changed, bool startsOpen) {
+    ImGui::PushID(title);
+    ImGui::Spacing();
+    if (isOn) {
+        if (ImGui::Checkbox("##on", isOn)) changed = true;
+        ImGui::SameLine(0, 6);
+    }
+    ImGui::PushStyleColor(ImGuiCol_Header, ImGui::GetStyleColorVec4(ImGuiCol_FrameBg));
+    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_FramePadding;
+    if (startsOpen) flags |= ImGuiTreeNodeFlags_DefaultOpen;
+    bool open = ImGui::TreeNodeEx("##module", flags, "%s", title);
+    ImGui::PopStyleColor();
+    ImGui::PopID();
+    // Off: its settings are not shown, they do nothing.
+    if (open && isOn && !*isOn) {
+        ImGui::TreePop();
+        return false;
+    }
+    return open;
+}
+
+/// What a module had when it was switched off, so that switching it on again brings it back.
+ParticleEmitter& rememberedFor(const ParticleEmitter& emitter) {
+    static std::unordered_map<const ParticleEmitter*, ParticleEmitter> kept;
+    auto found = kept.find(&emitter);
+    if (found == kept.end()) found = kept.emplace(&emitter, emitter).first;
+    return found->second;
+}
+
+}  // namespace
+
+bool drawEmitterProperties(EditorContext& editor, ParticleEmitter& emitter, bool) {
+    bool changed = false;
+    ParticleEmitter& remembered = rememberedFor(emitter);
+
+    if (particleModule("Main", nullptr, changed, true)) {
+        changed |= ui::checkbox("Playing", emitter.isEmitting);
+        ui::tooltip("Emitting new particles. Code and visual scripts can switch it on and off");
+        changed |= ui::dragFloat("Duration", emitter.duration, 0.01f, 0.0f, 600.0f, "%.2f s");
+        ui::tooltip("It emits for this long and stops. 0: for as long as it is there");
+        if (emitter.duration > 0) changed |= ui::checkbox("Looping", emitter.loops);
+        changed |= ui::checkbox("Prewarm", emitter.prewarm);
+        ui::tooltip("Starts as if it had been running already: a fire already burning when the scene begins");
+        changed |= ui::dragFloat("Start Delay", emitter.startDelay, 0.01f, 0.0f, 600.0f, "%.2f s");
+        changed |= ui::dragFloat("Lifetime, Shortest", emitter.lifetimeMin, 0.01f, 0.01f, 600.0f, "%.2f s");
+        changed |= ui::dragFloat("Lifetime, Longest", emitter.lifetimeMax, 0.01f, 0.01f, 600.0f, "%.2f s");
+        changed |= ui::dragFloat("Speed, Slowest", emitter.speedMin, 0.02f, 0.0f, 1000.0f, "%.2f m/s");
+        changed |= ui::dragFloat("Speed, Fastest", emitter.speedMax, 0.02f, 0.0f, 1000.0f, "%.2f m/s");
+        changed |= ui::sliderFloat("Size Variation", emitter.sizeVariation, 0.0f, 1.0f);
+        changed |= ui::sliderFloat("Shade Variation", emitter.shadeVariation, 0.0f, 1.0f);
+        ui::tooltip("Each particle a little darker or brighter than the next: smoke that is not one flat grey");
+        changed |= ui::dragVec3("Gravity", emitter.gravity, 0.02f);
+        int space = int(emitter.space);
+        if (ui::combo("Simulation Space", space, {"World", "Local"})) {
+            emitter.space = ParticleEmitter::Space(space);
+            emitter.particles.clear();
+            changed = true;
+        }
+        ui::tooltip("World: what it emitted stays where it was born as the entity moves on (smoke, a trail). Local: carried along with the entity (a halo)");
+        changed |= ui::sliderFloat("Simulation Speed", emitter.simulationSpeed, 0.0f, 4.0f);
+        changed |= ui::dragFloat("Inherit Velocity", emitter.inheritVelocity, 0.01f, -2.0f, 2.0f);
+        ui::tooltip("The share of the entity's own movement each particle is born with: sparks off a moving grinder");
+        changed |= ui::dragInt("Max Particles", emitter.maxParticles, 4.0f, 1, 100000);
+        ImGui::TreePop();
+    }
+    if (particleModule("Emission", nullptr, changed, true)) {
+        changed |= ui::dragFloat("Rate over Time", emitter.rate, 0.5f, 0.0f, 10000.0f, "%.0f a second");
+        changed |= ui::dragFloat("Rate over Distance", emitter.ratePerMeter, 0.1f, 0.0f, 1000.0f, "%.1f a meter");
+        ui::tooltip("Emitted for every meter the entity moves: a trail behind something that flies");
         changed |= ui::dragInt("Burst at Start", emitter.burstAtStart, 1.0f, 0, 100000);
         changed |= ui::dragFloat("Burst Every", emitter.burstEvery, 0.01f, 0.0f, 600.0f, "%.2f s");
         ui::tooltip("0: no bursts after the first");
-        if (emitter.burstEvery > 0) changed |= ui::dragInt("Particles in a Burst", emitter.burstCount, 1.0f, 0, 100000);
-        changed |= ui::dragFloat("Lasts", emitter.duration, 0.01f, 0.0f, 600.0f, "%.2f s");
-        ui::tooltip("It emits for this long and stops. 0: for as long as it is there.");
-        if (emitter.duration > 0) changed |= ui::checkbox("Starts Over", emitter.loops);
+        if (emitter.burstEvery > 0) changed |= ui::dragInt("Burst Count", emitter.burstCount, 1.0f, 0, 100000);
+        ImGui::TreePop();
     }
-    if (ui::section("Shape")) {
+    if (particleModule("Shape", nullptr, changed, true)) {
         int shape = int(emitter.shape);
-        if (ui::combo("Born", shape, {"In a sphere", "In a box", "On a ring"})) {
+        if (ui::combo("Shape", shape, {"Cone", "Box", "Ring", "Sphere", "Hemisphere", "Line"})) {
             emitter.shape = ParticleEmitter::Shape(shape);
             changed = true;
         }
-        if (emitter.shape == ParticleEmitter::Shape::Box) changed |= ui::dragVec3("Box Size", emitter.boxSize, 0.02f);
-        else changed |= ui::dragFloat("Radius", emitter.spawnRadius, 0.01f, 0.0f, 1000.0f);
+        using Shape = ParticleEmitter::Shape;
+        if (emitter.shape == Shape::Box) changed |= ui::dragVec3("Box Size", emitter.boxSize, 0.02f);
+        else if (emitter.shape == Shape::Line) {
+            float length = emitter.boxSize.x;
+            if (ui::dragFloat("Length", length, 0.02f, 0.0f, 1000.0f, "%.2f m")) emitter.boxSize.x = length, changed = true;
+        }
+        else changed |= ui::dragFloat("Radius", emitter.spawnRadius, 0.01f, 0.0f, 1000.0f, "%.2f m");
+        if (emitter.shape == Shape::Box || emitter.shape == Shape::Sphere || emitter.shape == Shape::Hemisphere || emitter.shape == Shape::Cone) {
+            changed |= ui::checkbox("From the Surface", emitter.fromShell);
+            ui::tooltip("Born on its surface instead of anywhere inside");
+        }
         changed |= ui::dragVec3("Direction", emitter.direction, 0.01f);
         changed |= ui::dragDegrees("Spread", emitter.spread, 0.0f, 180.0f);
-        ui::tooltip("How wide the cone they leave in is: 180 is every direction");
+        ui::tooltip(emitter.shape == Shape::Sphere || emitter.shape == Shape::Hemisphere ? "How far from straight out they scatter"
+                                                                                       : "How wide the cone they leave in is: 180 is every direction");
+        ImGui::TreePop();
     }
-    if (ui::section("Life and Motion")) {
-        changed |= ui::dragFloat("Life, Shortest", emitter.lifetimeMin, 0.01f, 0.01f, 60.0f);
-        changed |= ui::dragFloat("Life, Longest", emitter.lifetimeMax, 0.01f, 0.01f, 60.0f);
-        changed |= ui::dragFloat("Speed, Slowest", emitter.speedMin, 0.02f, 0.0f, 1000.0f);
-        changed |= ui::dragFloat("Speed, Fastest", emitter.speedMax, 0.02f, 0.0f, 1000.0f);
-        changed |= ui::dragVec3("Gravity", emitter.gravity, 0.02f);
-        changed |= ui::dragFloat("Drag", emitter.drag, 0.01f, 0.0f, 20.0f);
-        changed |= ui::sliderFloat("Wind Influence", emitter.windInfluence, 0.0f, 1.0f);
-        changed |= ui::dragFloat("Turbulence", emitter.turbulence, 0.01f, 0.0f, 20.0f);
-        ui::tooltip("Swirling, as in smoke that curls");
-        if (emitter.turbulence > 0) changed |= ui::dragFloat("Swirl Size", emitter.turbulenceSize, 0.01f, 0.05f, 100.0f, "%.2f m");
-        changed |= ui::dragFloat("Streak", emitter.stretch, 0.001f, 0.0f, 1.0f, "%.3f s");
-        ui::tooltip("Each particle drawn as a streak along the way it goes, this many seconds of it long: rain, sparks. 0 for round dots.");
-        changed |= ui::checkbox("Bounces", emitter.bounces);
-        ui::tooltip("Off a level floor");
-        if (emitter.bounces) {
-            changed |= ui::dragFloat("Floor Height", emitter.floorHeight, 0.01f);
-            changed |= ui::sliderFloat("Bounciness", emitter.bounciness, 0.0f, 1.0f);
+    bool hasVelocity = simd::length_squared(emitter.drift) > 0 || emitter.radial != 0 || emitter.orbital != 0;
+    bool velocityWas = hasVelocity;
+    if (particleModule("Velocity over Lifetime", &hasVelocity, changed, false)) {
+        changed |= ui::dragVec3("Linear", emitter.drift, 0.01f);
+        ui::tooltip("Meters a second every particle moves along, besides its own speed, in the simulation's space");
+        changed |= ui::dragFloat("Radial", emitter.radial, 0.01f, -100.0f, 100.0f, "%.2f m/s");
+        ui::tooltip("Away from the emitter; below 0, toward it");
+        changed |= ui::dragFloat("Orbital", emitter.orbital, 0.01f, -50.0f, 50.0f, "%.2f rad/s");
+        ui::tooltip("Round the emitter's direction: a whirl, a vortex");
+        ImGui::TreePop();
+    }
+    if (hasVelocity != velocityWas) {
+        if (!hasVelocity) {
+            remembered.drift = emitter.drift, remembered.radial = emitter.radial, remembered.orbital = emitter.orbital;
+            emitter.drift = Vec3{0, 0, 0}, emitter.radial = 0, emitter.orbital = 0;
+        } else {
+            bool hadSome = simd::length_squared(remembered.drift) > 0 || remembered.radial != 0 || remembered.orbital != 0;
+            emitter.drift = hadSome ? remembered.drift : Vec3{0, 0.5f, 0};
+            emitter.radial = remembered.radial, emitter.orbital = remembered.orbital;
         }
     }
-    if (ui::section("Look")) {
-        changed |= ui::color("Color at Birth", emitter.colorStart);
-        changed |= ui::dragFloat("Size at Birth", emitter.sizeStart, 0.005f, 0.0f, 100.0f);
-        changed |= ui::checkbox("A Middle", emitter.hasMiddle);
-        ui::tooltip("A third color and size on the way: fire that is yellow, then orange, then smoke");
+    if (particleModule("Forces", nullptr, changed, false)) {
+        changed |= ui::dragFloat("Buoyancy", emitter.buoyancy, 0.02f, -50.0f, 50.0f, "%.2f m/s²");
+        ui::tooltip("Hot gas rises: a push upward at birth that fades as the particle cools. Flames and smoke rise by this, not by gravity");
+        changed |= ui::dragFloat("Drag", emitter.drag, 0.01f, 0.0f, 20.0f);
+        ui::tooltip("How quickly the air slows them: light things (smoke) a lot, heavy ones (sparks) little");
+        changed |= ui::sliderFloat("Wind", emitter.windInfluence, 0.0f, 1.0f);
+        ui::tooltip("How much the scene's wind (Lighting > Wind) carries them: 1 for smoke that goes wherever the air goes");
+        ImGui::TreePop();
+    }
+    bool hasNoise = emitter.turbulence > 0;
+    bool noiseWas = hasNoise;
+    if (particleModule("Noise", &hasNoise, changed, false)) {
+        changed |= ui::dragFloat("Strength", emitter.turbulence, 0.01f, 0.0f, 20.0f, "%.2f m/s");
+        changed |= ui::dragFloat("Size", emitter.turbulenceSize, 0.01f, 0.05f, 100.0f, "%.2f m");
+        ui::tooltip("How large the swirls are");
+        changed |= ui::sliderFloat("Scroll Speed", emitter.turbulenceSpeed, 0.0f, 5.0f);
+        ui::tooltip("How fast the swirls themselves change");
+        changed |= ui::dragInt("Octaves", emitter.turbulenceOctaves, 0.05f, 1, 3);
+        ui::tooltip("Swirls inside swirls: 2 or 3 for smoke that curls like real smoke");
+        ImGui::TreePop();
+    }
+    if (hasNoise != noiseWas) {
+        if (!hasNoise) remembered.turbulence = emitter.turbulence, emitter.turbulence = 0;
+        else emitter.turbulence = remembered.turbulence > 0 ? remembered.turbulence : 0.5f;
+    }
+    bool hasCollision = emitter.collides || emitter.bounces;
+    bool collisionWas = hasCollision;
+    if (particleModule("Collision", &hasCollision, changed, false)) {
+        changed |= ui::checkbox("With Colliders", emitter.collides);
+        ui::tooltip("The boxes, spheres and capsules of the scene: sparks off a wall, smoke under a ceiling");
+        changed |= ui::checkbox("With a Floor", emitter.bounces);
+        if (emitter.bounces) changed |= ui::dragFloat("Floor Height", emitter.floorHeight, 0.01f, -10000.0f, 10000.0f, "%.2f m");
+        changed |= ui::sliderFloat("Bounce", emitter.bounciness, 0.0f, 1.0f);
+        changed |= ui::sliderFloat("Friction", emitter.friction, 0.0f, 1.0f);
+        changed |= ui::sliderFloat("Lifetime Loss", emitter.lifetimeLoss, 0.0f, 1.0f);
+        ui::tooltip("The share of its life a particle loses each time it hits");
+        changed |= ui::checkbox("Dies on Hit", emitter.diesOnHit);
+        if (emitter.space == ParticleEmitter::Space::Local) ImGui::TextDisabled("Collisions are for the World space.");
+        ImGui::TreePop();
+    }
+    if (hasCollision != collisionWas) {
+        if (!hasCollision) emitter.collides = emitter.bounces = false;
+        else emitter.collides = true;
+    }
+    if (particleModule("Color over Lifetime", nullptr, changed, true)) {
+        changed |= ui::color("At Birth", emitter.colorStart);
+        changed |= ui::checkbox("A Middle Color", emitter.hasMiddle);
+        ui::tooltip("A third color and size on the way: yellow, then orange, then smoke");
         if (emitter.hasMiddle) {
             changed |= ui::sliderFloat("Middle At", emitter.middleAt, 0.02f, 0.98f);
-            changed |= ui::color("Color at the Middle", emitter.colorMiddle);
-            changed |= ui::dragFloat("Size at the Middle", emitter.sizeMiddle, 0.005f, 0.0f, 100.0f);
+            changed |= ui::color("At the Middle", emitter.colorMiddle);
         }
-        changed |= ui::color("Color at Death", emitter.colorEnd);
-        changed |= ui::dragFloat("Size at Death", emitter.sizeEnd, 0.005f, 0.0f, 100.0f);
-        changed |= ui::checkbox("Additive", emitter.isAdditive);
-        ui::tooltip("Light added to what is behind (fire, sparks, magic) instead of covering it (smoke, dust)");
+        changed |= ui::color("At Death", emitter.colorEnd);
+        ui::tooltip("Values above 1 glow: the bloom picks them up");
+        ImGui::TreePop();
+    }
+    if (particleModule("Size over Lifetime", nullptr, changed, true)) {
+        changed |= ui::dragFloat("At Birth", emitter.sizeStart, 0.005f, 0.0f, 1000.0f, "%.3f m");
+        if (emitter.hasMiddle) changed |= ui::dragFloat("At the Middle", emitter.sizeMiddle, 0.005f, 0.0f, 1000.0f, "%.3f m");
+        changed |= ui::dragFloat("At Death", emitter.sizeEnd, 0.005f, 0.0f, 1000.0f, "%.3f m");
+        ImGui::TreePop();
+    }
+    if (particleModule("Rotation", nullptr, changed, false)) {
+        changed |= ui::checkbox("Random Start", emitter.randomRotation);
+        changed |= ui::dragFloat("Spin, Least", emitter.spinMin, 0.01f, 0.0f, 30.0f, "%.2f rad/s");
+        changed |= ui::dragFloat("Spin, Most", emitter.spinMax, 0.01f, 0.0f, 30.0f, "%.2f rad/s");
+        ui::tooltip("Each turns either way at a speed between these: smoke that rolls");
+        ImGui::TreePop();
+    }
+    bool hasSheet = emitter.sheetColumns * emitter.sheetRows > 1;
+    bool sheetWas = hasSheet;
+    if (particleModule("Texture Sheet Animation", &hasSheet, changed, false)) {
+        int sheet[2] = {emitter.sheetColumns, emitter.sheetRows};
+        ui::label("Tiles");
+        if (ImGui::DragInt2("##sheet", sheet, 0.05f, 1, 16)) {
+            emitter.sheetColumns = std::max(sheet[0], 1);
+            emitter.sheetRows = std::max(sheet[1], 1);
+            changed = true;
+        }
+        ui::tooltip("The picture is a sheet of frames, columns by rows");
+        changed |= ui::dragFloat("Frames a Second", emitter.sheetFps, 0.1f, 0.0f, 120.0f, "%.1f");
+        ui::tooltip("0: the whole sheet once over each particle's life");
+        changed |= ui::checkbox("Random Start Frame", emitter.randomFrame);
+        if (emitter.texture.empty()) ImGui::TextDisabled("Choose a picture in the Renderer.");
+        ImGui::TreePop();
+    }
+    if (hasSheet != sheetWas) {
+        if (!hasSheet) emitter.sheetColumns = emitter.sheetRows = 1;
+        else emitter.sheetColumns = 2, emitter.sheetRows = 2;
+    }
+    if (particleModule("Renderer", nullptr, changed, true)) {
+        int mode = int(emitter.renderMode);
+        if (ui::combo("Render Mode", mode, {"Billboard", "Stretched", "Horizontal", "Vertical"})) {
+            emitter.renderMode = ParticleEmitter::RenderMode(mode);
+            if (emitter.renderMode == ParticleEmitter::RenderMode::Stretched && emitter.stretch <= 0) emitter.stretch = 0.03f;
+            changed = true;
+        }
+        if (emitter.renderMode == ParticleEmitter::RenderMode::Stretched) {
+            changed |= ui::dragFloat("Length", emitter.stretch, 0.001f, 0.001f, 1.0f, "%.3f s of its way");
+        }
+        changed |= pickValue(editor, Entity{}, "picture", "Picture", emitter.texture);
+        ui::tooltip("A picture with clear (transparent) around its shape, tinted by the particle's color. None: a soft round dot");
+        int blend = emitter.isAdditive ? 0 : 1;
+        if (ui::combo("Blending", blend, {"Additive (light)", "Alpha (matter)"})) {
+            emitter.isAdditive = blend == 0;
+            changed = true;
+        }
+        ui::tooltip("Additive adds its light to what is behind (fire, sparks, magic); Alpha covers it (smoke, dust, leaves)");
+        changed |= ui::sliderFloat("Lit", emitter.lit, 0.0f, 1.0f);
+        ui::tooltip("0: its own color, glowing. 1: lit by the sun and the sky, and brighter with the sun behind it, like smoke");
+        changed |= ui::dragFloat("Soft Particles", emitter.softness, 0.01f, 0.0f, 10.0f, "%.2f m");
+        ui::tooltip("Fades out where it meets a surface instead of cutting a hard line into it");
+        ImGui::TreePop();
     }
     emitter.lifetimeMax = std::max(emitter.lifetimeMax, emitter.lifetimeMin);
     emitter.speedMax = std::max(emitter.speedMax, emitter.speedMin);
+    emitter.spinMax = std::max(emitter.spinMax, emitter.spinMin);
     return changed;
 }
 
@@ -791,7 +1005,7 @@ void registerBuiltinComponents(EditorContext& editor) {
     registry.addComponent<Light>(nullptr, "Light", [](EditorContext&, Entity, Light& light) {
         bool changed = false;
         int type = int(light.type);
-        if (ui::combo("Type", type, {"Directional", "Point", "Spot"})) {
+        if (ui::combo("Type", type, {"Directional", "Point", "Spot", "Area"})) {
             light.type = LightType(type);
             changed = true;
         }
@@ -802,6 +1016,10 @@ void registerBuiltinComponents(EditorContext& editor) {
             changed |= ui::dragDegrees("Inner Cone", light.innerConeAngle, 0.0f, 89.0f);
             changed |= ui::dragDegrees("Outer Cone", light.outerConeAngle, 0.0f, 89.0f);
             light.outerConeAngle = std::max(light.outerConeAngle, light.innerConeAngle);
+        }
+        if (light.type == LightType::Area) {
+            changed |= ui::dragVec2("Size", light.areaSize, 0.02f);
+            ui::tooltip("The glowing rectangle, in meters: a window, a panel of light, a screen. It shines from its front (the way the entity faces)");
         }
         if (light.type == LightType::Directional) changed |= ui::checkbox("Casts Shadows", light.castsShadows);
         return changed;
@@ -876,13 +1094,12 @@ void registerBuiltinComponents(EditorContext& editor) {
         const Transform* transform = scene.get<Transform>(entity);
         if (renderer && renderer->mesh && transform && ImGui::Button("Fit to Mesh")) {
             // Colliders ignore Transform::scale, so the scale goes into their size.
-            const AABB& box = renderer->mesh->bounds();
-            Vec3 half = box.halfExtents() * transform->scale;
-            collider.halfExtents = half;
-            collider.radius = collider.shape == ColliderShape::Sphere ? std::max({half.x, half.y, half.z}) : std::max(half.x, half.z);
-            collider.halfHeight = std::max(half.y - collider.radius, 0.0f);
-            collider.offset = box.center() * transform->scale;
+            fitColliderToMesh(collider, renderer->mesh->bounds(), transform->scale);
             changed = true;
+        }
+        if (renderer && renderer->mesh && transform) {
+            ui::tooltip("The size of the model it draws, at the entity's scale. A collider that fits goes on fitting while the entity is scaled; "
+                        "one sized by hand is left alone.");
         }
         return changed;
     };
@@ -912,13 +1129,7 @@ void registerBuiltinComponents(EditorContext& editor) {
             // The size of what it is on, if that draws a mesh.
             const MeshRenderer* renderer = scene.get<MeshRenderer>(entity);
             const Transform* transform = scene.get<Transform>(entity);
-            if (renderer && renderer->mesh && transform && !scene.get<Collider>(entity)) {
-                Vec3 half = renderer->mesh->bounds().halfExtents() * transform->scale;
-                collider.halfExtents = simd::max(half, Vec3{0.01f, 0.01f, 0.01f});
-                collider.radius = shape == ColliderShape::Sphere ? std::max({half.x, half.y, half.z}) : std::max(half.x, half.z);
-                collider.halfHeight = std::max(half.y - collider.radius, 0.0f);
-                collider.offset = renderer->mesh->bounds().center() * transform->scale;
-            }
+            if (renderer && renderer->mesh && transform && !scene.get<Collider>(entity)) fitColliderToMesh(collider, renderer->mesh->bounds(), transform->scale);
             if (scene.get<Collider>(entity)) *scene.get<Collider>(entity) = collider;
             else scene.add(entity, collider);
         };

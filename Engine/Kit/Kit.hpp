@@ -58,6 +58,21 @@ struct Spin {
     void update(World& world, Entity self, float dt);
 };
 
+/// Takes its entity to and fro between where it was put and `offset` from there: a platform,
+/// a target on its rail, a gate that opens and shuts. What is under it goes with it.
+struct Shuttle {
+    Vec3 offset{4, 0, 0};               // where it goes to, from where it starts, in its parent's axes
+    float seconds = 3.0f;               // each way
+    float waits = 0.0f;                 // seconds at each end
+    bool eases = true;                  // slows into each end, instead of turning round at full speed
+
+    void update(World& world, Entity self, float dt);
+
+    Vec3 from{0, 0, 0};
+    bool hasFrom = false;
+    float time = 0;
+};
+
 /// Moves its entity at a steady velocity, or toward another entity.
 struct Mover {
     Vec3 velocity{0, 0, -12};
@@ -102,6 +117,9 @@ struct Health {
     void start(World& world, Entity self);
     /// Takes damage; removes the entity when nothing is left.
     void damage(World& world, Entity self, float damageAmount);
+    /// The message "damage" takes the number it carries: how something on another machine, or
+    /// a visual script, hurts it.
+    void onMessage(World& world, Entity self, const Message& message);
 };
 
 /// Hurts what it touches, if that has Health. Works with a trigger or a solid collider.
@@ -189,7 +207,7 @@ struct HudText {
 // way: `anchor` is a point of the screen (0 0 its top left, 1 1 its bottom right, 0.5 0.5
 // its middle) and `offset` is how far from there the piece's middle is, in points. A health
 // bar anchored to the top left stays in that corner on a phone and on a wide monitor.
-// In the editor they are made from Create > UI and dragged into place in the Game view.
+// In the editor they are made from Entity > UI and dragged into place in the Game view.
 
 /// Where a piece of interface is on a screen of a size: its middle.
 inline Vec2 placeOnScreen(Vec2 screen, Vec2 anchor, Vec2 offset) { return Vec2{screen.x * anchor.x + offset.x, screen.y * anchor.y + offset.y}; }
@@ -268,6 +286,59 @@ struct UIGauge {
     Vec4 backColor{0.04f, 0.045f, 0.055f, 0.7f};
 
     float shown = 0;                    // eased toward the value: a needle has weight
+
+    void draw(World& world, Entity self, Canvas& canvas);
+};
+
+// ---- the pieces dials and gauges are made of: each one thing, put together under a parent
+// (Entity > UI > Gauge is a background, a filled arc, marks, a needle and two texts), so a dial
+// of one's own is made the same way. Angles are in degrees, clockwise from the right.
+
+/// An arc of a ring, filled as far as a shared value says (all of it with no value): a dial's
+/// track, a timer's ring, a cooldown. Thickness as large as the radius makes a disc.
+struct UIArc {
+    Vec2 anchor{0.5f, 0.5f};
+    Vec2 offset{0, 0};
+    float radius = 70.0f;
+    float thickness = 7.0f;
+    float startAngle = 135.0f;
+    float sweep = 270.0f;
+    std::string value;                  // filled as far as this value is of `most`; empty: all of it
+    float most = 100.0f;
+    Vec4 color{1.0f, 0.5f, 0.18f, 1};
+    float shown = 0;                    // eased toward the value
+
+    void draw(World& world, Entity self, Canvas& canvas);
+};
+
+/// Marks along an arc, long and numbered at each `every`, short between: a dial's scale.
+struct UIMarks {
+    Vec2 anchor{0.5f, 0.5f};
+    Vec2 offset{0, 0};
+    float radius = 62.0f;               // of their outer ends
+    float startAngle = 135.0f;
+    float sweep = 270.0f;
+    float most = 200.0f;                // the value at the end of the arc
+    float every = 20.0f;                // a numbered mark at each multiple of this
+    float numbersScale = 1.0f;          // the numbers as written: 0.001 writes rpm in thousands
+    bool showsNumbers = true;
+    Vec4 color{1, 1, 1, 0.85f};
+
+    void draw(World& world, Entity self, Canvas& canvas);
+};
+
+/// A needle turned as far along an arc as a shared value says.
+struct UINeedle {
+    Vec2 anchor{0.5f, 0.5f};
+    Vec2 offset{0, 0};
+    float radius = 60.0f;               // its length
+    float startAngle = 135.0f;
+    float sweep = 270.0f;
+    std::string value = "speed";
+    float most = 200.0f;
+    float thickness = 2.5f;
+    Vec4 color{1.0f, 0.3f, 0.15f, 1};
+    float shown = 0;
 
     void draw(World& world, Entity self, Canvas& canvas);
 };
@@ -439,7 +510,7 @@ struct Buoyancy {
 /// A boat: pushed ahead and turned by its rudder, only while it floats. With a Buoyancy and a
 /// RigidBody. Driven by the move actions (W/S and A/D, the left stick), or by `throttle` and
 /// `steer` from code with `usesInput` off. It makes its Buoyancy's lengthwise drag small, as a
-/// hull's is.
+/// hull's is. Writes the values "speed" (km/h) and "knots".
 struct Boat {
     float acceleration = 5;             // meters per second, per second, at full throttle
     float topSpeed = 12;                // meters per second
@@ -448,10 +519,13 @@ struct Boat {
     bool usesInput = true;
     float throttle = 0;                 // -1 astern to 1 full ahead
     float steer = 0;                    // -1 left to 1 right
+    std::string sound;                  // its engine: a sound of Assets that loops, louder and higher with the throttle; empty for silence
 
     void start(World& world, Entity self);
     void fixedUpdate(World& world, Entity self, float dt);
+    void update(World& world, Entity self, float dt);
     float speed = 0;                    // along the way it points, now
+    uint32_t voice = 0;
 };
 
 /// Makes sure the kit's components are known even to a program that never mentions them.

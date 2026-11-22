@@ -59,8 +59,13 @@ TileLook lookOf(AssetType type) {
 }
 
 class AssetBrowserPanel final : public Panel {
+    float viewerWidth_ = 360;
+
 public:
     AssetBrowserPanel() { title = "Explorer"; }
+
+    /// What "+ New" makes, for the menu bar's Assets > Create.
+    void drawCreateItems(EditorContext& editor) { drawNewItems(editor); }
 
     void draw(EditorContext& editor) override {
         if (!editor.hasProject) {
@@ -71,6 +76,9 @@ public:
         // The folder may have been renamed or deleted, here or in the Finder.
         if (!editor.currentFolder.empty() && !assets.find(editor.currentFolder)) editor.currentFolder.clear();
 
+        keepChoiceInStep(editor);
+        handleKeys(editor);
+        handleRequest(editor);
         drawToolbar(editor);
         ImGui::Separator();
 
@@ -88,9 +96,29 @@ public:
         }
         ImGui::EndChild();
         ImGui::SameLine();
-        ImGui::BeginChild("##contents", ImVec2(0, 0));
+        // What is chosen is shown at the right, in the viewer; nothing chosen, no viewer.
+        const AssetInfo* chosen = editor.selectedAsset.empty() ? nullptr : assets.find(editor.selectedAsset);
+        float room = ImGui::GetContentRegionAvail().x;
+        viewerWidth_ = std::clamp(viewerWidth_, 220.0f, std::max(220.0f, room - 200.0f));
+        ImGui::BeginChild("##contents", ImVec2(chosen ? room - viewerWidth_ - 8 : 0, 0));
         drawContents(editor);
         ImGui::EndChild();
+        if (chosen) {
+            ImGui::SameLine(0, 0);
+            ImVec2 at = ImGui::GetCursorScreenPos();
+            float height = ImGui::GetContentRegionAvail().y;
+            ImGui::InvisibleButton("##viewer-bar", ImVec2(8, height));
+            bool active = ImGui::IsItemActive(), hovered = ImGui::IsItemHovered();
+            if (hovered || active) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+            if (active) viewerWidth_ -= ImGui::GetIO().MouseDelta.x;
+            ImGui::GetWindowDrawList()->AddLine(ImVec2(at.x + 4, at.y), ImVec2(at.x + 4, at.y + height),
+                                                ImGui::GetColorU32(active ? ImGuiCol_SeparatorActive : hovered ? ImGuiCol_SeparatorHovered : ImGuiCol_Separator), active || hovered ? 2.0f : 1.0f);
+            ImGui::SameLine(0, 0);
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::GetStyleColorVec4(ImGuiCol_FrameBg));
+            if (ImGui::BeginChild("##viewer", ImVec2(0, 0), ImGuiChildFlags_AlwaysUseWindowPadding)) drawAssetViewer(editor);
+            ImGui::EndChild();
+            ImGui::PopStyleColor();
+        }
 
         drawDeleteConfirmation(editor);
     }
@@ -139,32 +167,199 @@ private:
         std::string extension = info->isFolder() ? std::string() : std::filesystem::path(info->name).extension().string();
         std::string newName = renameText_ + extension;
         if (newName == info->name) return;
-        bool wasOpenScene = editor.scene.filePath == editor.assets.absolutePath(oldPath);
         std::string error;
         std::string newPath = editor.assets.rename(oldPath, newName, &error);
         fail(editor, error);
         if (newPath.empty()) return;
+        follow(editor, oldPath, newPath);
         editor.selectedAsset = newPath;
-        if (editor.currentFolder == oldPath) editor.currentFolder = newPath;
-        if (wasOpenScene) editor.scene.filePath = editor.assets.absolutePath(newPath);
+        chosen_ = {newPath};
     }
 
-    void moveInto(EditorContext& editor, const std::string& path, const std::string& folder) {
-        bool wasOpenScene = editor.scene.filePath == editor.assets.absolutePath(path);
+    // ---------------------------------------------------------------- moving, and what follows a move
+
+    /// `path` with `from` at its start replaced by `to`: the path of a thing inside a folder that moved.
+    static bool replaceStart(std::string& path, const std::string& from, const std::string& to) {
+        if (path == from) {
+            path = to;
+            return true;
+        }
+        if (path.size() > from.size() && path.compare(0, from.size(), from) == 0 && path[from.size()] == '/') {
+            path = to + path.substr(from.size());
+            return true;
+        }
+        return false;
+    }
+
+    /// Everything that named `from` names `to` now: the files that use it, the open scene, the
+    /// project's first scene and icon, and what the editor itself has open or chosen.
+    void follow(EditorContext& editor, const std::string& from, const std::string& to) {
+        int files = editor.assets.retargetReferences(from, to);
+        editor.scene.retargetAsset(from, to);
+        bool projectChanged = replaceStart(editor.project.startScene, from, to);
+        projectChanged |= replaceStart(editor.project.icon, from, to);
+        if (projectChanged) editor.project.save();
+        std::string sceneFile = editor.scene.filePath, assetsFolder = editor.project.assetsDirectory();
+        if (sceneFile.size() > assetsFolder.size() + 1 && sceneFile.compare(0, assetsFolder.size() + 1, assetsFolder + "/") == 0) {
+            std::string relative = sceneFile.substr(assetsFolder.size() + 1);
+            if (replaceStart(relative, from, to)) editor.scene.filePath = editor.assets.absolutePath(relative);
+        }
+        replaceStart(editor.selectedAsset, from, to);
+        replaceStart(editor.currentFolder, from, to);
+        for (std::string& path : chosen_) replaceStart(path, from, to);
+        for (std::string& path : cut_) replaceStart(path, from, to);
+        if (files > 0) editor.notify("Updated " + std::to_string(files) + (files == 1 ? " file that uses " : " files that use ") + to);
+    }
+
+    std::string moveInto(EditorContext& editor, const std::string& path, const std::string& folder) {
         std::string error;
         std::string newPath = editor.assets.move(path, folder, &error);
         fail(editor, error);
-        if (newPath.empty()) return;
-        if (editor.selectedAsset == path) editor.selectedAsset = newPath;
-        if (wasOpenScene) editor.scene.filePath = editor.assets.absolutePath(newPath);
+        if (!newPath.empty() && newPath != path) follow(editor, path, newPath);
+        return newPath;
+    }
+
+    /// Moves them all into `folder`. A thing inside a folder that moves too goes with its folder.
+    void moveAll(EditorContext& editor, std::vector<std::string> paths, const std::string& folder) {
+        std::sort(paths.begin(), paths.end());
+        paths.erase(std::unique(paths.begin(), paths.end()), paths.end());
+        std::vector<std::string> outermost;
+        for (const std::string& path : paths) {
+            bool isInside = false;
+            for (const std::string& other : outermost) isInside |= path.size() > other.size() && path.compare(0, other.size() + 1, other + "/") == 0;
+            if (!isInside) outermost.push_back(path);
+        }
+        int moved = 0;
+        for (const std::string& path : outermost) {
+            if (!editor.assets.find(path)) continue;
+            std::string parent = std::filesystem::path(path).parent_path().string();
+            if (parent == folder) continue;
+            if (!moveInto(editor, path, folder).empty()) moved++;
+        }
+        if (moved > 1) editor.notify("Moved " + std::to_string(moved) + " items to " + (folder.empty() ? std::string("Assets") : folder));
     }
 
     void acceptMove(EditorContext& editor, const std::string& folder) {
         if (!ImGui::BeginDragDropTarget()) return;
         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(ui::kAssetPayload)) {
-            moveInto(editor, std::string(static_cast<const char*>(payload->Data)), folder);
+            std::string path(static_cast<const char*>(payload->Data));
+            // The tile dragged, or all the chosen ones if it was one of them.
+            bool isGroup = std::find(dragged_.begin(), dragged_.end(), path) != dragged_.end();
+            moveAll(editor, isGroup ? dragged_ : std::vector<std::string>{path}, folder);
         }
         ImGui::EndDragDropTarget();
+    }
+
+    /// Every folder of the project, for Move To.
+    void drawMoveToItems(EditorContext& editor) {
+        std::vector<std::string> folders = {""};
+        for (const AssetInfo& asset : editor.assets.assets()) {
+            if (asset.isFolder()) folders.push_back(asset.path);
+        }
+        std::sort(folders.begin(), folders.end());
+        for (const std::string& folder : folders) {
+            // Not into itself or into a folder inside it.
+            bool isOwn = false;
+            for (const std::string& path : chosen_) isOwn |= folder == path || folder.compare(0, path.size() + 1, path + "/") == 0;
+            int depth = int(std::count(folder.begin(), folder.end(), '/')) + (folder.empty() ? 0 : 1);
+            std::string label = std::string(size_t(depth) * 3, ' ') + (folder.empty() ? std::string("Assets") : std::filesystem::path(folder).filename().string());
+            ImGui::PushID(folder.c_str());
+            if (ImGui::MenuItem(label.c_str(), nullptr, false, !isOwn)) moveAll(editor, chosen_, folder);
+            ImGui::PopID();
+        }
+    }
+
+    // ---------------------------------------------------------------- choosing several, and the keys
+
+    bool isChosen(const std::string& path) const { return std::find(chosen_.begin(), chosen_.end(), path) != chosen_.end(); }
+
+    /// The Viewer shows one thing (editor.selectedAsset); the list may have more chosen. When
+    /// something else chose an asset (a field's "show in Explorer"), the list follows it.
+    void keepChoiceInStep(EditorContext& editor) {
+        chosen_.erase(std::remove_if(chosen_.begin(), chosen_.end(), [&](const std::string& path) { return !editor.assets.find(path); }), chosen_.end());
+        cut_.erase(std::remove_if(cut_.begin(), cut_.end(), [&](const std::string& path) { return !editor.assets.find(path); }), cut_.end());
+        if (editor.selectedAsset.empty()) chosen_.clear();
+        else if (!isChosen(editor.selectedAsset)) chosen_ = {editor.selectedAsset};
+    }
+
+    void choose(EditorContext& editor, const std::string& path) {
+        ImGuiIO& io = ImGui::GetIO();
+        bool adds = io.KeySuper || io.KeyCtrl;
+        if (io.KeyShift && !anchor_.empty()) {
+            // Everything between the last one clicked and this one, as they are shown.
+            auto from = std::find(shownPaths_.begin(), shownPaths_.end(), anchor_);
+            auto to = std::find(shownPaths_.begin(), shownPaths_.end(), path);
+            if (from != shownPaths_.end() && to != shownPaths_.end()) {
+                if (from > to) std::swap(from, to);
+                if (!adds) chosen_.clear();
+                for (auto it = from; it <= to; ++it) {
+                    if (!isChosen(*it)) chosen_.push_back(*it);
+                }
+                editor.selectedAsset = path;
+                return;
+            }
+        }
+        if (adds) {
+            if (isChosen(path)) chosen_.erase(std::find(chosen_.begin(), chosen_.end(), path));
+            else chosen_.push_back(path);
+            editor.selectedAsset = chosen_.empty() ? std::string() : (isChosen(path) ? path : chosen_.back());
+        } else {
+            chosen_ = {path};
+            editor.selectedAsset = path;
+        }
+        anchor_ = path;
+    }
+
+    void cutChosen(EditorContext& editor) {
+        if (chosen_.empty()) return;
+        cut_ = chosen_;
+        editor.notify(std::string(cut_.size() == 1 ? "Cut " + cut_.front() : "Cut " + std::to_string(cut_.size()) + " items") +
+                      ". Paste in another folder moves them there.");
+    }
+
+    void pasteInto(EditorContext& editor, const std::string& folder) {
+        if (cut_.empty()) return;
+        std::vector<std::string> paths = std::move(cut_);
+        cut_.clear();
+        moveAll(editor, paths, folder);
+    }
+
+    /// What the Assets and Edit menus asked for (EditorCommands.cpp), about what is chosen here.
+    void handleRequest(EditorContext& editor) {
+        if (editor.assetRequest.empty()) return;
+        std::string request = std::move(editor.assetRequest);
+        editor.assetRequest.clear();
+        AssetDatabase& assets = editor.assets;
+        if (request == "import") importFiles(editor);
+        else if (request == "rename" && chosen_.size() == 1) startRenaming(editor, chosen_.front());
+        else if (request == "delete" && !chosen_.empty()) pendingDelete_ = chosen_;
+        else if (request == "cut") cutChosen(editor);
+        else if (request == "paste") pasteInto(editor, editor.currentFolder);
+        else if (request == "selectAll") chosen_ = shownPaths_;
+        else if (request == "reveal") platform::revealInFinder(assets.absolutePath(chosen_.empty() ? editor.currentFolder : chosen_.front()));
+        else if (request == "open" && !chosen_.empty()) {
+            const AssetInfo* asset = assets.find(chosen_.front());
+            if (!asset) return;
+            if (asset->isFolder()) editor.currentFolder = asset->path;
+            else if (asset->type == AssetType::Scene) editor.requestOpenScene(assets.absolutePath(asset->path));
+            else if (asset->type == AssetType::Graph) editor.editGraph(asset->path);
+            else platform::openWithDefaultApplication(assets.absolutePath(asset->path));
+        }
+    }
+
+    void handleKeys(EditorContext& editor) {
+        if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) return;
+        editor.explorerHasKeys = true;
+        if (ImGui::GetIO().WantTextInput || !renaming_.empty()) return;
+        if (ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) return;
+        // Focused shortcuts: here they come before the editor's own, which are for the scene.
+        if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_A)) chosen_ = shownPaths_;
+        if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_X)) cutChosen(editor);
+        if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_V)) pasteInto(editor, editor.currentFolder);
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) cut_.clear();
+        if (chosen_.empty()) return;
+        if (ImGui::IsKeyPressed(ImGuiKey_Delete, false) || ImGui::IsKeyPressed(ImGuiKey_Backspace, false)) pendingDelete_ = chosen_;
+        if ((ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_F2, false)) && chosen_.size() == 1) startRenaming(editor, chosen_.front());
     }
 
     /// What can be made: the same list under + New and under a right click anywhere, made in
@@ -195,25 +390,6 @@ private:
             // A surface shader to write by hand: it starts as one that works, to change.
             std::string path = editor.assets.uniquePath(folder, "New Shader", ".shader");
             if (text::writeFile(editor.assets.absolutePath(path), newSurfaceShaderText())) {
-                editor.assets.refresh();
-                editor.currentFolder = folder;
-                startRenaming(editor, path);
-            }
-        }
-        if (ImGui::MenuItem("Effect")) {
-            // A particle effect to shape in the Viewer: it starts as a fire.
-            std::string path = editor.assets.uniquePath(folder, "New Effect", ".effect");
-            if (text::writeFile(editor.assets.absolutePath(path), writeEffect(effectPreset("Fire")))) {
-                editor.assets.refresh();
-                editor.currentFolder = folder;
-                startRenaming(editor, path);
-            }
-        }
-        if (ImGui::MenuItem("Animation Clip")) {
-            // Keys to set in the Animation window, on whatever entity plays it.
-            AnimationClip clip;
-            std::string path = editor.assets.uniquePath(folder, "New Animation", ".anim");
-            if (text::writeFile(editor.assets.absolutePath(path), clip.toText())) {
                 editor.assets.refresh();
                 editor.currentFolder = folder;
                 startRenaming(editor, path);
@@ -304,8 +480,14 @@ private:
                 editor.currentFolder = folder;
                 importFiles(editor);
             }
+            if (!cut_.empty() && ImGui::MenuItem("Paste Here", "Cmd+V")) pasteInto(editor, folder);
             ImGui::Separator();
             if (ImGui::MenuItem("Reveal in Finder")) platform::revealInFinder(editor.assets.absolutePath(folder));
+            if (!folder.empty()) {
+                if (ImGui::MenuItem("Rename")) startRenaming(editor, folder);
+                ImGui::Separator();
+                if (ImGui::MenuItem("Move to Trash")) pendingDelete_ = {folder};
+            }
             ImGui::EndPopup();
         }
         if (isOpen) {
@@ -330,6 +512,7 @@ private:
             }
         }
 
+        shownPaths_ = paths;
         float spacing = ImGui::GetStyle().ItemSpacing.x;
         float tileWidth = isList() ? ImGui::GetContentRegionAvail().x : tileSize_ + 16;
         int columns = isList() ? 1 : std::max(1, int((ImGui::GetContentRegionAvail().x + spacing) / (tileWidth + spacing)));
@@ -348,13 +531,23 @@ private:
         // The space that is left: a click deselects, a right click offers what can be made here.
         ImVec2 rest = ImGui::GetContentRegionAvail();
         ImGui::InvisibleButton("##rest", ImVec2(std::max(rest.x, 1.0f), std::max(rest.y, 30.0f)));
-        if (ImGui::IsItemClicked()) editor.selectedAsset.clear();
-        if (ImGui::BeginPopupContextWindow("##rest-menu", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
+        if (ImGui::IsItemClicked()) {
+            editor.selectedAsset.clear();
+            chosen_.clear();
+        }
+        acceptMove(editor, editor.currentFolder);
+        // A right click anywhere that is not a tile: what can be made here.
+        if (ImGui::IsItemClicked(ImGuiMouseButton_Right) ||
+            (ImGui::IsWindowHovered() && !ImGui::IsAnyItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right))) {
+            ImGui::OpenPopup("##rest-menu");
+        }
+        if (ImGui::BeginPopup("##rest-menu")) {
             if (ImGui::BeginMenu("New")) {
                 drawNewItems(editor);
                 ImGui::EndMenu();
             }
             if (ImGui::MenuItem("Import...")) importFiles(editor);
+            if (!cut_.empty() && ImGui::MenuItem("Paste", "Cmd+V")) pasteInto(editor, editor.currentFolder);
             ImGui::Separator();
             if (ImGui::MenuItem("Reveal in Finder")) platform::revealInFinder(assets.absolutePath(editor.currentFolder));
             ImGui::EndPopup();
@@ -376,10 +569,10 @@ private:
         float textHeight = asList ? ImGui::GetTextLineHeight() : ImGui::GetTextLineHeight() * 2 + 4;
         ImVec2 origin = ImGui::GetCursorScreenPos();
         ImVec2 size = asList ? ImVec2(tileWidth, 24) : ImVec2(tileWidth, tileSize_ + textHeight + 12);
-        bool isSelected = editor.selectedAsset == path;
+        bool isSelected = isChosen(path);
         if (ImGui::Selectable("##tile", isSelected, ImGuiSelectableFlags_AllowDoubleClick, size)) {
-            editor.selectedAsset = path;
-            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+            choose(editor, path);
+            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && chosen_.size() == 1) {
                 if (isFolder) {
                     editor.currentFolder = path;
                     filter_.clear();
@@ -390,7 +583,7 @@ private:
                 } else if (type == AssetType::Controller) {
                     editor.openPanel("Animator");
                 } else if (type == AssetType::Animation) {
-                    editor.openPanel("Animation");
+                    editor.openPanel("Timeline");
                 } else if (type == AssetType::Timeline) {
                     editor.openPanel("Timeline");
                 } else {
@@ -401,13 +594,18 @@ private:
         bool isHovered = ImGui::IsItemHovered();
 
         if (ImGui::BeginDragDropSource()) {
+            // One of the chosen ones carries them all (into a folder); another carries itself.
+            dragged_ = isChosen(path) ? chosen_ : std::vector<std::string>{path};
             ImGui::SetDragDropPayload(ui::kAssetPayload, path.c_str(), path.size() + 1);
-            ImGui::TextUnformatted(name.c_str());
+            if (dragged_.size() > 1) ImGui::Text("%s and %d more", name.c_str(), int(dragged_.size()) - 1);
+            else ImGui::TextUnformatted(name.c_str());
             ImGui::EndDragDropSource();
         }
         if (isFolder) acceptMove(editor, path);
 
         if (ImGui::BeginPopupContextItem("##menu")) {
+            // A right click on one that is not chosen chooses it alone; on a chosen one, it acts on them all.
+            if (!isChosen(path)) chosen_ = {path};
             editor.selectedAsset = path;
             if (ImGui::BeginMenu(isFolder ? "New Inside" : "New")) {
                 drawNewItems(editor, isFolder ? path : editor.currentFolder);
@@ -439,11 +637,19 @@ private:
                 std::string made = convertCppToGraph(editor, path);
                 if (!made.empty()) editor.editGraph(made);
             }
-            if (ImGui::MenuItem("Rename")) startRenaming(editor, path);
+            if (ImGui::MenuItem("Rename", "Return", false, chosen_.size() == 1)) startRenaming(editor, path);
             if (ImGui::MenuItem("Reveal in Finder")) platform::revealInFinder(editor.assets.absolutePath(path));
             if (!isFolder && ImGui::MenuItem("Open with Default Application")) platform::openWithDefaultApplication(editor.assets.absolutePath(path));
             ImGui::Separator();
-            if (ImGui::MenuItem("Move to Trash")) pendingDelete_ = path;
+            if (ImGui::MenuItem("Cut", "Cmd+X")) cutChosen(editor);
+            if (isFolder && !cut_.empty() && ImGui::MenuItem("Paste Into", "Cmd+V")) pasteInto(editor, path);
+            if (ImGui::BeginMenu("Move To")) {
+                drawMoveToItems(editor);
+                ImGui::EndMenu();
+            }
+            ImGui::Separator();
+            std::string trashLabel = chosen_.size() > 1 ? "Move " + std::to_string(chosen_.size()) + " Items to Trash" : std::string("Move to Trash");
+            if (ImGui::MenuItem(trashLabel.c_str(), "Delete")) pendingDelete_ = chosen_;
             ImGui::EndPopup();
         }
 
@@ -506,6 +712,10 @@ private:
             }
             if (isHovered) ImGui::SetItemTooltip("%s", name.c_str());
         }
+        // Cut, waiting for Paste: faded, as in the Finder.
+        if (std::find(cut_.begin(), cut_.end(), path) != cut_.end()) {
+            drawList->AddRectFilled(origin, ImVec2(origin.x + size.x, origin.y + size.y), ImGui::GetColorU32(ImGuiCol_WindowBg, 0.55f), 4.0f);
+        }
         ImGui::EndGroup();
         ImGui::PopID();
     }
@@ -513,23 +723,37 @@ private:
     void drawDeleteConfirmation(EditorContext& editor) {
         if (!pendingDelete_.empty() && !ImGui::IsPopupOpen("Move to Trash?")) ImGui::OpenPopup("Move to Trash?");
         if (!ImGui::BeginPopupModal("Move to Trash?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
-        ImGui::Text("Move \"%s\" to the Trash?", pendingDelete_.c_str());
-        ImGui::TextDisabled("Scenes that use it will no longer find it. It can be put back from the Trash.");
+        if (pendingDelete_.size() == 1) {
+            ImGui::Text("Move \"%s\" to the Trash?", pendingDelete_.front().c_str());
+        } else {
+            ImGui::Text("Move these %d items to the Trash?", int(pendingDelete_.size()));
+            for (size_t i = 0; i < pendingDelete_.size() && i < 6; i++) ImGui::BulletText("%s", pendingDelete_[i].c_str());
+            if (pendingDelete_.size() > 6) ImGui::TextDisabled("and %d more", int(pendingDelete_.size()) - 6);
+        }
+        ImGui::TextDisabled("Scenes that use them will no longer find them. They can be put back from the Trash.");
         ImGui::Spacing();
-        if (ImGui::Button("Move to Trash", ImVec2(140, 0))) {
-            std::string absolute = editor.assets.absolutePath(pendingDelete_);
-            if (platform::moveToTrash(absolute)) {
-                editor.notify("Moved " + pendingDelete_ + " to the Trash");
-                if (editor.selectedAsset == pendingDelete_) editor.selectedAsset.clear();
-                editor.assets.refresh();            // also removes the .meta that is now alone
-            } else {
-                editor.notify("Cannot move " + pendingDelete_ + " to the Trash", ConsoleMessage::Level::Error);
+        bool confirms = ImGui::Button("Move to Trash", ImVec2(140, 0)) || ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false);
+        ImGui::SameLine();
+        bool cancels = ImGui::Button("Cancel", ImVec2(100, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+        if (confirms) {
+            int moved = 0;
+            for (const std::string& path : pendingDelete_) {
+                if (!editor.assets.find(path)) continue;        // inside a folder that went first
+                if (platform::moveToTrash(editor.assets.absolutePath(path))) {
+                    moved++;
+                    // Its .meta goes with it, or the refresh would find it alone.
+                    platform::moveToTrash(editor.assets.absolutePath(path) + ".meta");
+                } else {
+                    editor.notify("Cannot move " + path + " to the Trash", ConsoleMessage::Level::Error);
+                }
             }
+            if (moved > 0) editor.notify(moved == 1 ? "Moved " + pendingDelete_.front() + " to the Trash" : "Moved " + std::to_string(moved) + " items to the Trash");
+            editor.assets.refresh();
+            if (!editor.assets.find(editor.selectedAsset)) editor.selectedAsset.clear();
+            chosen_.clear();
             pendingDelete_.clear();
             ImGui::CloseCurrentPopup();
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(100, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        } else if (cancels) {
             pendingDelete_.clear();
             ImGui::CloseCurrentPopup();
         }
@@ -541,13 +765,28 @@ private:
     bool isList() const { return tileSize_ <= 50.0f; }
     std::string renaming_, renameText_;
     bool renameNeedsFocus_ = false;
-    std::string pendingDelete_;
+    std::vector<std::string> pendingDelete_;    // waiting for "Move to Trash?"
+    std::vector<std::string> chosen_;           // everything chosen; editor.selectedAsset is the one the Viewer shows
+    std::string anchor_;                        // where a Shift-click range starts
+    std::vector<std::string> shownPaths_;       // the tiles in the order shown
+    std::vector<std::string> dragged_;          // what the drag under way carries
+    std::vector<std::string> cut_;              // waiting for Paste
 };
 
 }  // namespace
 
+namespace {
+AssetBrowserPanel* theBrowser = nullptr;        // the one the editor has, for the menu bar
+}
+
 void registerAssetBrowserPanel(EditorContext& editor) {
-    editor.registry.addPanel(nullptr, std::make_unique<AssetBrowserPanel>());
+    auto panel = std::make_unique<AssetBrowserPanel>();
+    theBrowser = panel.get();
+    editor.registry.addPanel(nullptr, std::move(panel));
+}
+
+void drawAssetCreateMenu(EditorContext& editor) {
+    if (theBrowser && editor.hasProject) theBrowser->drawCreateItems(editor);
 }
 
 }  // namespace molten::editor

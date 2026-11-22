@@ -363,6 +363,46 @@ void UISlider::draw(World& world, Entity self, Canvas& canvas) {
     }
 }
 
+// ---------------------------------------------------------------- UIToggle
+
+void UIToggle::start(World& world, Entity) {
+    if (value.empty()) return;
+    if (isSaved && world.hasPreference(value)) world.setValue(value, world.preference(value));
+    else if (!world.hasValue(value)) world.setValue(value, isOn ? 1.0f : 0.0f);
+}
+
+void UIToggle::update(World& world, Entity self, float) {
+    hasChanged = false;
+    if (value.empty()) return;
+    Vec2 corner = placeOnScreen(gLastScreen, anchor, offset) - size * 0.5f;
+    Pointer pointer = pointerOf(world);
+    bool isOver = isInside(pointer.position, corner, corner + size) && isTouchableAt(world, self, pointer.position);
+    if (pointer.isDown && pointer.hasBegun && isOver) {
+        float now = world.value(value) > 0.5f ? 0.0f : 1.0f;
+        world.setValue(value, now);
+        if (isSaved) world.setPreference(value, now);
+        hasChanged = true;
+    }
+}
+
+void UIToggle::draw(World& world, Entity self, Canvas& canvas) {
+    gLastScreen = canvas.size();
+    InterfaceClip clip(world, self, canvas);
+    Vec2 corner = placeOnScreen(gLastScreen, anchor, offset) - size * 0.5f;
+    float letters = std::min(size.y * 0.45f, 22.0f);
+    bool ticked = value.empty() ? isOn : world.value(value) > 0.5f;
+    // The box on the left, the words beside it.
+    float side = size.y * 0.62f;
+    Vec2 box{corner.x + 4, corner.y + (size.y - side) * 0.5f};
+    canvas.roundedRect(box, Vec2{side, side}, side * 0.22f, ticked ? color : backColor);
+    if (ticked) {
+        Vec2 a{box.x + side * 0.24f, box.y + side * 0.52f}, b{box.x + side * 0.43f, box.y + side * 0.72f}, c{box.x + side * 0.78f, box.y + side * 0.3f};
+        canvas.line(a, b, std::max(side * 0.12f, 2.0f), textColor);
+        canvas.line(b, c, std::max(side * 0.12f, 2.0f), textColor);
+    }
+    if (!label.empty()) canvas.text(world.translate(label), Vec2{box.x + side + 12, corner.y + (size.y - letters * 1.2f) * 0.5f}, letters, textColor);
+}
+
 // ---------------------------------------------------------------- fonts
 
 InterfaceFont::InterfaceFont(World& world, Canvas& canvas, const std::string& name, std::shared_ptr<Font>& loaded, std::string& loadedName)

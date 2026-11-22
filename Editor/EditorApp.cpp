@@ -7,6 +7,7 @@
 
 #include "Core/Paths.hpp"
 #include "Core/TextFile.hpp"
+#include "Scene/SceneAhead.hpp"
 
 #include <sstream>
 #include <unordered_map>
@@ -20,8 +21,12 @@
 #include <algorithm>
 #include <cstdlib>
 #include <chrono>
+#include <cmath>
+#include <ctime>
+#include <memory>
 #include <cstdlib>
 #include <filesystem>
+#include <future>
 #include <thread>
 #include <mutex>
 
@@ -30,10 +35,6 @@ namespace molten::editor {
 namespace fs = std::filesystem;
 
 namespace {
-
-const char* const kVersion = "1.0";
-/// Where the engine's source is.
-const char* const kRepository = "https://github.com/gabrielevierti/moltenengine";
 
 /// Everything the engine logs also goes to the console panel. The engine may log from
 /// another thread (audio), so messages wait here until the frame collects them.
@@ -66,6 +67,9 @@ void EditorApp::start(Engine& engine) {
         logQueue().waiting.push_back({kind, message});
     };
 
+    openLogFile();
+    logRendererState();
+
     std::string userData = userDataDirectory();
     // The editor's own settings: its look, and the shortcuts changed.
     settingsFile_ = userData + "/editor-settings.txt";
@@ -76,8 +80,11 @@ void EditorApp::start(Engine& engine) {
         while (std::getline(lines, line)) {
             if (line.rfind("theme ", 0) == 0) setTheme(line.substr(6));
             else if (line.rfind("shortcut ", 0) == 0) shortcutLines += line.substr(9) + "\n";
+            else if (line.rfind("autosave ", 0) == 0) autosaves_ = line.substr(9) != "0";
+            else if (line.rfind("autosaveMinutes ", 0) == 0) autosaveMinutes_ = std::clamp(std::atoi(line.substr(16).c_str()), 1, 60);
+            else if (line.rfind("reopenLastProject ", 0) == 0) reopensLastProject_ = line.substr(18) != "0";
         }
-        shortcuts_.fromText(shortcutLines);
+        context_->shortcuts.fromText(shortcutLines);
         if (ImGui::GetCurrentContext()) applyTheme(1.0f);       // otherwise the interface starts with it
     }
     recentFile_ = userData + "/recent-projects.txt";
@@ -87,7 +94,7 @@ void EditorApp::start(Engine& engine) {
     templates_ = projectTemplates(findRootDirectory() + "/Templates");
     makeMissingTemplatePreviews();
 
-    std::string layoutFile = userData + "/layout-6.ini";     // a new name when the default changes: it is then laid out afresh
+    std::string layoutFile = userData + "/layout-7.ini";     // a new name when the default changes: it is then laid out afresh
     std::error_code ignored;
     needsDefaultLayout_ = !fs::exists(layoutFile, ignored);
     if (!engine.window()) needsDefaultLayout_ = true;       // a capture shows the editor as it first opens
@@ -101,7 +108,6 @@ void EditorApp::start(Engine& engine) {
     registerAssetViewerPanel(editor);
     registerConsolePanel(editor);
     registerProfilerPanel(editor);
-    registerTimelinePanel(editor);
     registerAnimationPanel(editor);
     registerAnimatorPanel(editor);
     registerSourceControlPanel(editor);
@@ -109,6 +115,8 @@ void EditorApp::start(Engine& engine) {
     registerRenderingPanel(editor);
     registerProjectPanel(editor);
     registerVisualScriptPanel(editor);
+    registerManualPanel(editor);
+    registerCommands();
     // The editor opens on its project window, at once: no logo to wait for, and no empty
     // editor shown on the way. (Games made with it still have their splash.)
     splashSeconds_ = Splash::kDuration;
@@ -116,7 +124,10 @@ void EditorApp::start(Engine& engine) {
 
     // Plugins that come with the editor live next to its executable.
     if (!engine.config().executablePath.empty()) {
-        fs::path beside = fs::absolute(fs::path(engine.config().executablePath), ignored).parent_path() / "Plugins";
+        // The real program, through the link the editor's application in the build folder is.
+        std::string program = currentExecutablePath();
+        if (program.empty()) program = fs::absolute(fs::path(engine.config().executablePath), ignored).string();
+        fs::path beside = fs::path(program).parent_path() / "Plugins";
         plugins_.loadDirectory(editor, beside.string(), false);
     }
 
@@ -124,12 +135,55 @@ void EditorApp::start(Engine& engine) {
     // What an empty project starts with, for its card in the project window.
     emptyScenePicture_ = makeScenePicture(editor, 640, 360);
     projectWindow_.emptyPicture = ImGuiLayer::textureId(emptyScenePicture_.get());
-    if (!projectToOpen.empty() && !openProject(projectToOpen)) projectToOpen.clear();
-    if (editor.hasProject && !sceneToOpen.empty()) openSceneNow(editor.assets.absolutePath(sceneToOpen));
+    // The project the editor had, if Preferences say to open on it and it is still there.
+    if (projectToOpen.empty() && reopensLastProject_ && !recent_.paths.empty() && engine.window() && fs::exists(recent_.paths.front(), ignored)) {
+        projectToOpen = recent_.paths.front();
+    }
+    if (!projectToOpen.empty()) {
+        // Asked for from the Terminal: straight to it, with the loading screen and without the logo.
+        openProjectWithFeedback(projectToOpen, sceneToOpen);
+    }
     updateTitle();
 }
 
+void EditorApp::openLogFile() {
+    // Beside the real program (in the build folder, when it is run from there): a new file each run.
+    std::string program = currentExecutablePath();
+    if (program.empty() && engine_) program = engine_->config().executablePath;
+    if (program.empty()) return;
+    std::error_code code;
+    fs::path folder = fs::weakly_canonical(fs::path(program), code).parent_path();
+    if (code || folder.empty()) folder = fs::path(program).parent_path();
+    logFile_ = std::fopen((folder / "editor.log").string().c_str(), "w");
+    if (!logFile_) return;
+    std::time_t now = std::time(nullptr);
+    char when[64] = "";
+    std::strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S", std::localtime(&now));
+    std::fprintf(logFile_, "Molten Metal Engine %s, editor started %s\n", kVersion, when);
+    std::fflush(logFile_);
+}
+
+void EditorApp::writeLog(const char* level, const std::string& message) {
+    if (!logFile_) return;
+    std::fprintf(logFile_, "[%7.2f] %-7s %s\n", engine_ ? engine_->time.elapsed : 0.0, level, message.c_str());
+    std::fflush(logFile_);              // a crash right after must not lose what led to it
+}
+
+void EditorApp::logRendererState() {
+    if (!engine_) return;
+    // What the engine said while it started was said before anyone listened: the state it ended in.
+    Renderer& renderer = engine_->renderer();
+    writeLog("info", std::string("ray tracing: ") + (renderer.device().supportsRayTracing() ? "the GPU can" : "the GPU cannot") +
+                         (renderer.canTraceRays() ? ", and the shaders with it are in use" : ", and it is not in use"));
+    writeLog("info", std::string("shaders: ") + (renderer.hasExtras() ? "with the extras (water depth, clouds with depth, low fog, traced light)" : "WITHOUT the extras"));
+    if (!renderer.shaderProblem().empty()) writeLog("error", "the full shaders did not compile; what the compiler said:\n" + renderer.shaderProblem());
+}
+
 void EditorApp::shutdown(Engine& engine) {
+    if (logFile_) {
+        std::fclose(logFile_);
+        logFile_ = nullptr;
+    }
     if (!context_) return;
     plugins_.unloadAll(*context_);
     logSink() = nullptr;
@@ -139,38 +193,353 @@ void EditorApp::shutdown(Engine& engine) {
 
 // ---------------------------------------------------------------- projects and scenes
 
-bool EditorApp::openProject(const std::string& path) {
-    EditorContext& editor = *context_;
-    std::string error;
-    std::optional<Project> project = Project::load(path, &error);
-    if (!project) {
-        projectWindow_.error = error;
-        editor.notify(error, ConsoleMessage::Level::Error);
-        recent_.remove(path);
+/// Opening a project, step by step: each is a thing the editor can say it is doing.
+std::vector<EditorApp::WorkStep> EditorApp::projectSteps(const std::string& path, const std::string& sceneAfter) {
+    auto loaded = std::make_shared<std::optional<Project>>();
+    std::vector<WorkStep> steps;
+    steps.push_back({"Reading the project", [this, path, loaded] {
+        EditorContext& editor = *context_;
+        std::string error;
+        *loaded = Project::load(path, &error);
+        if (!*loaded) {
+            projectWindow_.error = error;
+            editor.notify(error, ConsoleMessage::Level::Error);
+            recent_.remove(path);
+            recent_.save(recentFile_);
+            return false;
+        }
+        return true;
+    }});
+    steps.push_back({"Looking through its assets", [this, loaded] {
+        EditorContext& editor = *context_;
+        closeProject();
+        editor.project = **loaded;
+        // While the game is tried here, what it keeps for the player is kept with the project.
+        editor.engine.preferencesFile = editor.project.libraryDirectory() + "/Preferences.txt";
+        editor.hasProject = true;
+        editor.engine.assets().setProjectDirectory(editor.project.assetsDirectory());
+        editor.engine.loadQuality(editor.project.settingsDirectory());
+        editor.engine.loadSettings(editor.project.settingsDirectory());
+        editor.engine.loadInputMap();       // the project's own actions (Assets/Input.actions): Play here uses the keys the game will
+        assetChanges_.forget();
+        editor.assets.open(editor.project.assetsDirectory());
+        editor.currentFolder.clear();
+        editor.selectedAsset.clear();
+        recent_.add(editor.project.directory);
         recent_.save(recentFile_);
-        return false;
-    }
-    closeProject();
-    editor.project = *project;
-    // While the game is tried here, what it keeps for the player is kept with the project.
-    editor.engine.preferencesFile = project->libraryDirectory() + "/Preferences.txt";
-    editor.hasProject = true;
-    editor.engine.assets().setProjectDirectory(editor.project.assetsDirectory());
-    assetChanges_.forget();
-    editor.assets.open(editor.project.assetsDirectory());
-    editor.currentFolder.clear();
-    editor.selectedAsset.clear();
-    recent_.add(editor.project.directory);
-    recent_.save(recentFile_);
-    plugins_.loadDirectory(editor, editor.project.pluginsDirectory(), true);
-    buildGame();                            // before the scene is read: its components are the game's
+        return true;
+    }});
+    steps.push_back({"Loading its plugins", [this] {
+        plugins_.loadDirectory(*context_, context_->project.pluginsDirectory(), true);
+        return true;
+    }});
+    // Before the scene is read: its components are the game's.
+    steps.push_back(buildStep("Building the game's code"));
+    steps.push_back(sceneStep("Opening the scene", [this, sceneAfter] {
+        EditorContext& editor = *context_;
+        // The scene asked for; else the one the game starts with; else a new scene to save later.
+        return !sceneAfter.empty() ? editor.assets.absolutePath(sceneAfter)
+             : editor.project.startScene.empty() ? std::string() : editor.assets.absolutePath(editor.project.startScene);
+    }, [this](bool opened) {
+        EditorContext& editor = *context_;
+        if (!opened) editor.scene.newScene();
+        else lookForAutosave();
+        editor.notify("Opened project " + editor.project.name);
+        projectWindow_.error.clear();
+    }));
+    steps[0].seconds = 0.1f;
+    steps[1].seconds = 0.35f;
+    steps[2].seconds = 0.1f;
+    return steps;
+}
 
-    // The scene the game starts with, if it has one; otherwise a new scene to save later.
-    std::string first = editor.project.startScene.empty() ? std::string() : editor.assets.absolutePath(editor.project.startScene);
-    if (first.empty() || !editor.scene.open(first)) editor.scene.newScene();
-    editor.notify("Opened project " + editor.project.name);
-    projectWindow_.error.clear();
+EditorApp::WorkStep EditorApp::buildStep(const std::string& label) {
+    auto result = std::make_shared<BuildResult>();
+    auto project = std::make_shared<Project>();
+    auto host = std::make_shared<std::string>();
+    WorkStep step;
+    step.label = label;
+    step.seconds = 1.6f;
+    step.begin = [this, project, host] {
+        *project = context_->project;
+        *host = currentExecutablePath();
+        builtSignature_ = gameSourceSignature(*project);      // whatever happens, this state of the code has been tried
+    };
+    // The compiler is another program, and what it reads are files: the editor goes on drawing meanwhile.
+    step.prepare = [result, project, host] { *result = buildGameCode(*project, *host); };
+    step.run = [this, result] {
+        if (context_->hasProject) finishBuild(*result);
+        return true;                    // a game whose code does not build can still be opened, and mended
+    };
+    return step;
+}
+
+EditorApp::WorkStep EditorApp::sceneStep(const std::string& label, std::function<std::string()> pathNow, std::function<void(bool opened)> then) {
+    auto ahead = std::make_shared<SceneAhead>();
+    auto progress = std::make_shared<SceneAheadProgress>();
+    auto path = std::make_shared<std::string>();
+    auto pathOf = std::make_shared<std::function<std::string(const std::string&)>>();
+    WorkStep step;
+    step.label = label;
+    step.seconds = 1.2f;
+    step.begin = [this, path, pathOf, pathNow] {
+        *path = pathNow();
+        *pathOf = context_->engine.assetPathFinder();
+    };
+    // Its models made into triangles and its pictures into pixels, several files at a time
+    // (Scene/SceneAhead.hpp): the slow part of opening a scene, and none of it needs the main thread.
+    step.prepare = [ahead, progress, path, pathOf] {
+        if (!path->empty()) *ahead = readSceneAhead(*path, *path, *pathOf, progress.get());
+    };
+    step.progress = [progress] { return progress->fraction(); };
+    step.run = [this, ahead, path, then] {
+        EditorContext& editor = *context_;
+        Assets& assets = editor.engine.assets();
+        for (SceneAhead::Model& model : ahead->models) assets.preload(model.name, std::move(model.data));
+        for (SceneAhead::Picture& picture : ahead->pictures) assets.preloadPicture(picture.name, std::move(picture.pixels), picture.width, picture.height);
+        std::string error;
+        bool opened = !path->empty() && editor.scene.open(*path, &error);
+        assets.forgetPreloaded();
+        if (!opened && !path->empty()) editor.notify(error.empty() ? "Cannot open " + *path : error, ConsoleMessage::Level::Error);
+        if (then) then(opened);
+        return true;
+    };
+    return step;
+}
+
+/// Opens a project at once, without the screen: when there is no window to show it in.
+bool EditorApp::openProject(const std::string& path) {
+    for (WorkStep& step : projectSteps(path, {})) {
+        if (step.begin) step.begin();
+        if (step.prepare) step.prepare();
+        if (step.run && !step.run()) return false;
+    }
     return true;
+}
+
+void EditorApp::openProjectWithFeedback(const std::string& path, const std::string& sceneAfter) {
+    if (!engine_->window()) {
+        if (openProject(path) && !sceneAfter.empty()) openSceneNow(context_->assets.absolutePath(sceneAfter));
+        return;
+    }
+    Work work;
+    std::string name = fs::path(path).filename().string();
+    if (name == "" || fs::path(path).extension() == ".molten") name = fs::path(path).stem().string();
+    work.title = "Opening " + name;
+    work.coversAll = true;
+    work.steps = projectSteps(path, sceneAfter);
+    startWork(std::move(work));
+}
+
+void EditorApp::openSceneWithFeedback(const std::string& absolutePath) {
+    Work work;
+    work.title = "Opening " + fs::path(absolutePath).stem().string();
+    work.steps.push_back(sceneStep("Reading the scene and what it uses", [absolutePath] { return absolutePath; }, [this](bool opened) {
+        if (!opened) return;
+        context_->notify("Opened " + context_->scene.displayName());
+        lookForAutosave();
+    }));
+    startWork(std::move(work));
+}
+
+void EditorApp::buildGameWithFeedback() {
+    if (!context_->hasProject) return;
+    Work work;
+    work.title = "Building the game's code";
+    work.steps.push_back(buildStep("Compiling the scripts"));
+    startWork(std::move(work));
+}
+
+void EditorApp::exportGameWithFeedback() {
+    Work work;
+    work.title = "Exporting the game";
+    work.steps.push_back({"Building, then packing the application", [this] {
+        exportGame();
+        return true;
+    }});
+    startWork(std::move(work));
+}
+
+// ---------------------------------------------------------------- the work screen
+
+void EditorApp::startWork(Work work) {
+    if (work_ || work.steps.empty()) return;
+    work.started = ImGui::GetCurrentContext() ? ImGui::GetTime() : 0.0;
+    work_ = std::move(work);
+}
+
+namespace {
+
+const double kWorkFadeIn = 0.16, kWorkFadeOut = 0.32;
+
+float smoothStep(float t) {
+    t = std::clamp(t, 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
+}  // namespace
+
+/// A step at a time. What is slow in a step and can be done elsewhere (the compiler, reading
+/// models and pictures) runs on another thread, and the screen goes on moving; what must be
+/// done here waits for a frame that has shown what it is.
+void EditorApp::runWork() {
+    if (!work_) return;
+    Work& work = *work_;
+    const double now = ImGui::GetTime();
+    if (work.finishedAt >= 0) {
+        // Gone once the bar has reached its end and the screen has faded.
+        if (work.fullAt >= 0 && now - work.fullAt > kWorkFadeOut) work_.reset();
+        return;
+    }
+    // Nothing that makes the editor wait while the screen is still coming in.
+    if (now - work.started < kWorkFadeIn) return;
+    if (work.waitFrames > 0) {
+        work.waitFrames--;
+        return;
+    }
+    WorkStep& step = work.steps[work.next];
+    if (step.prepare && !work.isPrepared) {
+        if (!work.isPreparing) {
+            if (step.begin) step.begin();
+            work.preparing = std::async(std::launch::async, step.prepare);
+            work.isPreparing = true;
+            return;
+        }
+        if (work.preparing.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+        work.preparing.get();
+        work.isPreparing = false;
+        work.isPrepared = true;
+    } else if (step.begin && !step.prepare) {
+        step.begin();
+    }
+    bool carriesOn = !step.run || step.run();
+    work.next++;
+    work.isPrepared = false;
+    work.stepStarted = -1;              // the next one starts with the next frame
+    work.waitFrames = 1;
+    if (!carriesOn) {
+        work_.reset();                  // what went wrong is said where it went wrong
+        return;
+    }
+    if (work.next >= work.steps.size()) work.finishedAt = ImGui::GetTime();
+}
+
+void EditorApp::drawWork() {
+    if (!work_) return;
+    Work& work = *work_;
+    ImGuiIO& io = ImGui::GetIO();
+    const double now = ImGui::GetTime();
+    if (work.stepStarted < 0) work.stepStarted = now;
+
+    // ---- where the bar should be: each step has its share of it, by how long such a step takes
+    float total = 0, done = 0;
+    for (size_t i = 0; i < work.steps.size(); i++) {
+        total += work.steps[i].seconds;
+        if (i < work.next) done += work.steps[i].seconds;
+    }
+    float target = 1.0f;
+    if (work.finishedAt < 0) {
+        const WorkStep& step = work.steps[work.next];
+        // Inside a step: as far as the step says it is; or, when it cannot say, toward its end
+        // at the pace such a step goes, slowing as it nears it and never arriving before it.
+        float byTime = 1.0f - std::exp(-float(now - work.stepStarted) / std::max(step.seconds, 0.05f));
+        float within = step.progress && work.isPreparing ? std::max(std::clamp(step.progress(), 0.0f, 1.0f) * 0.96f, byTime * 0.3f) : byTime * 0.92f;
+        target = (done + step.seconds * within) / std::max(total, 0.001f);
+    } else {
+        // The work is done. What is under the screen draws its first frames now (shaders made
+        // ready, pictures sent to the GPU), and those are the slow ones: it is shown once they
+        // have passed, not in the middle of them.
+        work.calmFrames = io.DeltaTime < 0.05f ? work.calmFrames + 1 : 0;
+        bool hasSettled = !work.coversAll || work.calmFrames >= 4 || now - work.finishedAt > 2.5;
+        target = hasSettled ? 1.0f : 0.97f;
+    }
+    // The bar follows: only forward, and at a pace, however long the last frame took.
+    const float dt = std::min(io.DeltaTime, 1.0f / 30.0f);
+    const float gap = target - work.shown;
+    if (gap > 0) work.shown += std::min(gap, dt * std::max(work.finishedAt >= 0 ? 0.9f : 0.2f, gap * 6.0f));
+    if (work.finishedAt >= 0 && work.fullAt < 0 && work.shown >= 0.999f) work.fullAt = now;
+
+    const float in = smoothStep(float((now - work.started) / kWorkFadeIn));
+    const float out = work.fullAt >= 0 ? 1.0f - smoothStep(float((now - work.fullAt) / kWorkFadeOut)) : 1.0f;
+    const float alpha = in * out;
+    auto faded = [alpha](int r, int g, int b, float a = 1.0f) { return IM_COL32(r, g, b, int(255.0f * a * alpha)); };
+
+    // A window over everything: it takes the clicks and keys while the work goes on.
+    ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->Pos);
+    ImGui::SetNextWindowSize(viewport->Size);
+    ImGui::SetNextWindowFocus();
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    ImGui::Begin("##work", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                                        ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoDocking);
+    ImGui::PopStyleVar(2);
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    const ImVec2 min = viewport->Pos, max(viewport->Pos.x + viewport->Size.x, viewport->Pos.y + viewport->Size.y);
+    const ImVec2 center((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
+    ImFont* font = ImGui::GetFont();
+    const std::string label = (work.next < work.steps.size() ? work.steps[work.next].label : work.steps.back().label) + "...";
+    char percent[16];
+    std::snprintf(percent, sizeof(percent), "%d%%", int(std::floor(work.shown * 100.0f + 0.5f)));
+
+    // The bar: what is done, from ember to flame, and a light that runs along it, which says
+    // the editor is at work even when a step takes its time.
+    auto drawBar = [&](ImVec2 at, float width) {
+        const float height = 8, radius = 4;
+        drawList->AddRectFilled(at, ImVec2(at.x + width, at.y + height), faded(255, 255, 255, 0.075f), radius);
+        const float filled = std::max(height, width * work.shown);
+        const ImVec2 end(at.x + filled, at.y + height);
+        const ImU32 from = faded(224, 90, 26), to = faded(255, 160, 74);
+        drawList->AddRectFilled(at, end, from, radius);
+        if (filled > height * 1.5f) {
+            drawList->AddRectFilledMultiColor(ImVec2(at.x + radius, at.y), ImVec2(end.x - radius, end.y), from, to, to, from);
+            drawList->AddCircleFilled(ImVec2(end.x - radius, at.y + radius), radius, to, 16);
+        }
+        drawList->PushClipRect(at, end, true);
+        const float span = 140.0f;
+        const float x = at.x - span + float(std::fmod(now * 0.6, 1.0)) * (filled + span * 2.0f);
+        const ImU32 light = faded(255, 240, 210, 0.38f), none = faded(255, 240, 210, 0.0f);
+        drawList->AddRectFilledMultiColor(ImVec2(x - span * 0.5f, at.y), ImVec2(x, end.y), none, light, light, none);
+        drawList->AddRectFilledMultiColor(ImVec2(x, at.y), ImVec2(x + span * 0.5f, end.y), light, none, none, light);
+        drawList->PopClipRect();
+    };
+    // What is being done under the bar's left end, how far it is under its right end.
+    auto drawWords = [&](ImVec2 at, float width) {
+        drawList->AddText(font, 13.0f, at, faded(139, 147, 161), label.c_str());
+        ImVec2 extent = font->CalcTextSizeA(13.0f, FLT_MAX, 0, percent);
+        drawList->AddText(font, 13.0f, ImVec2(at.x + width - extent.x, at.y), faded(190, 196, 206), percent);
+    };
+
+    if (work.coversAll) {
+        // Opening a project: the window is the editor's own until the project is there.
+        drawList->AddRectFilled(min, max, faded(17, 18, 22));
+        const float width = std::min(440.0f, viewport->Size.x - 80.0f);
+        float top = center.y - 96;
+        ImTextureID mark = pictureAt(findRootDirectory() + "/Assets/Branding/mark-hd.png");
+        if (mark) {
+            const float markWidth = 150, markHeight = markWidth * 520.0f / 1126.0f;
+            drawList->AddImage(mark, ImVec2(center.x - markWidth * 0.5f, top), ImVec2(center.x + markWidth * 0.5f, top + markHeight), ImVec2(0, 0), ImVec2(1, 1),
+                               faded(255, 255, 255));
+            top += markHeight + 22;
+        }
+        ImVec2 extent = font->CalcTextSizeA(23.0f, FLT_MAX, 0, work.title.c_str());
+        drawList->AddText(font, 23.0f, ImVec2(center.x - extent.x * 0.5f, top), faded(223, 227, 234), work.title.c_str());
+        const ImVec2 bar(center.x - width * 0.5f, top + 46);
+        drawBar(bar, width);
+        drawWords(ImVec2(bar.x, bar.y + 18), width);
+    } else {
+        // Anything else: a card over the editor, which stays in view behind it.
+        drawList->AddRectFilled(min, max, faded(8, 9, 12, 0.45f));
+        const float width = 420, height = 108;
+        const ImVec2 cardMin(center.x - width * 0.5f, center.y - height * 0.5f), cardMax(center.x + width * 0.5f, center.y + height * 0.5f);
+        drawList->AddRectFilled(ImVec2(cardMin.x, cardMin.y + 6), ImVec2(cardMax.x, cardMax.y + 10), faded(0, 0, 0, 0.35f), 14);
+        drawList->AddRectFilled(cardMin, cardMax, faded(36, 40, 47), 12);
+        drawList->AddRect(cardMin, cardMax, faded(58, 64, 75), 12);
+        drawList->AddText(font, 16.0f, ImVec2(cardMin.x + 24, cardMin.y + 20), faded(223, 227, 234), work.title.c_str());
+        drawBar(ImVec2(cardMin.x + 24, cardMin.y + 54), width - 48);
+        drawWords(ImVec2(cardMin.x + 24, cardMin.y + 72), width - 48);
+    }
+    ImGui::End();
 }
 
 void EditorApp::closeProject() {
@@ -188,8 +557,12 @@ void EditorApp::closeProject() {
 void EditorApp::openSceneNow(const std::string& absolutePath) {
     EditorContext& editor = *context_;
     std::string error;
-    if (editor.scene.open(absolutePath, &error)) editor.notify("Opened " + editor.scene.displayName());
-    else editor.notify(error, ConsoleMessage::Level::Error);
+    if (editor.scene.open(absolutePath, &error)) {
+        editor.notify("Opened " + editor.scene.displayName());
+        lookForAutosave();
+    } else {
+        editor.notify(error, ConsoleMessage::Level::Error);
+    }
 }
 
 void EditorApp::saveScene(bool asNewFile) {
@@ -221,8 +594,12 @@ void EditorApp::saveScene(bool asNewFile) {
     } else if (editor.scene.save(&error)) {
         editor.notify("Saved " + editor.scene.displayName());
     }
-    if (!error.empty()) editor.notify(error, ConsoleMessage::Level::Error);
-    else saveProjectPreview();
+    if (!error.empty()) {
+        editor.notify(error, ConsoleMessage::Level::Error);
+    } else {
+        forgetAutosave();                   // what it kept is in the file now
+        saveProjectPreview();
+    }
 }
 
 /// The picture the project is shown with where projects are listed: what the game's camera
@@ -298,7 +675,12 @@ bool EditorApp::buildGame() {
     EditorContext& editor = *context_;
     if (!editor.hasProject) return false;
     builtSignature_ = gameSourceSignature(editor.project);      // whatever happens, this state of the code has been tried
-    BuildResult result = buildGameCode(editor.project, currentExecutablePath());
+    return finishBuild(buildGameCode(editor.project, currentExecutablePath()));
+}
+
+bool EditorApp::finishBuild(const BuildResult& built) {
+    EditorContext& editor = *context_;
+    BuildResult result = built;
     if (!result.hadSources) {
         if (gameModule_.isLoaded()) editor.scene.reloadGameCode([this] { gameModule_.retire(); });
         return true;                        // a project without code is a project all the same
@@ -319,6 +701,13 @@ bool EditorApp::buildGame() {
         if (Panel* console = editor.registry.findPanel("Console")) console->isOpen = true;
         return false;
     }
+    // The build of last time, used again because nothing changed: a library loaded once
+    // cannot be loaded a second time (its components would not be declared again), so
+    // a project opened twice gets a copy of it under another name.
+    if (result.reused && loadedLibraries_.count(result.libraryPath)) {
+        std::string copy = copyOfBuild(result.libraryPath);
+        if (!copy.empty()) result.libraryPath = copy;
+    }
     std::string error;
     editor.scene.reloadGameCode([&] {
         if (!gameModule_.load(result.libraryPath, &error)) error = "The game's code was built but could not be loaded: " + error;
@@ -327,11 +716,17 @@ bool EditorApp::buildGame() {
         editor.notify(error, ConsoleMessage::Level::Error);
         return false;
     }
+    loadedLibraries_.insert(result.libraryPath);
     lastBuildFailed_ = false;
-    char seconds[32];
-    std::snprintf(seconds, sizeof(seconds), "%.1f", result.seconds);
     size_t count = gameModule_.componentNames().size();
-    editor.notify("Built the game's code in " + std::string(seconds) + " s: " + std::to_string(count) + (count == 1 ? " component" : " components"));
+    std::string components = std::to_string(count) + (count == 1 ? " component" : " components");
+    if (result.reused) {
+        editor.notify("The game's code is as it was last built: " + components);
+    } else {
+        char seconds[32];
+        std::snprintf(seconds, sizeof(seconds), "%.1f", result.seconds);
+        editor.notify("Built the game's code in " + std::string(seconds) + " s: " + components);
+    }
     return true;
 }
 
@@ -386,13 +781,14 @@ void EditorApp::runPendingAction() {
         return;
     }
     if (action == "open-scene") {
-        openSceneNow(argument);
+        openSceneWithFeedback(argument);
     } else if (action == "new-scene") {
         editor.scene.newScene();
     } else if (action == "open-project") {
-        openProject(argument);
-    } else if (action == "close-project") {
+        openProjectWithFeedback(argument);
+    } else if (action == "close-project" || action == "new-project") {
         closeProject();
+        if (action == "new-project") projectWindow_.showNewProject();
         editor.scene.newScene();
     } else if (action == "quit") {
         editor.engine.quit();
@@ -413,6 +809,7 @@ void EditorApp::drawUnsavedChangesDialog() {
     }
     ImGui::SameLine();
     if (ImGui::Button("Don't Save", ImVec2(110, 0))) {
+        forgetAutosave();                           // they were let go on purpose: nothing to recover
         editor.scene.newScene();                    // drops the changes; the action then replaces the scene anyway
         proceed = true;
     }
@@ -461,10 +858,21 @@ void EditorApp::draw(Engine& engine, Canvas& canvas) {
         }
         logQueue().waiting.clear();
     }
-    if (editor.console.size() > 2000) editor.console.erase(editor.console.begin(), editor.console.begin() + 500);
+    // What the console has heard since the last frame, from the engine or from the editor itself, goes to the log file.
+    static size_t written = 0;
+    if (written > editor.console.size()) written = editor.console.size();
+    for (; written < editor.console.size(); written++) {
+        const ConsoleMessage& said = editor.console[written];
+        writeLog(said.level == ConsoleMessage::Level::Error ? "error" : said.level == ConsoleMessage::Level::Warning ? "warning" : "info", said.text);
+    }
+    if (editor.console.size() > 2000) {
+        editor.console.erase(editor.console.begin(), editor.console.begin() + 500);
+        written -= std::min<size_t>(written, 500);
+    }
 
     // Files change behind the editor's back (the Finder, git, other programs): look once a second.
-    if (editor.hasProject && engine.time.elapsed >= nextAssetScan_) {
+    runWork();
+    if (editor.hasProject && !isWorking() && engine.time.elapsed >= nextAssetScan_) {
         nextAssetScan_ = engine.time.elapsed + 1.0;
         editor.assets.refresh();
         // Written again (a picture saved in another program, a model exported again): read
@@ -487,13 +895,13 @@ void EditorApp::draw(Engine& engine, Canvas& canvas) {
     }
 
     // Code saved in another program (Xcode, any text editor) is rebuilt by itself.
-    if (editor.hasProject && !editor.scene.isPlaying() && engine.time.elapsed >= nextSourceCheck_) {
+    if (editor.hasProject && !isWorking() && !editor.scene.isPlaying() && engine.time.elapsed >= nextSourceCheck_) {
         nextSourceCheck_ = engine.time.elapsed + 1.0;
-        if (gameSourceSignature(editor.project) != builtSignature_) buildGame();
+        if (gameSourceSignature(editor.project) != builtSignature_) buildGameWithFeedback();
     }
 
     handleWindowClose();
-    runPendingAction();
+    if (!isWorking()) runPendingAction();
     // What putting the game on a device says, as it says it: kept for its window, and in the Console.
     for (std::string& line : deviceExport_.takeLines()) {
         bool isError = line.find("error") != std::string::npos;
@@ -518,7 +926,7 @@ void EditorApp::draw(Engine& engine, Canvas& canvas) {
     applyPendingLayout();
     imgui_.beginFrame();
     plugins_.update(editor, engine.time.unscaledDelta);
-    handleShortcuts();
+    if (!isWorking()) handleShortcuts();            // nothing is started while a project is half open
     drawMenuBar();
     if (editor.hasProject) drawPlayBar();
     if (editor.hasProject) drawStatusBar();       // it speaks of the scene: nothing to say without one
@@ -528,14 +936,28 @@ void EditorApp::draw(Engine& engine, Canvas& canvas) {
     } else {
         hideSceneAndGameViews(editor);
         drawProjectList();
+        // The manual can be read before any project is open.
+        if (Panel* manual = editor.registry.findPanel("Manual"); manual && manual->isOpen) {
+            ImGui::SetNextWindowSize(manual->firstSize(), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
+            if (ImGui::Begin(manual->title.c_str(), &manual->isOpen, manual->windowFlags() | ImGuiWindowFlags_NoDocking)) manual->draw(editor);
+            ImGui::End();
+            if (!editor.panelToFocus.empty()) {
+                ImGui::SetWindowFocus(editor.panelToFocus.c_str());
+                editor.panelToFocus.clear();
+            }
+        }
     }
+    autosave();
     drawUnsavedChangesDialog();
+    drawRecoverDialog();
     drawAboutDialog();
     drawCommandPalette();
     drawSettingsWindow();
     drawBuildWindow();
 drawNewScriptDialog();
     drawSaveLayoutDialog();
+    drawWork();                             // over everything: what the editor is busy with
 
     // An edit becomes a step for Undo once the hand is off: no drag in progress, no text field open.
     bool interacting = ImGui::IsAnyItemActive() || ImGui::IsMouseDown(ImGuiMouseButton_Left);
@@ -570,7 +992,7 @@ static ImGuiKey keyNamed(const std::string& name) {
 
 bool EditorApp::isPressed(const std::string& action) {
     if (!recording_.empty()) return false;              // the keys are being taken for a shortcut
-    const KeyChord& chord = shortcuts_.chord(action);
+    const KeyChord& chord = context_->shortcuts.chord(action);
     ImGuiKey key = keyNamed(chord.key);
     if (key == ImGuiKey_None) return false;
     ImGuiKeyChord mods = (chord.shift ? ImGuiMod_Shift : 0) | (chord.alt ? ImGuiMod_Alt : 0);
@@ -584,66 +1006,62 @@ void EditorApp::handleShortcuts() {
     EditorContext& editor = *context_;
     SceneDocument& scene = editor.scene;
     ImGuiIO& io = ImGui::GetIO();
-
-    if (isPressed("quit")) editor.requestQuit();
-    if (isPressed("findAnything") && !(scene.isPlaying() && editor.gameViewHasFocus)) palette_.open();
-    if (isPressed("settings")) showsSettings_ = true;
-    if (isPressed("openProject")) chooseAndOpenProject();
-    else if (!editor.hasProject && isPressed("openScene")) chooseAndOpenScene();
-    if (!editor.hasProject) return;
-
-    if (isPressed("pause")) {
-        if (scene.isPlaying()) scene.setPaused(!scene.isPaused());
-    } else if (isPressed("step")) {
-        scene.stepFrame();
-    } else if (isPressed("play")) {
-        scene.setPlaying(!scene.isPlaying());
-    }
     // While the game has the keys, the arrows and Space are the game's: the editor's own keyboard
     // navigation (moving between buttons and lists, showing their tips) is off until it lets go.
-    {
-        ImGuiIO& io = ImGui::GetIO();
-        if (scene.isPlaying() && editor.gameViewHasFocus) io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
-        else io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    const bool gameHasKeys = editor.hasProject && scene.isPlaying() && editor.gameViewHasFocus;
+    if (gameHasKeys) io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
+    else io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    // A game that took the pointer to look about with has it only while it runs: stopped or held, the pointer is the editor's again.
+    if (!scene.isPlaying() || scene.isPaused()) editor.engine.input.setPointerCaptured(false);
+    // While the game has it, the editor's own panels must not feel a pointer that is not shown going over them.
+    if (editor.engine.input.isPointerCaptured()) io.ConfigFlags |= ImGuiConfigFlags_NoMouse;
+    else io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
+
+    // Keys that would fight with typing in a text field, or belong to a panel with a document of
+    // its own, or to the Explorer while it has the keyboard: each command says which it is.
+    const bool panelHasThem = editor.panelOwnsEditKeys, explorerHasThem = editor.explorerHasKeys;
+    editor.panelOwnsEditKeys = false;           // the panel says so again this frame if it still has the keyboard
+    editor.explorerHasKeys = false;
+    const bool isTyping = io.WantTextInput;
+    // Flying through the scene holds a mouse button and letters: Shift+D is then "right, fast", not a command.
+    const bool handsAreBusy = ImGui::IsMouseDown(ImGuiMouseButton_Right) || ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+
+    // By index: what a command does may be anything, but the list itself does not change.
+    const std::deque<Command>& all = editor.commands.all();
+    for (size_t i = 0; i < all.size(); i++) {
+        const Command& command = all[i];
+        if (!command.run || command.id.empty()) continue;
+        const KeyChord& chord = editor.shortcuts.chord(command.id);
+        if (chord.isEmpty()) continue;
+        if (gameHasKeys && !command.worksInGame) continue;
+        if (command.usesEditKeys && (isTyping || panelHasThem)) continue;
+        if (command.actsOnSelection && explorerHasThem) continue;
+        if (!chord.command && (isTyping || handsAreBusy)) continue;
+        if (isPressed(command.id) && command.isEnabled()) command.run();
     }
-    if (scene.isPlaying() && editor.gameViewHasFocus) {
-        // The keyboard is the game's, but for the way out.
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) scene.setPlaying(false);
+
+    if (gameHasKeys) {
+        // The keyboard is the game's, but for the way out. A game that holds the pointer hears the
+        // first Esc itself, and gives the pointer back (for its own buttons, and for the editor's);
+        // the next one stops it.
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !editor.engine.input.isPointerCaptured()) scene.setPlaying(false);
         return;
     }
-    const bool isEditing = !scene.isPlaying();
-    if (isEditing) {
-        if (isPressed("saveAs")) saveScene(true);
-        else if (isPressed("save")) saveScene(false);
-        if (isPressed("newScene")) editor.requestNewScene();
-        if (isPressed("openScene")) chooseAndOpenScene();
-        if (isPressed("export")) showsBuild_ = true;
-        else if (isPressed("buildScripts")) buildGame();
-    }
-    if (isPressed("alignWithView")) editor.alignWithViewRequested = true;
-
-    // These would fight with typing in a text field, or belong to a panel with a document of its own.
-    bool panelHasThem = editor.panelOwnsEditKeys;
-    editor.panelOwnsEditKeys = false;           // the panel says so again this frame if it still has the keyboard
-    if (io.WantTextInput || panelHasThem) return;
-    if (isEditing) {
-        bool redoes = isPressed("redo") || ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Y, ImGuiInputFlags_RouteGlobal);
-        if (redoes) scene.redo();
-        else if (isPressed("undo")) scene.undo();
-    }
-    if (isPressed("duplicate")) scene.duplicateSelection();
-    if (isPressed("selectAll")) scene.selectAll();
-    if (!ImGui::IsAnyItemActive() && (ImGui::IsKeyPressed(ImGuiKey_Delete, false) || ImGui::IsKeyPressed(ImGuiKey_Backspace, false))) {
-        // Only when the scene is what the user is working on, not the asset browser.
-        if (!scene.selection().empty() && editor.selectedAsset.empty()) scene.deleteSelection();
-    }
+    if (!editor.hasProject || isTyping || panelHasThem || !recording_.empty()) return;
+    // Two that hands expect besides the ones in the settings: Cmd+Y redoes, and Delete or Backspace alone deletes.
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Y, ImGuiInputFlags_RouteGlobal)) editor.commands.run("redo");
+    bool deletes = ImGui::IsKeyPressed(ImGuiKey_Delete, false) || ImGui::IsKeyPressed(ImGuiKey_Backspace, false);
+    if (deletes && !io.KeySuper && !io.KeyCtrl && !ImGui::IsAnyItemActive() && !explorerHasThem) editor.commands.run("delete");
 }
 
-// ---------------------------------------------------------------- Edit > Editor Settings
+// ---------------------------------------------------------------- Edit > Preferences
 
 void EditorApp::saveEditorSettings() {
     std::string out = "theme " + currentTheme() + "\n";
-    std::istringstream changed(shortcuts_.toText());
+    out += std::string("autosave ") + (autosaves_ ? "1" : "0") + "\n";
+    out += "autosaveMinutes " + std::to_string(autosaveMinutes_) + "\n";
+    out += std::string("reopenLastProject ") + (reopensLastProject_ ? "1" : "0") + "\n";
+    std::istringstream changed(context_->shortcuts.toText());
     std::string line;
     while (std::getline(changed, line)) out += "shortcut " + line + "\n";
     std::error_code code;
@@ -656,98 +1074,167 @@ void EditorApp::drawSettingsWindow() {
         recording_.clear();
         return;
     }
-    ImGui::SetNextWindowSize(ImVec2(620, 560), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Editor Settings", &showsSettings_, ImGuiWindowFlags_NoDocking)) {
+    ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(780, 580), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Preferences", &showsSettings_, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoCollapse)) {
         ImGui::End();
         return;
     }
-    if (ImGui::BeginTabBar("##settings")) {
-        if (ImGui::BeginTabItem("Shortcuts")) {
-            // Taking the keys for one: the next key pressed, with what is held with it.
-            if (!recording_.empty()) {
-                if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
-                    recording_.clear();
-                } else {
-                    for (int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_NamedKey_END && !recording_.empty(); key++) {
-                        ImGuiKey k = ImGuiKey(key);
-                        bool isModifier = k == ImGuiKey_LeftCtrl || k == ImGuiKey_RightCtrl || k == ImGuiKey_LeftShift || k == ImGuiKey_RightShift ||
-                                          k == ImGuiKey_LeftAlt || k == ImGuiKey_RightAlt || k == ImGuiKey_LeftSuper || k == ImGuiKey_RightSuper ||
-                                          (k >= ImGuiKey_MouseLeft && k <= ImGuiKey_MouseWheelY) || k >= ImGuiKey_ReservedForModCtrl;
-                        if (isModifier || !ImGui::IsKeyPressed(k, false)) continue;
-                        ImGuiIO& io = ImGui::GetIO();
-                        KeyChord chord;
-                        chord.command = io.KeyCtrl || io.KeySuper;
-                        chord.shift = io.KeyShift;
-                        chord.alt = io.KeyAlt;
-                        chord.key = ImGui::GetKeyName(k);
-                        // Backspace alone takes the shortcut away.
-                        if (k == ImGuiKey_Backspace && !chord.command && !chord.shift && !chord.alt) chord = KeyChord{};
-                        shortcuts_.set(recording_, chord);
-                        recording_.clear();
-                        saveEditorSettings();
-                    }
-                }
-            }
-            ImGui::TextDisabled("Click one, then press its new keys. Backspace: none. Esc: as it was.");
-            if (ImGui::BeginTable("##shortcuts", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY, ImVec2(0, -34))) {
-                ImGui::TableSetupColumn("What", ImGuiTableColumnFlags_WidthStretch);
-                ImGui::TableSetupColumn("Keys", ImGuiTableColumnFlags_WidthFixed, 170);
-                ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 60);
-                std::string group;
-                for (const Shortcuts::Action& action : shortcuts_.actions()) {
-                    ImGui::PushID(action.id.c_str());
-                    if (action.group != group) {
-                        group = action.group;
-                        ImGui::TableNextRow();
-                        ImGui::TableNextColumn();
-                        ImGui::TextDisabled("%s", group.c_str());
-                    }
-                    ImGui::TableNextRow();
-                    ImGui::TableNextColumn();
-                    ImGui::TextUnformatted(action.title.c_str());
-                    std::vector<std::string> sharing = shortcuts_.sharing(action.id);
-                    if (!sharing.empty()) {
-                        ImGui::SameLine();
-                        ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.3f, 1), "also %s", sharing.front().c_str());
-                    }
-                    ImGui::TableNextColumn();
-                    bool isTaking = recording_ == action.id;
-                    std::string shown = isTaking ? std::string("Press the keys...") : shortcuts_.text(action.id);
-                    if (shown.empty()) shown = "none";
-                    if (ImGui::Button(shown.c_str(), ImVec2(-1, 0))) recording_ = isTaking ? std::string() : action.id;
-                    ImGui::TableNextColumn();
-                    if (!(action.chord == action.original)) {
-                        if (ImGui::SmallButton("Reset")) {
-                            shortcuts_.reset(action.id);
-                            saveEditorSettings();
-                        }
-                    }
-                    ImGui::PopID();
-                }
-                ImGui::EndTable();
-            }
-            if (ImGui::Button("All as They Were")) {
-                shortcuts_.resetAll();
-                recording_.clear();
-                saveEditorSettings();
-            }
-            ImGui::EndTabItem();
-        } else {
+    // A list of pages at the left, the page at the right: as the Mac's own settings are, and Unity's Preferences.
+    static int page = 0;
+    const char* pages[] = {"General", "Appearance", "Shortcuts"};
+    const char* icons[] = {"logic", "eye", "graph"};
+    const char* notes[] = {"How the editor itself behaves. It is the same for every project.", "The colors of the editor. The game's own are in its scenes.",
+                           "Every command of the menus, and the keys that do it."};
+    const int pageCount = 3;
+    if (!settingsPage_.empty()) {
+        for (int i = 0; i < pageCount; i++) {
+            if (settingsPage_ == pages[i]) page = i;
+        }
+        settingsPage_.clear();
+    }
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::GetStyleColorVec4(ImGuiCol_FrameBg));
+    ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0, 0.5f));
+    ImGui::BeginChild("##pages", ImVec2(176, 0), ImGuiChildFlags_AlwaysUseWindowPadding);
+    for (int i = 0; i < pageCount; i++) {
+        ImVec2 at = ImGui::GetCursorScreenPos();
+        if (ImGui::Selectable((std::string("       ") + pages[i]).c_str(), page == i, 0, ImVec2(0, 26))) {
+            page = i;
             recording_.clear();
         }
-        if (ImGui::BeginTabItem("Look")) {
-            ImGui::TextDisabled("The colors of the editor. The game's own are in its scenes.");
-            for (const std::string& name : themeNames()) {
-                if (ImGui::RadioButton(name.c_str(), currentTheme() == name)) {
-                    setTheme(name);
-                    applyTheme(1.0f);
+        ui::drawIcon(ImGui::GetWindowDrawList(), ImVec2(at.x + 13, at.y + 13), 14, icons[i], ImGui::GetColorU32(page == i ? ImGuiCol_Text : ImGuiCol_TextDisabled));
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor();
+    ImGui::SameLine();
+    ImGui::BeginChild("##page", ImVec2(0, 0), ImGuiChildFlags_AlwaysUseWindowPadding);
+    ui::title(pages[page]);
+    ImGui::TextDisabled("%s", notes[page]);
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+    if (page == 0) {
+        bool changed = false;
+        ui::subheading("Saving");
+        changed |= ui::checkbox("Autosave", autosaves_);
+        ui::tooltip("While a scene has changes that are not saved, a copy is kept aside every few minutes (in the project's Library).\n"
+                    "The scene's own file is never touched: if the editor closes badly, the next time the scene is opened it asks whether to recover the copy");
+        ImGui::BeginDisabled(!autosaves_);
+        ui::label("Every");
+        changed |= ImGui::DragInt("##autosave-minutes", &autosaveMinutes_, 0.05f, 1, 60, autosaveMinutes_ == 1 ? "%d minute" : "%d minutes", ImGuiSliderFlags_AlwaysClamp);
+        ui::tooltip("How long between two copies");
+        ImGui::EndDisabled();
+        ui::subheading("Starting");
+        changed |= ui::checkbox("Reopen Last Project", reopensLastProject_);
+        ui::tooltip("The editor opens on the project it had last, without stopping at the project window");
+        if (changed) saveEditorSettings();
+    } else if (page == 1) {
+        // Each look as a card: a click wears it.
+        float card = 150;
+        int column = 0, perRow = std::max(1, int(ImGui::GetContentRegionAvail().x / (card + 10)));
+        for (const std::string& name : themeNames()) {
+            if (column++ % perRow) ImGui::SameLine(0, 10);
+            ImGui::PushID(name.c_str());
+            bool isCurrent = currentTheme() == name;
+            ImVec2 at = ImGui::GetCursorScreenPos();
+            if (ImGui::InvisibleButton("##theme", ImVec2(card, 92))) {
+                setTheme(name);
+                applyTheme(1.0f);
+                saveEditorSettings();
+            }
+            ImDrawList* draw = ImGui::GetWindowDrawList();
+            bool hovered = ImGui::IsItemHovered();
+            draw->AddRectFilled(at, ImVec2(at.x + card, at.y + 92), ImGui::GetColorU32(ImGuiCol_FrameBg), 8.0f);
+            // A small editor in the card: a bar, a panel, an accent.
+            draw->AddRectFilled(ImVec2(at.x + 10, at.y + 10), ImVec2(at.x + card - 10, at.y + 22), ImGui::GetColorU32(ImGuiCol_MenuBarBg), 3.0f);
+            draw->AddRectFilled(ImVec2(at.x + 10, at.y + 26), ImVec2(at.x + 50, at.y + 64), ImGui::GetColorU32(ImGuiCol_WindowBg), 3.0f);
+            draw->AddRectFilled(ImVec2(at.x + 54, at.y + 26), ImVec2(at.x + card - 10, at.y + 64), ImGui::GetColorU32(ImGuiCol_ChildBg, 1.0f), 3.0f);
+            draw->AddRectFilled(ImVec2(at.x + 60, at.y + 32), ImVec2(at.x + 100, at.y + 40), ImGui::GetColorU32(ImGuiCol_ButtonActive), 2.0f);
+            draw->AddText(ImVec2(at.x + 10, at.y + 70), ImGui::GetColorU32(ImGuiCol_Text), name.c_str());
+            if (isCurrent || hovered) draw->AddRect(at, ImVec2(at.x + card, at.y + 92), ImGui::GetColorU32(isCurrent ? ImGuiCol_ButtonActive : ImGuiCol_Border), 8.0f, 0, isCurrent ? 2.0f : 1.0f);
+            ImGui::PopID();
+        }
+    } else {
+        // Taking the keys for one: the next key pressed, with what is held with it.
+        if (!recording_.empty()) {
+            if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+                recording_.clear();
+            } else {
+                for (int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_NamedKey_END && !recording_.empty(); key++) {
+                    ImGuiKey k = ImGuiKey(key);
+                    bool isModifier = k == ImGuiKey_LeftCtrl || k == ImGuiKey_RightCtrl || k == ImGuiKey_LeftShift || k == ImGuiKey_RightShift ||
+                                      k == ImGuiKey_LeftAlt || k == ImGuiKey_RightAlt || k == ImGuiKey_LeftSuper || k == ImGuiKey_RightSuper ||
+                                      (k >= ImGuiKey_MouseLeft && k <= ImGuiKey_MouseWheelY) || k >= ImGuiKey_ReservedForModCtrl;
+                    if (isModifier || !ImGui::IsKeyPressed(k, false)) continue;
+                    ImGuiIO& io = ImGui::GetIO();
+                    KeyChord chord;
+                    chord.command = io.KeyCtrl || io.KeySuper;
+                    chord.shift = io.KeyShift;
+                    chord.alt = io.KeyAlt;
+                    chord.key = ImGui::GetKeyName(k);
+                    // Backspace alone takes the shortcut away.
+                    if (k == ImGuiKey_Backspace && !chord.command && !chord.shift && !chord.alt) chord = KeyChord{};
+                    context_->shortcuts.set(recording_, chord);
+                    recording_.clear();
                     saveEditorSettings();
                 }
             }
-            ImGui::EndTabItem();
         }
-        ImGui::EndTabBar();
+        static std::string filter;
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 130);
+        ImGui::InputTextWithHint("##filter", "Search shortcuts", &filter);
+        ImGui::SameLine();
+        if (ImGui::Button("Reset All", ImVec2(-1, 0))) {
+            context_->shortcuts.resetAll();
+            recording_.clear();
+            saveEditorSettings();
+        }
+        ImGui::TextDisabled("Click the keys of one, then press the new ones. Backspace: none. Esc: as it was.");
+        auto lower = [](std::string text) {
+            for (char& c : text) c = char(std::tolower(static_cast<unsigned char>(c)));
+            return text;
+        };
+        std::string wanted = lower(filter);
+        ImGui::BeginChild("##list", ImVec2(0, 0));
+        std::string group;
+        for (const Shortcuts::Action& action : context_->shortcuts.actions()) {
+            if (!wanted.empty() && lower(action.title).find(wanted) == std::string::npos && lower(action.group).find(wanted) == std::string::npos) continue;
+            ImGui::PushID(action.id.c_str());
+            if (action.group != group) {
+                group = action.group;
+                ui::subheading(group.c_str());
+            }
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(action.title.c_str());
+            std::vector<std::string> sharing = context_->shortcuts.sharing(action.id);
+            if (!sharing.empty()) {
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.3f, 1), "(also %s)", sharing.front().c_str());
+            }
+            bool isTaking = recording_ == action.id;
+            std::string shown = isTaking ? std::string("Press the keys...") : context_->shortcuts.text(action.id);
+            if (shown.empty()) shown = "none";
+            float right = ImGui::GetContentRegionAvail().x;
+            ImGui::SameLine(right - 190);
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
+            if (isTaking) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+            if (ImGui::Button(shown.c_str(), ImVec2(150, 0))) recording_ = isTaking ? std::string() : action.id;
+            if (isTaking) ImGui::PopStyleColor();
+            ImGui::PopStyleVar();
+            if (!(action.chord == action.original)) {
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Reset")) {
+                    context_->shortcuts.reset(action.id);
+                    saveEditorSettings();
+                }
+            }
+            ImGui::PopID();
+        }
+        ImGui::EndChild();
     }
+    ImGui::EndChild();
     ImGui::End();
 }
 
@@ -771,244 +1258,114 @@ void EditorApp::chooseAndOpenScene() {
 
 /// Draws the items plugins (and the editor) registered under one top-level menu.
 /// "Tools/Level/Align" with menu "Tools" appears as Level > Align.
+void EditorApp::drawMenuRows(const Commands& commands, const std::string& menuPath) {
+    EditorContext& editor = *context_;
+    for (const Commands::Row& row : commands.rowsOf(menuPath)) {
+        if (!row.command) {
+            if (ImGui::BeginMenu(row.submenu.c_str())) {
+                drawMenuRows(commands, menuPath + "/" + row.submenu);
+                ImGui::EndMenu();
+            }
+            continue;
+        }
+        const Command& command = *row.command;
+        if (command.isLine()) {
+            ImGui::Separator();
+            continue;
+        }
+        std::string name = command.name();
+        if (command.items) {
+            // A list that is made as it is shown: in the menu itself, or in a submenu of its own.
+            if (command.itemsAreInline) {
+                ImGui::BeginDisabled(!command.isEnabled());
+                command.items();
+                ImGui::EndDisabled();
+            } else if (ImGui::BeginMenu(name.c_str(), command.isEnabled())) {
+                command.items();
+                ImGui::EndMenu();
+            }
+            continue;
+        }
+        std::string keys = command.keys.empty() ? editor.shortcuts.text(command.id) : command.keys;
+        if (ImGui::MenuItem(name.c_str(), keys.empty() ? nullptr : keys.c_str(), command.isChecked(), command.isEnabled()) && command.run) command.run();
+    }
+}
+
 void EditorApp::drawRegisteredMenuItems(const std::string& menu) {
     EditorContext& editor = *context_;
-    // Indices, not references: an action may register or remove items.
+    // What plugins put in this menu, as commands of a list of their own: submenus are then
+    // drawn once each, however many items share them. Actions are copied: one may remove items.
+    Commands added;
     for (size_t i = 0; i < editor.registry.menuItems.size(); i++) {
         const MenuItem& item = editor.registry.menuItems[i].value;
-        if (item.path.compare(0, menu.size() + 1, menu + "/") != 0) continue;
-        std::string rest = item.path.substr(menu.size() + 1);
-        // Open the submenus along the path, then the item itself.
-        int depth = 0;
-        bool isVisible = true;
-        size_t start = 0;
-        for (size_t slash = rest.find('/'); slash != std::string::npos; slash = rest.find('/', start)) {
-            if (!ImGui::BeginMenu(rest.substr(start, slash - start).c_str())) {
-                isVisible = false;
-                break;
-            }
-            depth++;
-            start = slash + 1;
-        }
-        if (isVisible) {
-            bool isEnabled = !item.isEnabled || item.isEnabled(editor);
-            std::function<void(EditorContext&)> action = item.action;
-            if (ImGui::MenuItem(rest.substr(start).c_str(), item.shortcut.empty() ? nullptr : item.shortcut.c_str(), false, isEnabled) && action) {
-                action(editor);
-            }
-        }
-        for (; depth > 0; depth--) ImGui::EndMenu();
+        if (item.path.compare(0, menu.size() + 1, menu + "/") != 0 || !item.action) continue;
+        std::function<void(EditorContext&)> action = item.action;
+        std::function<bool(EditorContext&)> isEnabled = item.isEnabled;
+        Command& command = added.add({}, item.path, [action, &editor] { action(editor); });
+        if (isEnabled) command.when([isEnabled, &editor] { return isEnabled(editor); });
+        command.shows(item.shortcut);
     }
+    if (added.all().empty()) return;
+    ImGui::Separator();
+    drawMenuRows(added, menu);
 }
 
 void EditorApp::drawMenuBar() {
     EditorContext& editor = *context_;
-    SceneDocument& scene = editor.scene;
     if (!ImGui::BeginMainMenuBar()) return;
-    bool hasProject = editor.hasProject, isEditing = hasProject && !scene.isPlaying();
-
-    if (ImGui::BeginMenu("File")) {
-        if (ImGui::MenuItem("New Scene", shortcuts_.text("newScene").c_str(), false, isEditing)) editor.requestNewScene();
-        if (ImGui::MenuItem("Open...", shortcuts_.text("openScene").c_str())) chooseAndOpenScene();
-        ui::tooltip("A scene of this project, or another project (its .molten file)");
-        if (ImGui::BeginMenu("Open Scene of the Project", isEditing)) {
-            bool any = false;
-            for (const AssetInfo& asset : editor.assets.assets()) {
-                if (asset.type != AssetType::Scene) continue;
-                any = true;
-                if (ImGui::MenuItem(asset.path.c_str())) editor.requestOpenScene(editor.assets.absolutePath(asset.path));
-            }
-            if (!any) ImGui::TextDisabled("The project has no scenes yet.");
-            ImGui::EndMenu();
-        }
-        ImGui::Separator();
-        if (ImGui::MenuItem("Save Scene", shortcuts_.text("save").c_str(), false, isEditing)) saveScene(false);
-        if (ImGui::MenuItem("Save Scene As New File", shortcuts_.text("saveAs").c_str(), false, isEditing)) saveScene(true);
-        ImGui::Separator();
-        if (ImGui::MenuItem("Open Project...", shortcuts_.text("openProject").c_str())) chooseAndOpenProject();
-        if (ImGui::BeginMenu("Recent Projects", !recent_.paths.empty())) {
-            for (const std::string& path : std::vector<std::string>(recent_.paths)) {
-                if (ImGui::MenuItem(path.c_str())) editor.requestOpenProject(path);
-            }
-            ImGui::EndMenu();
-        }
-        if (ImGui::MenuItem("Close Project", nullptr, false, hasProject)) {
-            editor.pendingAction = "close-project";
-            editor.pendingArgument.clear();
-        }
-        drawRegisteredMenuItems("File");
-        ImGui::Separator();
-        if (ImGui::MenuItem("Quit", shortcuts_.text("quit").c_str())) editor.requestQuit();
-        ImGui::EndMenu();
-    }
-
-    if (ImGui::BeginMenu("Edit")) {
-        if (ImGui::MenuItem("Undo", shortcuts_.text("undo").c_str(), false, scene.canUndo())) scene.undo();
-        if (ImGui::MenuItem("Redo", shortcuts_.text("redo").c_str(), false, scene.canRedo())) scene.redo();
-        ImGui::Separator();
-        bool hasSelection = hasProject && !scene.selection().empty();
-        if (ImGui::MenuItem("Duplicate", shortcuts_.text("duplicate").c_str(), false, hasSelection)) scene.duplicateSelection();
-        if (ImGui::MenuItem("Delete", "Del", false, hasSelection)) scene.deleteSelection();
-        if (ImGui::MenuItem("Select All", shortcuts_.text("selectAll").c_str(), false, isEditing)) scene.selectAll();
-        if (ImGui::MenuItem("Frame Selection", "F", false, hasSelection)) editor.frameSelectionRequested = true;
-        if (ImGui::MenuItem("Align with View", shortcuts_.text("alignWithView").c_str(), false, hasSelection)) editor.alignWithViewRequested = true;
-        if (ImGui::MenuItem("Align View with Selection", nullptr, false, hasSelection)) scene.alignViewWithSelection();
-        ImGui::Separator();
-        if (ImGui::MenuItem("Find Anything...", shortcuts_.text("findAnything").c_str())) palette_.open();
-        if (ImGui::MenuItem("Editor Settings...", shortcuts_.text("settings").c_str())) showsSettings_ = true;
-        drawRegisteredMenuItems("Edit");
-        ImGui::Separator();
-        if (ImGui::MenuItem("Project Settings...", nullptr, false, hasProject)) {
-            if (Panel* panel = editor.registry.findPanel("Project Settings")) panel->isOpen = true;
-        }
-        ImGui::EndMenu();
-    }
-
-    if (ImGui::BeginMenu("Create", isEditing)) {
-        drawCreateMenu(editor, Entity{});
-        ImGui::EndMenu();
-    }
-
-    if (ImGui::BeginMenu("Play", hasProject)) {
-        if (ImGui::MenuItem(scene.isPlaying() ? "Stop" : "Play", shortcuts_.text("play").c_str())) scene.setPlaying(!scene.isPlaying());
-        if (ImGui::MenuItem(scene.isPaused() ? "Resume" : "Pause", shortcuts_.text("pause").c_str(), false, scene.isPlaying())) scene.setPaused(!scene.isPaused());
-        if (ImGui::MenuItem("Step One Frame", shortcuts_.text("step").c_str(), false, scene.isPlaying())) scene.stepFrame();
-        ImGui::EndMenu();
-    }
-
-    if (ImGui::BeginMenu("Game", hasProject)) {
-        if (ImGui::MenuItem("New Script...")) {
-            showsNewScript_ = true;
-            newScriptError_.clear();
-        }
-        if (ImGui::MenuItem("New Visual Script")) {
-            std::string folder = editor.assets.find("Scripts") ? "Scripts" : editor.assets.createFolder("", "Scripts");
-            std::string path = editor.assets.uniquePath(folder, "New Script", ".graph");
-            if (text::writeFile(editor.assets.absolutePath(path), script::Graph::starter().toText())) {
-                editor.assets.refresh();
-                editor.selectedAsset = path;
-                editor.currentFolder = folder;
-                editor.editGraph(path);
-            }
-        }
-        // The project's scripts of both kinds: a click opens one where it is edited.
-        if (ImGui::BeginMenu("Scripts")) {
-            std::vector<std::string> sources = gameSourceFiles(editor.project);
-            for (const std::string& source : sources) {
-                if (ImGui::MenuItem(fs::path(source).filename().string().c_str(), "code")) platform::openWithDefaultApplication(source);
-            }
-            bool any = !sources.empty();
-            for (const AssetInfo& asset : editor.assets.assets()) {
-                if (asset.type != AssetType::Graph) continue;
-                any = true;
-                std::string path = asset.path;
-                if (ImGui::MenuItem(asset.name.c_str(), "visual")) editor.editGraph(path);
-            }
-            if (!any) ImGui::TextDisabled("None yet.");
-            ImGui::EndMenu();
-        }
-        ImGui::Separator();
-        if (ImGui::MenuItem("Build Scripts Now", shortcuts_.text("buildScripts").c_str())) buildGame();
-        ui::tooltip("Scripts are built by themselves when one is saved, and before the game is exported: this is for doing it by hand");
-        if (ImGui::MenuItem("Show Scripts Folder")) platform::revealInFinder(editor.project.sourceDirectory());
-        if (ImGui::BeginMenu("Components", gameModule_.isLoaded())) {
-            for (const std::string& name : gameModule_.componentNames()) ImGui::MenuItem(name.c_str(), nullptr, false, false);
-            ImGui::EndMenu();
-        }
-        ImGui::Separator();
-        if (ImGui::MenuItem("Build and Export...", shortcuts_.text("export").c_str())) showsBuild_ = true;
-        drawRegisteredMenuItems("Game");
-        ImGui::EndMenu();
-    }
-
-    // Menus that exist only because something was registered under them: "Tools", or a plugin's own.
-    std::vector<std::string> extraMenus;
+    // Menus that exist only because a plugin registered something under them ("Tools") go before Window.
+    static const char* const first[] = {"File", "Edit", "Assets", "Entity", "Component"};
+    static const char* const last[] = {"Window", "Help"};
+    std::vector<std::string> menus(std::begin(first), std::end(first));
     for (const auto& item : editor.registry.menuItems) {
         std::string menu = item.value.path.substr(0, item.value.path.find('/'));
-        bool isBuiltIn = menu == "File" || menu == "Edit" || menu == "Game" || menu == "Window" || menu == "Help";
-        if (!isBuiltIn && std::find(extraMenus.begin(), extraMenus.end(), menu) == extraMenus.end()) extraMenus.push_back(menu);
+        bool isLast = std::any_of(std::begin(last), std::end(last), [&](const char* name) { return menu == name; });
+        if (!isLast && std::find(menus.begin(), menus.end(), menu) == menus.end()) menus.push_back(menu);
     }
-    for (const std::string& menu : extraMenus) {
-        if (ImGui::BeginMenu(menu.c_str())) {
-            drawRegisteredMenuItems(menu);
-            ImGui::EndMenu();
-        }
-    }
-
-    if (ImGui::BeginMenu("Window")) {
-        for (auto& item : editor.registry.panels) {
-            ImGui::MenuItem(item.value->title.c_str(), nullptr, &item.value->isOpen);
-        }
-        ImGui::Separator();
-        ImGui::MenuItem("Show All Colliders", nullptr, &editor.engine.showsColliders);
-        ImGui::Separator();
-        if (ImGui::BeginMenu("Layouts")) {
-            drawLayoutItems();
-            ImGui::EndMenu();
-        }
-        if (ImGui::MenuItem("Reset Layout")) pendingLayout_ = "Default";
-        drawRegisteredMenuItems("Window");
+    menus.insert(menus.end(), std::begin(last), std::end(last));
+    for (const std::string& menu : menus) {
+        if (!ImGui::BeginMenu(menu.c_str())) continue;
+        drawMenuRows(editor.commands, menu);
+        drawRegisteredMenuItems(menu);
         ImGui::EndMenu();
     }
-
-    if (ImGui::BeginMenu("Help")) {
-        if (ImGui::MenuItem("About Molten Metal Engine")) showsAbout_ = true;
-        if (ImGui::MenuItem("Molten Engine on GitHub")) platform::openWebPage(kRepository);
-        drawRegisteredMenuItems("Help");
-        ImGui::EndMenu();
-    }
-
     ImGui::EndMainMenuBar();
 }
+
+void EditorApp::showPreferences(const std::string& page) {
+    showsSettings_ = true;
+    settingsPage_ = page;
+}
+
+void EditorApp::showProjectSettings() { context_->showProjectSettings(); }
+
+void EditorApp::showManual(const std::string& page) { molten::editor::showManual(*context_, page); }
 
 // ---------------------------------------------------------------- Cmd+K
 
 std::vector<PaletteCommand> EditorApp::paletteCommands() {
     EditorContext& editor = *context_;
     SceneDocument& scene = editor.scene;
-    const bool hasProject = editor.hasProject, isEditing = hasProject && !scene.isPlaying(), hasSelection = !scene.selection().empty();
+    const bool hasProject = editor.hasProject, isEditing = hasProject && !scene.isPlaying();
     std::vector<PaletteCommand> commands;
     auto add = [&](std::string title, std::string kind, std::string shortcut, bool isEnabled, std::function<void()> run) {
         commands.push_back(PaletteCommand{std::move(title), std::move(kind), std::move(shortcut), isEnabled, std::move(run)});
     };
-    // What the menus do.
-    add("New Scene", "File", shortcuts_.text("newScene"), isEditing, [&editor] { editor.requestNewScene(); });
-    add("Open Scene...", "File", shortcuts_.text("openScene"), true, [this] { chooseAndOpenScene(); });
-    add("Save Scene", "File", shortcuts_.text("save"), isEditing, [this] { saveScene(false); });
-    add("Save Scene As New File", "File", shortcuts_.text("saveAs"), isEditing, [this] { saveScene(true); });
-    add("Open Project...", "File", shortcuts_.text("openProject"), true, [this] { chooseAndOpenProject(); });
-    add("Undo", "Edit", shortcuts_.text("undo"), isEditing && scene.canUndo(), [&scene] { scene.undo(); });
-    add("Redo", "Edit", shortcuts_.text("redo"), isEditing && scene.canRedo(), [&scene] { scene.redo(); });
-    add("Duplicate", "Edit", shortcuts_.text("duplicate"), hasSelection, [&scene] { scene.duplicateSelection(); });
-    add("Delete", "Edit", "Del", hasSelection, [&scene] { scene.deleteSelection(); });
-    add("Select All", "Edit", shortcuts_.text("selectAll"), isEditing, [&scene] { scene.selectAll(); });
-    add("Frame Selection", "Edit", "F", hasSelection, [&editor] { editor.frameSelectionRequested = true; });
-    add("Align with View", "Edit", shortcuts_.text("alignWithView"), hasSelection, [&editor] { editor.alignWithViewRequested = true; });
-    add("Align View with Selection", "Edit", "", hasSelection, [&scene] { scene.alignViewWithSelection(); });
-    add("Project Settings", "Edit", "", hasProject, [&editor] {
-        if (Panel* panel = editor.registry.findPanel("Project Settings")) panel->isOpen = true;
-    });
-    add(scene.isPlaying() ? "Stop" : "Play", "Play", shortcuts_.text("play"), hasProject, [&scene] { scene.setPlaying(!scene.isPlaying()); });
-    add(scene.isPaused() ? "Resume" : "Pause", "Play", shortcuts_.text("pause"), scene.isPlaying(), [&scene] { scene.setPaused(!scene.isPaused()); });
-    add("Step One Frame", "Play", shortcuts_.text("step"), scene.isPlaying(), [&scene] { scene.stepFrame(); });
-    add("New Script...", "Game", "", hasProject, [this] {
-        showsNewScript_ = true;
-        newScriptError_.clear();
-    });
-    add("Build Scripts Now", "Game", shortcuts_.text("buildScripts"), hasProject, [this] { buildGame(); });
-    add("Build and Export...", "Game", shortcuts_.text("export"), hasProject, [this] { showsBuild_ = true; });
-    add("Show Scripts Folder", "Game", "", hasProject, [&editor] { platform::revealInFinder(editor.project.sourceDirectory()); });
-    add(editor.engine.showsColliders ? "Hide All Colliders" : "Show All Colliders", "Window", "", true,
-        [&editor] { editor.engine.showsColliders = !editor.engine.showsColliders; });
-    add("Reset Layout", "Window", "", true, [this] { pendingLayout_ = "Default"; });
-    add("About Molten Metal Engine", "Help", "", true, [this] { showsAbout_ = true; });
-    add("Editor Settings: Shortcuts and Look", "Edit", shortcuts_.text("settings"), true, [this] { showsSettings_ = true; });
-    // The windows: opened and brought to the front.
+    // What the menus do: the same commands, by the same names.
+    for (const Command& command : editor.commands.all()) {
+        if (!command.run || command.isLine()) continue;
+        std::function<void()> run = command.run;
+        add(command.name(), command.where(), editor.keysOf(command.id), command.isEnabled(), run);
+    }
+    // Windows that plugins added.
     for (auto& item : editor.registry.panels) {
         Panel* panel = item.value.get();
-        add(panel->title, "Window", "", true, [panel] {
+        bool isCommand = false;
+        for (const PaletteCommand& listed : commands) isCommand = isCommand || listed.title == panel->title;
+        if (isCommand) continue;
+        add(panel->title, "Window", "", hasProject, [panel, &editor] {
             panel->isOpen = true;
-            ImGui::SetWindowFocus(panel->title.c_str());
+            editor.panelToFocus = panel->title;
         });
     }
     // What plugins put in the menus.
@@ -1111,7 +1468,7 @@ void EditorApp::drawBuildWindow() {
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(ImVec2(620, std::min(720.0f, viewport->WorkSize.y - 60)), ImGuiCond_Appearing);
-    if (!ImGui::Begin("Build and Export", &showsBuild_, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoDocking)) {
+    if (!ImGui::Begin("Build Settings", &showsBuild_, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoDocking)) {
         ImGui::End();
         return;
     }
@@ -1207,8 +1564,8 @@ void EditorApp::drawBuildWindow() {
         if (const kit::UIButton* button = editor.engine.scene.get<kit::UIButton>(entity); button && (button->isRound || !button->action.empty())) buttons++;
     }
     step(3, "How it is played", buildPlatform_ == 0 || sticks + buttons > 0);
-    ImGui::TextWrapped("Keys, mouse and controllers are set in the Input window. On a phone or a tablet there are none: a Stick "
-                       "and Round Buttons (Create > UI) push the same actions from the screen. Drag them into place in the Game view, and try them there with the mouse.");
+    ImGui::TextWrapped("Keys, mouse and controllers are set in Project Settings > Input. On a phone or a tablet there are none: a Stick "
+                       "and Round Buttons (Entity > UI) push the same actions from the screen. Drag them into place in the Game view, and try them there with the mouse.");
     ImGui::TextDisabled("In the open scene: %d %s, %d %s with an action.", sticks, sticks == 1 ? "stick" : "sticks", buttons, buttons == 1 ? "button" : "buttons");
     ImGui::BeginDisabled(editor.scene.isPlaying() || !stickType);
     if (ImGui::Button("Add a Stick and a Button to the Scene")) {
@@ -1232,7 +1589,7 @@ void EditorApp::drawBuildWindow() {
     }
     ImGui::EndDisabled();
     if (ImGui::SameLine(); ImGui::Button("Open Input")) {
-        if (Panel* panel = editor.registry.findPanel("Input")) panel->isOpen = true;
+        editor.showProjectSettings("Input");
     }
 
     // ---- 4
@@ -1242,7 +1599,7 @@ void EditorApp::drawBuildWindow() {
     else ImGui::TextDisabled("%d %s. Built when one is saved, and again when the game is exported: nothing to do here.", int(sources.size()), sources.size() == 1 ? "file" : "files");
     if (lastBuildFailed_) {
         ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "The last build failed: the compiler's words are in the Console.");
-        if (ImGui::SameLine(); ImGui::SmallButton("Try Again")) buildGame();
+        if (ImGui::SameLine(); ImGui::SmallButton("Try Again")) buildGameWithFeedback();
     }
 
     // ---- 5
@@ -1258,7 +1615,7 @@ void EditorApp::drawBuildWindow() {
         bool wantsExport = ImGui::Button("Export for Mac...", ImVec2(200, 34));
         ImGui::EndDisabled();
         ImGui::PopStyleColor(2);
-        if (wantsExport) exportGame();          // saves the scene and builds the scripts first
+        if (wantsExport) exportGameWithFeedback();          // saves the scene and builds the scripts first
         ImGui::SameLine();
         ImGui::Checkbox("Development", &exportsDevelopment_);
         ui::tooltip("A development build: F1 shows the frame rate, the draw calls and where each frame's time goes; F2 the colliders.\n"
@@ -1380,7 +1737,7 @@ void EditorApp::drawNewScriptDialog() {
             editor.assets.refresh();
             editor.notify("Created Assets/Scripts/" + newScriptName_ + ".cpp");
             platform::openWithDefaultApplication(file);     // in Xcode, or whatever opens .cpp files here
-            buildGame();
+            buildGameWithFeedback();
         }
     }
     ImGui::SameLine();
@@ -1393,98 +1750,6 @@ void EditorApp::drawNewScriptDialog() {
 
 /// The bar under the menus: play, pause and step in the middle, where they are in reach
 /// whichever view is in front; the layout of the windows on the right.
-void EditorApp::drawPlayBar() {
-    EditorContext& editor = *context_;
-    SceneDocument& scene = editor.scene;
-    const float height = 38;
-    ImGuiWindowFlags flags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove;
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10, 6));
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::GetStyleColorVec4(ImGuiCol_MenuBarBg));
-    bool isOpen = ImGui::BeginViewportSideBar("##playbar", ImGui::GetMainViewport(), ImGuiDir_Up, height, flags);
-    ImGui::PopStyleColor();
-    ImGui::PopStyleVar();
-    if (isOpen) {
-        ImDrawList* drawList = ImGui::GetWindowDrawList();
-        const bool isPlaying = scene.isPlaying(), isPaused = scene.isPaused();
-        // Molten's own controls: three labelled keys at the left, and what the scene is doing beside them.
-        const float keyHeight = 26;
-        enum class Picture { Run, Stop, Hold, Frame };
-        auto control = [&](const char* id, const char* label, Picture picture, bool isLit, bool isEnabled, ImU32 litColor, const char* tooltip) {
-            float width = 34 + ImGui::CalcTextSize(label).x + 12;
-            ImGui::BeginDisabled(!isEnabled);
-            ImVec2 min = ImGui::GetCursorScreenPos();
-            bool pressed = ImGui::InvisibleButton(id, ImVec2(width, keyHeight));
-            bool isHovered = ImGui::IsItemHovered();
-            ImGui::EndDisabled();
-            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort | ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", tooltip);
-            ImVec2 max(min.x + width, min.y + keyHeight), c(min.x + 18, (min.y + max.y) * 0.5f);
-            ImU32 ink = !isEnabled ? IM_COL32(96, 102, 114, 255) : isLit ? litColor : IM_COL32(223, 227, 234, 255);
-            drawList->AddRectFilled(min, max, isHovered ? IM_COL32(58, 64, 76, 255) : IM_COL32(40, 44, 52, 255), keyHeight * 0.5f);
-            if (isLit) drawList->AddRect(min, max, litColor, keyHeight * 0.5f, ImDrawFlags_None, 1.5f);
-            switch (picture) {
-                case Picture::Run:      // a spark: the forge is lit
-                    drawList->AddCircle(c, 7.0f, ink, 20, 1.6f);
-                    drawList->AddTriangleFilled(ImVec2(c.x - 2.5f, c.y - 4), ImVec2(c.x - 2.5f, c.y + 4), ImVec2(c.x + 4.5f, c.y), ink);
-                    break;
-                case Picture::Stop:
-                    drawList->AddCircle(c, 7.0f, ink, 20, 1.6f);
-                    drawList->AddRectFilled(ImVec2(c.x - 3, c.y - 3), ImVec2(c.x + 3, c.y + 3), ink, 1.0f);
-                    break;
-                case Picture::Hold:     // a snowflake's worth: three bars of a held breath
-                    drawList->AddCircle(c, 7.0f, ink, 20, 1.6f);
-                    drawList->AddLine(ImVec2(c.x - 2.2f, c.y - 3.5f), ImVec2(c.x - 2.2f, c.y + 3.5f), ink, 1.8f);
-                    drawList->AddLine(ImVec2(c.x + 2.2f, c.y - 3.5f), ImVec2(c.x + 2.2f, c.y + 3.5f), ink, 1.8f);
-                    break;
-                case Picture::Frame:    // one frame of film, and an arrow past it
-                    drawList->AddRect(ImVec2(c.x - 7, c.y - 5), ImVec2(c.x + 1, c.y + 5), ink, 1.5f, ImDrawFlags_None, 1.5f);
-                    drawList->AddLine(ImVec2(c.x + 3, c.y), ImVec2(c.x + 8, c.y), ink, 1.6f);
-                    drawList->AddTriangleFilled(ImVec2(c.x + 6, c.y - 3), ImVec2(c.x + 6, c.y + 3), ImVec2(c.x + 9.5f, c.y), ink);
-                    break;
-            }
-            drawList->AddText(ImVec2(min.x + 32, c.y - ImGui::GetTextLineHeight() * 0.5f), ink, label);
-            return pressed;
-        };
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(6, 0));
-        // What the scene is doing, at the left.
-        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (keyHeight - ImGui::GetFrameHeight()) * 0.5f);
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextDisabled("%s", !isPlaying ? "Editing" : isPaused ? "Held: changes are kept until Stop" : "Running: what you change now is undone at Stop");
-        // The keys at the right end, beside the layout: their widths first, to know where they start.
-        const float layoutWidth = 170;
-        auto keyWidth = [](const char* label) { return 34 + ImGui::CalcTextSize(label).x + 12; };
-        float keysWidth = keyWidth(isPlaying ? "Stop" : "Run") + keyWidth(isPaused ? "Resume" : "Hold") + keyWidth("Frame") + 12;
-        // Each key placed on its own, all at the same height in the middle of the bar: placed
-        // after the text on the same line, the first was put on the text's line, lower than the others.
-        const float barTop = ImGui::GetWindowPos().y, keysTop = barTop + (height - keyHeight) * 0.5f;
-        float keyX = ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - layoutWidth - keysWidth - 22;
-        auto placeKey = [&](const char* label) {
-            ImGui::SetCursorScreenPos(ImVec2(keyX, keysTop));
-            keyX += keyWidth(label) + 6;
-        };
-        placeKey(isPlaying ? "Stop" : "Run");
-        if (control("##play", isPlaying ? "Stop" : "Run", isPlaying ? Picture::Stop : Picture::Run, isPlaying, true, IM_COL32(255, 122, 47, 255),
-                    isPlaying ? "Stop: back to editing, the scene returns to how it was (Cmd+P)" : "Run the scene (Cmd+P)")) {
-            scene.setPlaying(!isPlaying);
-        }
-        placeKey(isPaused ? "Resume" : "Hold");
-        if (control("##pause", isPaused ? "Resume" : "Hold", Picture::Hold, isPaused, isPlaying, IM_COL32(120, 190, 255, 255),
-                    isPaused ? "Resume (Shift+Cmd+P)" : "Hold: freeze the game where it is; change things, then resume (Shift+Cmd+P)")) {
-            scene.setPaused(!isPaused);
-        }
-        placeKey("Frame");
-        if (control("##step", "Frame", Picture::Frame, false, isPlaying, 0, "Advance one frame and hold (Alt+Cmd+P)")) scene.stepFrame();
-        ImGui::PopStyleVar();
-
-        // The layout of the windows, at the right end.
-        ImGui::SetCursorScreenPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - layoutWidth - 10, barTop + (height - ImGui::GetFrameHeight()) * 0.5f));
-        ImGui::SetNextItemWidth(layoutWidth);
-        if (ImGui::BeginCombo("##layout", ("Layout: " + layoutName_).c_str(), ImGuiComboFlags_HeightLarge)) {
-            drawLayoutItems();
-            ImGui::EndCombo();
-        }
-    }
-    ImGui::End();
-}
 
 // ---------------------------------------------------------------- layouts
 
@@ -1623,24 +1888,6 @@ void EditorApp::applyPendingLayout() {
     layoutName_ = name;
 }
 
-void EditorApp::drawStatusBar() {
-    EditorContext& editor = *context_;
-    ImGuiWindowFlags flags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_MenuBar;
-    if (ImGui::BeginViewportSideBar("##status", ImGui::GetMainViewport(), ImGuiDir_Down, ImGui::GetFrameHeight(), flags)) {
-        if (ImGui::BeginMenuBar()) {
-            if (editor.engine.time.elapsed < editor.statusUntil) ImGui::TextUnformatted(editor.statusText.c_str());
-            else if (editor.scene.isPlaying()) ImGui::TextDisabled("Playing. Click the Game window to give it the keyboard. What you change now is undone when you stop (Cmd+P).");
-            char right[160];
-            std::snprintf(right, sizeof(right), "%zu entities   %d draw calls   %.0f fps", editor.scene.entities().size(),
-                          editor.engine.renderer().stats.drawCalls, double(editor.engine.time.framesPerSecond));
-            float width = ImGui::CalcTextSize(right).x;
-            ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowWidth() - width - 14));
-            ImGui::TextDisabled("%s", right);
-            ImGui::EndMenuBar();
-        }
-    }
-    ImGui::End();
-}
 
 // ---------------------------------------------------------------- the dock space and the panels
 
@@ -1687,10 +1934,8 @@ void EditorApp::buildDefaultLayout(ImGuiID dockSpace) {
     ImGui::DockBuilderDockWindow("Rendering", inspector);
     ImGui::DockBuilderDockWindow("Explorer", bottom);
     ImGui::DockBuilderDockWindow("Console", console ? console : bottom);
-    ImGui::DockBuilderDockWindow("Input", bottom);
     ImGui::DockBuilderDockWindow("Visual Script", bottom);
     ImGui::DockBuilderDockWindow("Timeline", bottom);
-    ImGui::DockBuilderDockWindow("Animation", bottom);
     ImGui::DockBuilderDockWindow("Animator", bottom);
     ImGui::DockBuilderFinish(dockSpace);
 }
@@ -1734,7 +1979,8 @@ void EditorApp::drawPanels() {
     for (size_t i = 0; i < editor.registry.panels.size(); i++) {
         Panel* panel = editor.registry.panels[i].value.get();
         if (!panel->isOpen) continue;
-        ImGui::SetNextWindowSize(ImVec2(420, 520), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(panel->firstSize(), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
         if (ImGui::Begin(panel->title.c_str(), &panel->isOpen, panel->windowFlags())) panel->draw(editor);
         ImGui::End();
     }
@@ -1743,8 +1989,8 @@ void EditorApp::drawPanels() {
         if (ImGui::FindWindowByName(editor.panelToFocus.c_str())) ImGui::SetWindowFocus(editor.panelToFocus.c_str());
         editor.panelToFocus.clear();
     }
-    // Clicking an asset or selecting something in the scene brings the Inspector (where both are
-    // shown) to the front of its tabs, without taking the keyboard from where it is.
+    // Clicking an asset brings the Explorer (where its viewer is) to the front of its tabs, and
+    // selecting something in the scene the Inspector, without taking the keyboard from where it is.
     static std::string shownAsset;
     static size_t shownSelection = 0;
     auto bringForward = [](const char* name) {
@@ -1754,12 +2000,23 @@ void EditorApp::drawPanels() {
     const AssetInfo* asset = editor.selectedAsset.empty() ? nullptr : editor.assets.find(editor.selectedAsset);
     if (editor.selectedAsset != shownAsset) {
         shownAsset = editor.selectedAsset;
-        if (asset) bringForward("Inspector");
+        if (asset) bringForward("Explorer");
     }
     size_t selection = editor.scene.selection().size();
     if (selection != shownSelection) {
         shownSelection = selection;
         if (selection > 0) bringForward("Inspector");
+    }
+    // Edit's Rename, Delete, Cut... are about what was chosen last: files, or things of the scene.
+    static std::string lastAsset;
+    static Entity lastPrimary;
+    if (editor.selectedAsset != lastAsset) {
+        lastAsset = editor.selectedAsset;
+        editor.projectIsActive = !editor.selectedAsset.empty();
+    }
+    if (editor.scene.primary() != lastPrimary) {
+        lastPrimary = editor.scene.primary();
+        if (lastPrimary.isValid()) editor.projectIsActive = false;
     }
 }
 
@@ -1783,14 +2040,14 @@ void EditorApp::drawProjectList() {
             int chosen = projectWindow_.chosenTemplate;
             std::string from = chosen >= 0 && chosen < int(templates_.size()) ? templates_[size_t(chosen)].directory : std::string();
             std::optional<Project> created = Project::create(projectWindow_.location, projectWindow_.name, &error, from);
-            if (created) openProject(created->directory);
+            if (created) openProjectWithFeedback(created->directory);
             else projectWindow_.error = error;
             break;
         }
-        case ProjectWindow::Action::Open: openProject(asked.path); break;
+        case ProjectWindow::Action::Open: openProjectWithFeedback(asked.path, asked.scene); break;
         case ProjectWindow::Action::OpenOther: {
             std::string folder = platform::chooseFolder("Choose the folder of a Molten Metal Engine project");
-            if (!folder.empty()) openProject(folder);
+            if (!folder.empty()) openProjectWithFeedback(folder);
             break;
         }
         case ProjectWindow::Action::ChooseLocation: {
@@ -1803,6 +2060,16 @@ void EditorApp::drawProjectList() {
             recent_.save(recentFile_);
             break;
         case ProjectWindow::Action::Reveal: platform::revealInFinder(asked.path); break;
+        case ProjectWindow::Action::Delete:
+            // To the Trash, where it can be taken back from; and off the list.
+            if (platform::moveToTrash(asked.path)) {
+                recent_.remove(asked.path);
+                recent_.save(recentFile_);
+                projectWindow_.error.clear();
+            } else {
+                projectWindow_.error = "Could not move " + asked.path + " to the Trash.";
+            }
+            break;
     }
 }
 

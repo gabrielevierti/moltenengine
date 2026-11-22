@@ -49,6 +49,8 @@ public:
         std::optional<Project> project = projectPath.empty() ? std::nullopt : Project::load(projectPath, &error);
         if (project) {
             engine.assets().setProjectDirectory(project->assetsDirectory());
+            engine.loadQuality(project->settingsDirectory());
+            engine.loadSettings(project->settingsDirectory());
             // What the game keeps for the player: settings, records. In the player's own folder,
             // named after the game (on a phone, inside the application's own).
             engine.preferencesFile = userDataDirectory(project->name.empty() ? std::string("Molten Game") : project->name) + "/Preferences.txt";

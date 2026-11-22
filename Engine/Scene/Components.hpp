@@ -30,7 +30,7 @@ struct Camera {
     }
 };
 
-enum class LightType : uint32_t { Directional = 0, Point = 1, Spot = 2 };
+enum class LightType : uint32_t { Directional = 0, Point = 1, Spot = 2, Area = 3 };
 
 /// A light shines along the -Z axis of its entity's Transform (directional and spot),
 /// or in every direction from its position (point).
@@ -43,6 +43,7 @@ struct Light {
     float outerConeAngle = radians(30.0f); // spot: darkness outside this half-angle
     bool castsShadows = false;             // honored for the first directional light (the sun)
     bool isEnabled = true;                 // off: it is there, and gives no light
+    Vec2 areaSize{2.0f, 1.0f};             // area: the glowing rectangle, meters across (x) and up (y), facing its -Z
 };
 
 /// Game logic attached to one entity. `update` runs once per frame, `fixedUpdate` once

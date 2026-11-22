@@ -32,10 +32,12 @@ struct PipelineDescription {
     std::string vertexFunction;
     std::string fragmentFunction;                           // empty for depth-only passes
     MTL::PixelFormat colorFormat = MTL::PixelFormatInvalid; // Invalid: no color attachment
+    MTL::PixelFormat secondColorFormat = MTL::PixelFormatInvalid;   // a second picture written by the same pass (its fragment function returns two colors)
     MTL::PixelFormat depthFormat = MTL::PixelFormatInvalid; // Invalid: no depth attachment
     int sampleCount = 1;
     BlendMode blend = BlendMode::Opaque;
     bool usesMeshVertices = false;                          // reads vertices through the mesh vertex descriptor
+    bool isLayered = false;                                 // its vertex function says which slice of a texture array each triangle goes into
 };
 
 class ShaderLibrary {
@@ -69,6 +71,10 @@ public:
     bool isValid() const { return library_.get() != nullptr; }
     /// The compiler's message from the last failed compilation; empty after a success.
     const std::string& lastError() const { return lastError_; }
+    /// Not empty when the shaders in use are not the full ones: the fullest did not compile and
+    /// the engine went on with less. It holds what the compiler said about the fullest, so that
+    /// an editor can say, and keep saying, that effects are missing and why.
+    const std::string& degradedError() const { return degraded_; }
 
 private:
     bool compile();
@@ -85,6 +91,7 @@ private:
     std::vector<std::string> files_;
     std::filesystem::file_time_type loadedTime_{};
     std::string lastError_;
+    std::string degraded_;
     bool allowRayTracing_ = false;
     bool hasRayTracing_ = false;
     bool hasExtras_ = false;

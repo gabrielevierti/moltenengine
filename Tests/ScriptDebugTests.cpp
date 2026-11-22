@@ -27,7 +27,7 @@ TEST(the_debugger_shows_values_and_holds_at_breakpoints) {
     graph.connect(multiply, "result", move, "offset");
     graph.connect(move, "then", turn, "in");
 
-    Debugger& debugger = Debugger::instance();
+    script::Debugger& debugger = script::Debugger::instance();
     debugger.clearSeen();
     debugger.breakpoints.clear();
     debugger.graph = "Scripts/Mover.graph";
@@ -62,7 +62,7 @@ TEST(the_debugger_shows_values_and_holds_at_breakpoints) {
     CHECK(std::abs(scene.get<Transform>(actor)->position.x - 1) < 1e-5f);       // not moved: held before it
     // Going on: the node held at runs, and the flow after it.
     debugger.wantsHold = false;
-    debugger.stopped = Debugger::Stop{};
+    debugger.stopped = script::Debugger::Stop{};
     debugger.breakpoints.clear();
     double ranTurn = debugger.ran[turn];
     run();
@@ -72,7 +72,7 @@ TEST(the_debugger_shows_values_and_holds_at_breakpoints) {
     debugger.stepsOnce = true;
     run();
     CHECK(debugger.stopped.node == move && !debugger.stepsOnce);
-    debugger.stopped = Debugger::Stop{};
+    debugger.stopped = script::Debugger::Stop{};
     debugger.stepsOnce = true;
     run();                                                                      // the held move runs; held again before Rotate
     CHECK(debugger.stopped.node == turn);

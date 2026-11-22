@@ -42,12 +42,16 @@ public:
     /// Returns true if the script changed (as opposed to the view of it).
     bool draw(script::Graph& graph, ImVec2 size);
 
-    /// Brings the nodes into view: after opening another script.
-    void resetView() { needsCentering_ = true; }
+    /// Brings the nodes into view: after opening another script (at once, not gliding there).
+    void resetView() {
+        needsCentering_ = true;
+        snapsView_ = true;
+    }
     int selectedNode() const { return selection_.empty() ? 0 : *selection_.begin(); }
-    float zoom() const { return zoom_; }
+    float zoom() const { return targetZoom_; }
     /// Zooms by a factor around the middle of the board, as the - and + buttons do.
     void zoomBy(float factor) { pendingZoom_ *= factor; }
+    /// Glides to show every node.
     void fitView() { needsCentering_ = true; }
 
 private:
@@ -70,6 +74,14 @@ private:
 
     ImVec2 scroll_{0, 0};                       // how far the board has been dragged
     float zoom_ = 1.0f, pendingZoom_ = 1.0f;
+    // The view glides to where it is asked to be, instead of jumping: zoom and scroll ease toward these.
+    ImVec2 targetScroll_{0, 0};
+    float targetZoom_ = 1.0f;
+    bool zoomsAboutPoint_ = false;              // a zoom keeps this point of the board under this point of the screen
+    ImVec2 zoomScreen_{0, 0}, zoomBoard_{0, 0};
+    bool snapsView_ = true;                     // the next placing of the view is at once
+    PinRef pendingConnect_;                     // a wire let go on the board: the node added there is plugged into it
+    int hoveredNode_ = 0;
     std::set<int> selection_;
     bool isBoxSelecting_ = false;
     ImVec2 boxStart_{0, 0};                     // on the board, in its own units

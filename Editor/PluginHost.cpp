@@ -67,6 +67,11 @@ void EditorContext::openPanel(const std::string& title) {
     panelToFocus = title;
 }
 
+void EditorContext::showProjectSettings(const std::string& page) {
+    projectSettingsPage = page;
+    openPanel("Project Settings");
+}
+
 void EditorContext::editGraph(const std::string& path) {
     graphToEdit = path;
     if (Panel* panel = registry.findPanel("Visual Script")) panel->isOpen = true;

@@ -1,5 +1,7 @@
 #include "Kit/Kit.hpp"
 #include "Kit/Character.hpp"
+#include "Kit/Network.hpp"
+#include "Kit/Shooting.hpp"
 #include "Kit/Navigation.hpp"
 #include "Kit/Spline.hpp"
 #include "Kit/Layout.hpp"
@@ -48,7 +50,7 @@ bool isCalled(World& world, Entity entity, const std::string& wanted) {
 }
 
 /// Where the player wants to go: the actions moveX and moveZ (W A S D, the arrows and the
-/// left stick, unless the project's Input window says otherwise). x to the right, z toward the viewer.
+/// left stick, unless the project's Input settings say otherwise). x to the right, z toward the viewer.
 Vec3 moveInput(const Input& input, bool alongX, bool alongZ) {
     Vec3 direction{0, 0, 0};
     if (alongX) direction.x = input.axis("moveX");
@@ -241,11 +243,41 @@ void Boat::fixedUpdate(World& world, Entity self, float dt) {
     }
 }
 
+void Boat::update(World& world, Entity, float) {
+    // For a dial, and for whoever asks: how fast it goes, as a car's speed and as a sailor's.
+    world.setValue("speed", std::abs(speed) * 3.6f);
+    world.setValue("knots", std::abs(speed) * 1.943844f);
+    if (sound.empty()) return;
+    if (voice == 0) {
+        voice = world.startSound(sound, 0.0f, 1.0f, true);
+        if (voice == 0) voice = ~0u;                            // no sound here: do not ask again every frame
+    }
+    // Idling it mutters; with the lever forward it is loud, and higher the faster the boat goes.
+    float effort = std::abs(throttle), pace = std::clamp(std::abs(speed) / std::max(topSpeed, 0.1f), 0.0f, 1.0f);
+    if (voice != ~0u) world.changeSound(voice, 0.22f + 0.5f * effort, 0.6f + 0.45f * effort + 0.35f * pace);
+}
+
 void Spin::update(World& world, Entity self, float dt) {
     if (Transform* transform = world.scene.get<Transform>(self)) {
         Quat turn = axisAngle(safeNormalize(axis), radians(degreesPerSecond) * dt);
         transform->rotation = simd::normalize(turn * transform->rotation);
     }
+}
+
+void Shuttle::update(World& world, Entity self, float dt) {
+    Transform* place = world.scene.get<Transform>(self);
+    if (!place) return;
+    if (!hasFrom) {
+        from = place->position;
+        hasFrom = true;
+    }
+    time += dt;
+    float leg = std::max(seconds, 0.01f) + std::max(waits, 0.0f);
+    float through = std::fmod(time, 2 * leg);
+    bool comesBack = through >= leg;
+    float along = saturate((comesBack ? through - leg : through) / std::max(seconds, 0.01f));
+    if (eases) along = along * along * (3 - 2 * along);
+    place->position = from + offset * (comesBack ? 1 - along : along);
 }
 
 void Mover::update(World& world, Entity self, float dt) {
@@ -301,6 +333,10 @@ void Health::damage(World& world, Entity self, float damageAmount) {
     if (const Transform* transform = world.scene.get<Transform>(self)) spawnEffect(world, deathEffect, transform->worldPosition());
     world.scene.destroy(self);
     if (restarts) world.reloadScene();
+}
+
+void Health::onMessage(World& world, Entity self, const Message& message) {
+    if (message.name == "damage" && message.number > 0) damage(world, self, message.number);
 }
 
 void Damage::hit(World& world, Entity self, Entity other) {
@@ -630,6 +666,8 @@ void AudioSource::update(World& world, Entity self, float) {
 void registerKit() {
     (void)engineTorque("i4", 1000);
     linkCharacters();
+    linkShooting();
+    linkNetwork();
     linkNavigation();
     linkSplines();
     linkTerrain();
@@ -668,7 +706,7 @@ void registerKit() {
     registry.setCategory("Joint", "Physics");
     registry.setCategory("Animator", "Animation");
     registry.setCategory("TwoBoneIK", "Animation");
-    registry.setCategory("TimelinePlayer", "Animation");
+    registry.setCategory("TimelinePlayer", "Hidden");
     ComponentRegistry::setDisplayName("TimelinePlayer", "Timeline Player");
     ComponentRegistry::setDisplayName("TwoBoneIK", "Two Bone IK");
     registry.setCategory("Water", "Environment");
@@ -688,7 +726,15 @@ void registerKit() {
     registry.setCategory("Flicker", "Effects");
     registry.setCategory("HudText", "UI");
     registry.setCategory("TouchStick", "UI");
-    for (const char* name : {"UILayout", "UIPanel", "UIImage", "UIButton", "UIBar", "UIGauge", "UISlider", "UITextField"}) registry.setCategory(name, "UI");
+    // The interface's basic pieces, from which anything is made: a panel, a picture, words, a button,
+    // a toggle, a slider, a box to type in, a bar, an arc, a layout that places the others.
+    for (const char* name : {"UILayout", "UIPanel", "UIImage", "UIButton", "UIToggle", "UIBar", "UISlider", "UITextField", "UIArc"}) registry.setCategory(name, "UI");
+    ComponentRegistry::setDisplayName("UIArc", "Arc");
+    ComponentRegistry::setDisplayName("UIToggle", "Toggle");
+    // Pieces made of pieces: kept for the scenes that have them, not offered any more. A gauge is made of arcs and texts.
+    for (const char* name : {"UIGauge", "UIMarks", "UINeedle"}) registry.setCategory(name, "Hidden");
+    ComponentRegistry::setDisplayName("UIMarks", "Dial Marks");
+    ComponentRegistry::setDisplayName("UINeedle", "Needle");
     // A touch button is a round Button: kept for scenes that have one, but not offered any more.
     registry.setCategory("TouchButton", "Hidden");
     for (auto [type, shown] : {std::pair<const char*, const char*>{"HudText", "Text"}, {"UIPanel", "Panel"}, {"UIImage", "Image"}, {"UIButton", "Button"},
@@ -728,6 +774,8 @@ MOLTEN_COMPONENT(Lifetime, MOLTEN_FIELD(seconds))
 MOLTEN_COMPONENT(LoadingScreen)
 MOLTEN_COMPONENT(Collectible, MOLTEN_FIELD(collector).picks("entityOrTag").help("Who can pick it up, by name; empty for anyone"),
                  MOLTEN_FIELD(counter).picks("value").help("The shared value that goes up"), MOLTEN_FIELD(amount), MOLTEN_FIELD(sound).picks("sound"), MOLTEN_FIELD(effect).picks("prefab"))
+MOLTEN_COMPONENT(Shuttle, MOLTEN_FIELD(offset).help("Where it goes to, from where it starts"), MOLTEN_FIELD(seconds).range(0.05f, 120).help("Each way"),
+                 MOLTEN_FIELD(waits).range(0, 60).help("Seconds at each end"), MOLTEN_FIELD(eases).help("Slows into each end"))
 MOLTEN_COMPONENT(Health, MOLTEN_FIELD(amount), MOLTEN_FIELD(counter).picks("value").help("A shared value that shows it, for the screen"), MOLTEN_FIELD(scoreCounter).picks("value"),
                  MOLTEN_FIELD(points), MOLTEN_FIELD(effect).picks("prefab").help("A prefab spawned where it died"), MOLTEN_FIELD(restartsSceneOnDeath))
 MOLTEN_COMPONENT(Damage, MOLTEN_FIELD(amount), MOLTEN_FIELD(onlyTo).picks("entityOrTag").help("If set: only entities whose name starts with this"), MOLTEN_FIELD(destroysSelf))
@@ -969,6 +1017,67 @@ void UIGauge::draw(World& world, Entity self, Canvas& canvas) {
     if (!label.empty()) canvas.text(label, Vec2{middle.x, middle.y + radius * (showsValue ? 0.62f : 0.32f)}, std::max(radius * 0.14f, 8.0f), Vec4{1, 1, 1, 0.55f}, TextAlign::Center);
 }
 
+namespace {
+/// How far along a value is, eased: a needle and a dial have weight. Before the game sets it (the
+/// editor), two thirds, to be seen.
+float easedShare(World& world, const std::string& value, float most, float& shown) {
+    if (value.empty()) return 1.0f;
+    float target = world.hasValue(value) ? world.value(value) : most * 0.66f;
+    shown += (target - shown) * std::min(1.0f, world.time.unscaledDelta * 12.0f);
+    return most > 0 ? saturate(shown / most) : 0.0f;
+}
+}  // namespace
+
+void UIArc::draw(World& world, Entity self, Canvas& canvas) {
+    InterfaceClip clip(world, self, canvas);
+    gScreen = canvas.size();
+    Vec2 middle = placeOnScreen(gScreen, anchor, offset);
+    float share = easedShare(world, value, most, shown);
+    float from = radians(startAngle), to = from + radians(sweep) * share;
+    if (share <= 0.002f || thickness <= 0) return;
+    if (thickness >= radius * 0.98f && sweep >= 359.9f) {
+        canvas.circle(middle, radius, color);
+        return;
+    }
+    canvas.arc(middle, radius - thickness * 0.5f, from, to, thickness, color);
+}
+
+void UIMarks::draw(World& world, Entity self, Canvas& canvas) {
+    InterfaceClip clip(world, self, canvas);
+    gScreen = canvas.size();
+    Vec2 middle = placeOnScreen(gScreen, anchor, offset);
+    if (every <= 0 || most <= 0) return;
+    int count = int(most / every + 0.5f);
+    float numberSize = std::max(radius * 0.17f, 8.0f);
+    float from = radians(startAngle), span = radians(sweep);
+    for (int i = 0; i <= count * 2; i++) {
+        float at = float(i) * 0.5f * every / most;
+        if (at > 1.0001f) break;
+        float angle = from + span * at;
+        Vec2 direction{std::cos(angle), std::sin(angle)};
+        bool isLong = i % 2 == 0;
+        float inner = radius - (isLong ? radius * 0.15f : radius * 0.08f);
+        canvas.line(middle + direction * inner, middle + direction * radius, isLong ? 2.0f : 1.2f, Vec4{color.x, color.y, color.z, color.w * (isLong ? 1.0f : 0.55f)});
+        if (isLong && showsNumbers) {
+            char number[16];
+            std::snprintf(number, sizeof(number), "%g", double(std::round(float(i / 2) * every * numbersScale * 10) / 10));
+            Vec2 place = middle + direction * (inner - numberSize * 0.9f);
+            canvas.text(number, Vec2{place.x, place.y - numberSize * 0.6f}, numberSize, Vec4{color.x, color.y, color.z, color.w * 0.9f}, TextAlign::Center);
+        }
+    }
+}
+
+void UINeedle::draw(World& world, Entity self, Canvas& canvas) {
+    InterfaceClip clip(world, self, canvas);
+    gScreen = canvas.size();
+    Vec2 middle = placeOnScreen(gScreen, anchor, offset);
+    float share = easedShare(world, value, most, shown);
+    float angle = radians(startAngle) + radians(sweep) * share;
+    Vec2 direction{std::cos(angle), std::sin(angle)};
+    canvas.line(middle - direction * radius * 0.15f, middle + direction * radius, thickness, color);
+    canvas.circle(middle, thickness * 1.6f + 1.5f, Vec4{0.9f, 0.9f, 0.92f, 1});
+}
+
 void UIBar::draw(World& world, Entity self, Canvas& canvas) {
     InterfaceClip clip(world, self, canvas);
     gScreen = canvas.size();
@@ -1003,12 +1112,27 @@ MOLTEN_COMPONENT(UIGauge, MOLTEN_FIELD(value).picks("value").help("The shared va
                  MOLTEN_FIELD(redFrom).range(0, 1).help("Where the red part of the arc starts, as a share; 0 for none"), MOLTEN_FIELD(label), MOLTEN_FIELD(showsValue),
                  MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(radius).range(16, 300), MOLTEN_FIELD(thickness).range(1, 40),
                  MOLTEN_FIELD(color).color(), MOLTEN_FIELD(backColor).color())
+MOLTEN_COMPONENT(UIArc, MOLTEN_FIELD(value).picks("value").help("Filled as far as this shared value is of Most; empty: all of it"), MOLTEN_FIELD(most),
+                 MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(radius).range(2, 600), MOLTEN_FIELD(thickness).range(0, 600),
+                 MOLTEN_FIELD(startAngle).range(-360, 360).help("Degrees, clockwise from the right: 135 is the lower left"),
+                 MOLTEN_FIELD(sweep).range(0, 360).help("How far round it goes, in degrees"), MOLTEN_FIELD(color).color())
+MOLTEN_COMPONENT(UIMarks, MOLTEN_FIELD(most), MOLTEN_FIELD(every).help("A numbered mark at each multiple of this"),
+                 MOLTEN_FIELD(numbersScale).help("The numbers as written: 0.001 writes rpm in thousands"), MOLTEN_FIELD(showsNumbers),
+                 MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(radius).range(2, 600), MOLTEN_FIELD(startAngle).range(-360, 360),
+                 MOLTEN_FIELD(sweep).range(0, 360), MOLTEN_FIELD(color).color())
+MOLTEN_COMPONENT(UINeedle, MOLTEN_FIELD(value).picks("value").help("The shared value it points at"), MOLTEN_FIELD(most), MOLTEN_FIELD(anchor),
+                 MOLTEN_FIELD(offset), MOLTEN_FIELD(radius).range(2, 600), MOLTEN_FIELD(thickness).range(0.5f, 20), MOLTEN_FIELD(startAngle).range(-360, 360),
+                 MOLTEN_FIELD(sweep).range(0, 360), MOLTEN_FIELD(color).color())
 MOLTEN_COMPONENT(UIBar, MOLTEN_FIELD(value).picks("value").help("The shared value it shows: health"), MOLTEN_FIELD(most), MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(size),
                  MOLTEN_FIELD(color).color(), MOLTEN_FIELD(backColor).color())
 MOLTEN_COMPONENT(UISlider, MOLTEN_FIELD(label), MOLTEN_FIELD(value).picks("value").help("The shared value it shows and sets: volume"),
                  MOLTEN_FIELD(isSaved).help("Kept between plays, as a preference of that name"), MOLTEN_FIELD(least), MOLTEN_FIELD(most),
                  MOLTEN_FIELD(step).help("It moves by this much; 0 smoothly"), MOLTEN_FIELD(showsNumber), MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset),
                  MOLTEN_FIELD(size), MOLTEN_FIELD(color).color(), MOLTEN_FIELD(backColor).color(), MOLTEN_FIELD(textColor).color())
+MOLTEN_COMPONENT(UIToggle, MOLTEN_FIELD(label), MOLTEN_FIELD(value).picks("value").help("The shared value it shows and sets, 1 ticked or 0: sound"),
+                 MOLTEN_FIELD(isOn).help("Ticked at the start, when the value has not been set yet"), MOLTEN_FIELD(isSaved).help("Kept between plays, as a preference of that name"),
+                 MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(size), MOLTEN_FIELD(color).color(), MOLTEN_FIELD(backColor).color(),
+                 MOLTEN_FIELD(textColor).color())
 MOLTEN_COMPONENT(UITextField, MOLTEN_FIELD(value).picks("value").help("The shared text it shows and sets: playerName. Shown by a text as {playerName}"),
                  MOLTEN_FIELD(placeholder).help("Shown faintly while it is empty"), MOLTEN_FIELD(maxLength).range(0, 200),
                  MOLTEN_FIELD(isSaved).help("Kept between plays"), MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset), MOLTEN_FIELD(size), MOLTEN_FIELD(color).color(),
@@ -1034,7 +1158,8 @@ MOLTEN_COMPONENT(Boat, MOLTEN_FIELD(acceleration).range(0, 40).help("Meters per 
                  MOLTEN_FIELD(topSpeed).range(0, 80), MOLTEN_FIELD(turnSpeed).range(0, 180).help("Degrees per second at full rudder"),
                  MOLTEN_FIELD(reverse).range(0, 1).help("Of the acceleration, going backwards"),
                  MOLTEN_FIELD(usesInput).help("Driven by the move actions. Off: by throttle and steer, from code"),
-                 MOLTEN_FIELD(throttle).range(-1, 1), MOLTEN_FIELD(steer).range(-1, 1))
+                 MOLTEN_FIELD(throttle).range(-1, 1), MOLTEN_FIELD(steer).range(-1, 1),
+                 MOLTEN_FIELD(sound).picks("sound").help("Its engine: a sound in Assets that loops, louder and higher with the throttle. Empty: silent"))
 MOLTEN_COMPONENT(AudioSource, MOLTEN_FIELD(clip).picks("sound").help("A sound in Assets, like Audio/music.wav"), MOLTEN_FIELD(volume).range(0, 2), MOLTEN_FIELD(pitch).range(0.1f, 4),
                  MOLTEN_FIELD(loops), MOLTEN_FIELD(playsOnStart),
                  MOLTEN_FIELD(group).choices({"Effects", "Music", "Voices", "Interface"}).help("Which volume it follows"),

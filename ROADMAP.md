@@ -52,7 +52,7 @@ The base the rest builds on. Each `[~]` says what it still lacks.
 **Editor**
 - [x] Scene and Game views, docking, saved layouts, Hierarchy, Inspector, Explorer with previews, Viewer, Console
 - [x] Move, rotate, scale gizmos; snapping; grid; several objects edited together; undo and redo
-- [x] Run, Hold, Frame; the interface laid out by dragging in the Game view
+- [x] Play, Pause, Step; the interface laid out by dragging in the Game view
 - [x] Material editor, effect editor, visual script editor
 - [x] Export to iPhone and iPad from the editor, with the game's icon
 
@@ -64,6 +64,31 @@ The base the rest builds on. Each `[~]` says what it still lacks.
 - [x] Driving: a circuit, a Fiat 500 from its parts, four rivals, start lights, pit stops, weather, menus, touch controls
 
 ---
+
+## 1.1 — Everything works with everything
+
+- [x] The launcher: the logo poured in, the projects on the left, the chosen one shown and asked about before it opens; loading screens for opening a project, a scene, building the code and exporting
+- [x] The editor is an application with its icon (build/Molten Metal Engine.app); the engine finds its own files from the build folder
+- [x] The Explorer: several chosen at once, Delete to the Trash, Cut and Paste and Move To, dragging many; scenes, prefabs and materials follow a file that moves
+- [x] The Hierarchy: dropped between two rows, beside them in that order; under a parent between its children; several at once; Delete and Cmd+Backspace
+- [x] C++ to visual script for code written by hand, not only for code made from a graph; what has no box is named
+- [x] Visual scripting: a new board (gliding zoom, a map, wires that suggest the node to add), following the chosen entity and showing its own values
+- [x] Particle systems made of modules as in Unity; no presets to start from; local or world space; a smooth line behind a moving emitter; buoyancy, curl noise, soft and lit particles
+- [x] The night lit by the moon; heaped clouds lit gold at sunset; lens dirt
+- [x] The interface's basic pieces only, and a Toggle
+
+## 1.2 — A game from the first minute
+
+- [x] The launcher again: the projects on the left, the chosen one's scenes, files and numbers on the right, a progress bar that fills smoothly
+- [x] Six templates to start from, none with code of its own: a car, a plane, a boat, a figure seen from behind (walking, running and jumping, animated), a rifle seen from the eyes, and the garden for several players
+- [x] Each template made by the tests and played by them to its end, without a screen
+- [x] A figure with bones and five clips made in code, its walk and run worked out from the feet so that they do not slide
+- [x] First person: a view the mouse turns, a weapon with a magazine and a reserve, targets, machines that hunt, things to pick up
+- [x] The pointer taken by a game that looks about with the mouse, and given back with Esc
+- [x] Playing together: a host or a server and those who join, over UDP, with what must arrive arriving once and in order; a session and a "networked" component, and nothing to write for a game that needs no more
+- [x] Clouds with depth, marched; water seen through; ray traced light at about a ray a pixel
+- [x] Quality in seven groups and four levels, which a scene's own settings cannot exceed; dynamic resolution that works
+- [x] Draw calls counted by kind (the scene's own, its shadows, depth, full-screen passes), and fewer of them: the sun's shadow cascades in one pass, and no shadow pass where nothing casts one
 
 ## Phase 1 — Fast, and shippable
 
@@ -97,7 +122,7 @@ The next game after Driving: someone who walks, runs and jumps.
       it goes up), stands on slopes it can walk and slides off steeper ones, shoves bodies that move
 - [x] **Character mover and orbit camera**: walk and run where the input says, seen from the camera; jump, with a moment's
       grace after an edge; a camera turned with the mouse or the right stick that comes closer rather than go through a wall.
-      [x] Blending from one camera to another: Camera Shots and a Camera Director (Create > Camera Shot)
+      [x] Blending from one camera to another: Camera Shots and a Camera Director (Entity > Camera Shot)
 - [x] **Animator with states**: a `.animator` file of parameters, states (one clip, or a blend tree of clips by a number,
       kept in step), and transitions on conditions, after an exit time, eased over a time of their own; the character mover
       sets `speed`, `grounded`, `verticalSpeed` and `jump` by itself
@@ -107,6 +132,10 @@ The next game after Driving: someone who walks, runs and jumps.
 - [x] **Animator window**: the controller as a graph of states and transitions, parameters and layers, lit while the game runs
 - [x] **Animation from scripts**: Set Animator Float/Bool/Trigger, Play State, Play Clip; events as messages
 - [x] **No typed names**: every field and visual-script box that names something offers a list of what it can be
+- [x] **Animations of an entity's own**, keyed in the Timeline with Record; procedural tracks (wave, wander, a parameter); Time by
+- [x] **Simulated atmosphere** (Rayleigh, Mie, ozone), flyable volumetric clouds at a height, lens flare, limb-darkened sun
+- [x] **Water on any plane**: waves that rise, depth-tinted shallows, foam round what stands in it
+- [x] **Project quality settings** (Settings/Quality.settings), area lights, particle pictures and collisions, trackball rotation
 - [ ] **GPU skinning**, and **blend shapes** (faces)
 - [x] **Two-bone IK**: a foot or a hand on a target, the knee or elbow toward a pole
 - [x] **Navigation**: a Navigation Area finds the walkable ground (slope, steps, room for the agents' size); paths by A*,
@@ -149,7 +178,7 @@ The next game after Driving: someone who walks, runs and jumps.
 - [x] **Git in the editor**: changed files and how, commit, history, pull and push (Window > Source Control)
 - [ ] Scenes written to merge well (parents by name, not by number)
 - [ ] **Frame debugger**: the passes of one frame, each one's result, step by step
-- [x] **Keyboard shortcut editor**, editor themes (Edit > Editor Settings)
+- [x] **Keyboard shortcut editor**, editor themes (Edit > Preferences)
 
 ## Phase 6 — Making games faster
 
@@ -197,9 +226,9 @@ The five above are drawn by the GPU: written and built, to be seen on the Mac.
 - [ ] Audio buses, effects, reverb zones, ducking, adaptive music
 - [ ] Ragdolls, cloth, ropes with links, soft bodies, destruction
 - [ ] Continuous collision detection (fast bullets)
-- [ ] Multiplayer: start from Game Center matches between friends; servers, prediction and rollback only for a game made for it
+- [~] Multiplayer: [x] a host, a server and those who join, on a local network or by address (1.2) — [ ] finding games without typing an address, Game Center matches between friends, taking over when the host leaves; prediction and rollback only for a game made for it
 - [ ] Occlusion culling, HLOD, world streaming, additive scenes — for large worlds
-- [ ] FBX and USD import (glTF covers most models today)
+- [ ] FBX and USD import (glTF covers most models today; a character from a library of animations is brought in as .glb: see Docs/MakingGames.md)
 - [ ] Compressed textures (ASTC), streamed audio, asset bundles
 - [ ] A 2D engine: sprites, atlases, tilemaps, 2D physics and lights — almost an engine of its own; only for a 2D game
 - [ ] Modding support

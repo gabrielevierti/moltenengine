@@ -68,6 +68,7 @@ bool ShaderLibrary::compile() {
     ShaderSource source = ShaderSource::load(directory_);
     files_ = source.files;
     loadedTime_ = newestFileTime();
+    degraded_.clear();
     if (!source.error.empty()) {
         lastError_ = source.error;
         logError("shaders: %s", lastError_.c_str());
@@ -97,6 +98,8 @@ bool ShaderLibrary::compile() {
             logError("the project's surface shaders did not compile, and are left out:\n%s", surfaceError_.c_str());
         }
         if (compileVariant(source.text, variant.rayTracing, variant.extras, false)) return true;
+        // The first that fails is the fullest this machine can run: whatever comes after is less.
+        if (degraded_.empty()) degraded_ = lastError_;
         logWarning("the shaders did not compile%s%s; trying with less", variant.rayTracing ? " with ray tracing" : "", variant.extras ? " with the extras" : "");
     }
     return false;
@@ -185,9 +188,13 @@ MTL::RenderPipelineState* ShaderLibrary::pipeline(const PipelineDescription& des
     std::string key = description.vertexFunction + "|" + description.fragmentFunction + "|" +
                       std::to_string(int(description.colorFormat)) + "|" + std::to_string(int(description.depthFormat)) + "|" +
                       std::to_string(description.sampleCount) + "|" + std::to_string(int(description.blend)) + "|" +
-                      (description.usesMeshVertices ? "mesh" : "none");
+                      (description.usesMeshVertices ? "mesh" : "none") + (description.isLayered ? "|layered" : "") +
+                      (description.secondColorFormat != MTL::PixelFormatInvalid ? "|+" + std::to_string(int(description.secondColorFormat)) : "");
+    // One that could not be made is kept too, as nothing: asked for again every frame, it
+    // would fail again every frame, and say so every frame.
     auto found = pipelines_.find(key);
     if (found != pipelines_.end()) return found->second.get();
+    pipelines_[key] = NS::SharedPtr<MTL::RenderPipelineState>();
 
     auto descriptor = NS::TransferPtr(MTL::RenderPipelineDescriptor::alloc()->init());
     descriptor->setLabel(toNSString(key));
@@ -207,6 +214,8 @@ MTL::RenderPipelineState* ShaderLibrary::pipeline(const PipelineDescription& des
         descriptor->setFragmentFunction(fragmentFunction.get());
     }
     if (description.usesMeshVertices) descriptor->setVertexDescriptor(meshVertexDescriptor_.get());
+    // Metal asks what is drawn (triangles) of a pipeline that chooses the slice it draws into.
+    if (description.isLayered) descriptor->setInputPrimitiveTopology(MTL::PrimitiveTopologyClassTriangle);
 
     if (description.colorFormat != MTL::PixelFormatInvalid) {
         MTL::RenderPipelineColorAttachmentDescriptor* color = descriptor->colorAttachments()->object(0);
@@ -227,6 +236,9 @@ MTL::RenderPipelineState* ShaderLibrary::pipeline(const PipelineDescription& des
                 color->setDestinationAlphaBlendFactor(MTL::BlendFactorOne);
             }
         }
+    }
+    if (description.secondColorFormat != MTL::PixelFormatInvalid) {
+        descriptor->colorAttachments()->object(1)->setPixelFormat(description.secondColorFormat);
     }
     descriptor->setDepthAttachmentPixelFormat(description.depthFormat);
     descriptor->setRasterSampleCount(NS::UInteger(description.sampleCount));

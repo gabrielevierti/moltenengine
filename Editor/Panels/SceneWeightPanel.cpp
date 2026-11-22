@@ -123,8 +123,13 @@ private:
 
 }  // namespace
 
-void registerSceneWeightPanel(EditorContext& editor) {
-    editor.registry.addPanel(nullptr, std::make_unique<SceneWeightPanel>());
+void registerSceneWeightPanel(EditorContext&) {
+    // A page of the Profiler now (drawSceneWeightPage), not a window of its own.
+}
+
+void drawSceneWeightPage(EditorContext& editor) {
+    static SceneWeightPanel page;
+    page.draw(editor);
 }
 
 }  // namespace molten::editor

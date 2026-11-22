@@ -1,4 +1,5 @@
 #include "SceneDocument.hpp"
+#include "Assets/AssetDatabase.hpp"
 
 #include "Core/TextFile.hpp"
 
@@ -26,6 +27,54 @@ void SceneDocument::resetHistory() {
     undo_.clear();
     redo_.clear();
     touched_ = false;
+}
+
+void fitColliderToMesh(Collider& collider, const AABB& meshBounds, Vec3 scale) {
+    Vec3 size{std::abs(scale.x), std::abs(scale.y), std::abs(scale.z)};
+    Vec3 half = meshBounds.halfExtents() * size;
+    Vec3 offset = meshBounds.center() * scale;
+    if (half.y < 0.02f) {
+        // Nothing is as thin as a plane: a slab under it, its top where the plane is.
+        half.y = 0.5f;
+        offset.y -= 0.5f;
+    }
+    collider.halfExtents = simd::max(half, Vec3{0.01f, 0.01f, 0.01f});
+    collider.radius = collider.shape == ColliderShape::Sphere ? std::max({half.x, half.y, half.z}) : std::max(half.x, half.z);
+    collider.halfHeight = std::max(half.y - collider.radius, 0.0f);
+    collider.offset = offset;
+}
+
+bool isColliderFitted(const Collider& collider, const AABB& meshBounds, Vec3 scale) {
+    if (collider.shape == ColliderShape::Mesh) return false;
+    Collider fitted = collider;
+    fitColliderToMesh(fitted, meshBounds, scale);
+    auto near = [](float a, float b) { return std::abs(a - b) <= 0.002f + 0.01f * std::max(std::abs(a), std::abs(b)); };
+    auto nearVec = [&](Vec3 a, Vec3 b) { return near(a.x, b.x) && near(a.y, b.y) && near(a.z, b.z); };
+    if (!nearVec(collider.offset, fitted.offset)) return false;
+    if (collider.shape == ColliderShape::Box) return nearVec(collider.halfExtents, fitted.halfExtents);
+    if (collider.shape == ColliderShape::Sphere) return near(collider.radius, fitted.radius);
+    return near(collider.radius, fitted.radius) && near(collider.halfHeight, fitted.halfHeight);
+}
+
+void SceneDocument::keepCollidersFitted() {
+    Scene& scene = engine_.scene;
+    std::vector<ScaleSeen> now;
+    for (Entity entity : selection_) {
+        const Transform* transform = scene.get<Transform>(entity);
+        if (!transform) continue;
+        Vec3 scale = transform->scale;
+        for (const ScaleSeen& seen : scaleSeen_) {
+            if (seen.entity != entity || (seen.scale.x == scale.x && seen.scale.y == scale.y && seen.scale.z == scale.z)) continue;
+            Collider* collider = scene.get<Collider>(entity);
+            const MeshRenderer* renderer = scene.get<MeshRenderer>(entity);
+            if (collider && renderer && renderer->mesh && isColliderFitted(*collider, renderer->mesh->bounds(), seen.scale)) {
+                fitColliderToMesh(*collider, renderer->mesh->bounds(), scale);
+                markChanged();
+            }
+        }
+        now.push_back(ScaleSeen{entity, scale});
+    }
+    scaleSeen_ = std::move(now);
 }
 
 std::string SceneDocument::displayName() const {
@@ -82,6 +131,25 @@ void SceneDocument::keepPartPlace(Entity part) {
 void SceneDocument::rebuild() {
     restore(snapshot());
     markChanged();
+}
+
+void SceneDocument::retargetAsset(const std::string& from, const std::string& to) {
+    auto moved = [&](std::string& text) { text = AssetDatabase::replaceReferences(text, from, to); };
+    for (std::string& step : undo_) moved(step);
+    for (std::string& step : redo_) moved(step);
+    moved(saved_);
+    if (isPlaying_) {
+        // The game keeps what it has until it stops; the scene it goes back to has the new path.
+        moved(beforePlay_);
+        return;
+    }
+    std::string now = snapshot();
+    std::string changed = AssetDatabase::replaceReferences(now, from, to);
+    if (changed == now) return;
+    bool wasSaved = current_ == saved_ || AssetDatabase::replaceReferences(current_, from, to) == saved_;
+    restore(changed);
+    current_ = snapshot();
+    if (wasSaved) saved_ = current_;
 }
 
 void SceneDocument::restore(const std::string& text) {
@@ -320,10 +388,16 @@ Entity SceneDocument::create(Primitive kind, Entity parent) {
             scene.add(entity, MeshRenderer{assets.sphere(), material});
             scene.add(entity, Collider::sphere(0.5f));
             break;
-        case Primitive::Plane:
+        case Primitive::Plane: {
+            // Ten meters a side, as Unity's is: a floor to put things on, and solid like one.
             transform.position.y += 0.01f;
+            transform.scale = Vec3{10, 1, 10};
             scene.add(entity, MeshRenderer{assets.plane(), material});
+            Collider slab;
+            fitColliderToMesh(slab, assets.plane()->bounds(), transform.scale);
+            scene.add(entity, slab);
             break;
+        }
         case Primitive::Cylinder:
             transform.position.y += 0.5f;
             scene.add(entity, MeshRenderer{assets.cylinder(), material});
@@ -364,10 +438,24 @@ Entity SceneDocument::create(Primitive kind, Entity parent) {
             scene.add(entity, camera);
             break;
         }
-        case Primitive::ParticleEmitter:
+        case Primitive::ParticleEmitter: {
+            // As a new system starts in Unity: soft white particles rising in a cone, to shape from there.
             transform.position.y += 0.2f;
-            scene.add(entity, ParticleEmitter{});
+            ParticleEmitter emitter;
+            emitter.rate = 20;
+            emitter.lifetimeMin = 1.5f, emitter.lifetimeMax = 2.5f;
+            emitter.speedMin = 1.0f, emitter.speedMax = 2.0f;
+            emitter.spread = radians(25.0f);
+            emitter.spawnRadius = 0.1f;
+            emitter.gravity = Vec3{0, 0, 0};
+            emitter.drag = 0.2f;
+            emitter.sizeStart = 0.25f, emitter.sizeEnd = 0.05f;
+            emitter.colorStart = Vec4{1, 1, 1, 1}, emitter.colorEnd = Vec4{1, 1, 1, 0};
+            emitter.isAdditive = false;
+            emitter.softness = 0.2f;
+            scene.add(entity, emitter);
             break;
+        }
     }
     scene.add(entity, transform);
     entities_.push_back(entity);
@@ -513,8 +601,7 @@ Entity SceneDocument::duplicate(Entity entity) {
     return copy;
 }
 
-void SceneDocument::duplicateSelection() {
-    // Only the top of each selected tree: a selected child of a selected parent comes along anyway.
+std::vector<Entity> SceneDocument::selectionTops() const {
     std::vector<Entity> tops;
     for (Entity entity : selection_) {
         const Transform* transform = engine_.scene.get<Transform>(entity);
@@ -524,6 +611,12 @@ void SceneDocument::duplicateSelection() {
         }
         if (transform && !underAnother) tops.push_back(entity);
     }
+    return tops;
+}
+
+void SceneDocument::duplicateSelection() {
+    // Only the top of each selected tree: a selected child of a selected parent comes along anyway.
+    std::vector<Entity> tops = selectionTops();
     std::vector<Entity> copies;
     for (Entity entity : tops) {
         Entity copy = duplicate(entity);
@@ -536,6 +629,180 @@ void SceneDocument::deleteSelection() {
     if (selection_.empty()) return;
     for (Entity entity : selection_) engine_.scene.destroy(entity);    // children go with their parent
     selection_.clear();
+    markChanged();
+}
+
+// ---------------------------------------------------------------- copy and paste, and the Entity menu
+
+std::string SceneDocument::copySelection() {
+    Scene& scene = engine_.scene;
+    std::vector<Entity> tops = selectionTops();
+    if (tops.empty()) return {};
+    scene.updateTransforms();
+    // The trees, in the order the scene has them. A top is written where it is in the world:
+    // what it was under may not be where it is pasted.
+    std::vector<Entity> tree;
+    for (Entity entity : entities_) {
+        for (Entity top : tops) {
+            if (entity == top || isDescendant(entity, top)) {
+                tree.push_back(entity);
+                break;
+            }
+        }
+    }
+    std::vector<Transform> kept;
+    for (Entity top : tops) {
+        Transform* transform = scene.get<Transform>(top);
+        kept.push_back(*transform);
+        decompose(transform->world, transform->position, transform->rotation, transform->scale);
+        transform->parent = Entity{};
+    }
+    std::string text = writeScene(scene, materials, RenderSettings{}, &tree);
+    for (size_t i = 0; i < tops.size(); i++) *scene.get<Transform>(tops[i]) = kept[i];
+    return text;
+}
+
+bool SceneDocument::isEntityText(const std::string& text) {
+    return text.rfind("molten-scene ", 0) == 0 && text.find("\nentity ") != std::string::npos;
+}
+
+std::vector<Entity> SceneDocument::paste(const std::string& text, Entity beside) {
+    Scene& scene = engine_.scene;
+    if (!isEntityText(text)) return {};
+    std::vector<NamedMaterial> pastedMaterials;
+    RenderSettings ignored;
+    std::vector<Entity> created;
+    if (!readScene(text, scene, pastedMaterials, ignored, sceneAssets(engine_.assets()), &created) || created.empty()) return {};
+    // Materials the scene already has by that name are used; the others join it.
+    for (const NamedMaterial& named : pastedMaterials) {
+        std::shared_ptr<Material> existing;
+        for (const NamedMaterial& mine : materials) {
+            if (mine.name == named.name) existing = mine.material;
+        }
+        if (!existing) {
+            materials.push_back(named);
+            continue;
+        }
+        for (Entity entity : created) {
+            MeshRenderer* renderer = scene.get<MeshRenderer>(entity);
+            if (renderer && renderer->material == named.material) renderer->material = existing;
+        }
+    }
+    for (Entity entity : created) entities_.push_back(entity);
+    scene.updateTransforms();
+    Entity parent;
+    if (const Transform* place = scene.get<Transform>(beside)) parent = place->parent;
+    std::vector<Entity> tops;
+    for (Entity entity : created) {
+        const Transform* transform = scene.get<Transform>(entity);
+        if (!transform || scene.isAlive(transform->parent)) continue;
+        tops.push_back(entity);
+        if (scene.isAlive(parent)) reparent(entity, parent);
+    }
+    scene.updateTransforms();
+    selection_ = tops;
+    markChanged();
+    return tops;
+}
+
+void SceneDocument::selectChildren() {
+    std::vector<Entity> all = selection_;
+    for (Entity entity : entities_) {
+        if (isSelected(entity)) continue;
+        for (Entity chosen : selection_) {
+            if (isDescendant(entity, chosen)) {
+                all.push_back(entity);
+                break;
+            }
+        }
+    }
+    selection_ = all;
+}
+
+void SceneDocument::invertSelection() {
+    std::vector<Entity> others;
+    for (Entity entity : entities_) {
+        if (!isSelected(entity)) others.push_back(entity);
+    }
+    selection_ = others;
+}
+
+Entity SceneDocument::groupSelection() {
+    Scene& scene = engine_.scene;
+    std::vector<Entity> tops = selectionTops();
+    if (tops.empty()) return Entity{};
+    scene.updateTransforms();
+    Vec3 middle{0, 0, 0};
+    for (Entity top : tops) middle += scene.get<Transform>(top)->worldPosition();
+    middle = middle / float(tops.size());
+    // Under what the first of them was under, where it was in the list.
+    Entity parent = scene.get<Transform>(tops.front())->parent;
+    Entity group = create(Primitive::Empty, parent);
+    if (Name* name = scene.get<Name>(group)) name->value = "Group";
+    scene.updateTransforms();
+    setWorldMatrix(group, compose(middle, Quat{}, Vec3{1, 1, 1}));
+    scene.updateTransforms();
+    moveBeside(group, tops.front(), false);
+    for (Entity top : tops) reparent(top, group);
+    scene.updateTransforms();
+    select(group);
+    markChanged();
+    return group;
+}
+
+void SceneDocument::clearParentOfSelection() {
+    engine_.scene.updateTransforms();
+    for (Entity top : selectionTops()) reparent(top, Entity{});
+    engine_.scene.updateTransforms();
+}
+
+void SceneDocument::moveSelectionInOrder(bool first) {
+    Scene& scene = engine_.scene;
+    std::vector<Entity> tops = selectionTops();
+    // Going first, the last of them is moved first, so that they keep their order among themselves.
+    if (first) std::reverse(tops.begin(), tops.end());
+    for (Entity top : tops) {
+        const Transform* transform = scene.get<Transform>(top);
+        if (!transform) continue;
+        std::vector<Entity> siblings = scene.isAlive(transform->parent) ? children(transform->parent) : roots();
+        siblings.erase(std::remove(siblings.begin(), siblings.end(), top), siblings.end());
+        if (siblings.empty()) continue;
+        moveBeside(top, first ? siblings.front() : siblings.back(), !first);
+    }
+}
+
+void SceneDocument::toggleSelectionActive() {
+    Scene& scene = engine_.scene;
+    bool anyOff = false;
+    for (Entity entity : selection_) {
+        const Transform* transform = scene.get<Transform>(entity);
+        if (transform && !transform->isActive) anyOff = true;
+    }
+    for (Entity entity : selection_) {
+        if (Transform* transform = scene.get<Transform>(entity)) transform->isActive = anyOff;
+    }
+    if (!selection_.empty()) markChanged();
+}
+
+void SceneDocument::moveSelectionToView() {
+    Scene& scene = engine_.scene;
+    std::vector<Entity> tops = selectionTops();
+    if (tops.empty()) return;
+    scene.updateTransforms();
+    // The middle of them goes to the view's pivot; each keeps its place around that middle.
+    Vec3 middle{0, 0, 0};
+    for (Entity top : tops) middle += scene.get<Transform>(top)->worldPosition();
+    middle = middle / float(tops.size());
+    Vec3 offset = cameraPosition + cameraForward() * orbitDistance - middle;
+    for (Entity top : tops) {
+        const Transform* transform = scene.get<Transform>(top);
+        Mat4 world = transform->world;
+        world.columns[3].x += offset.x;
+        world.columns[3].y += offset.y;
+        world.columns[3].z += offset.z;
+        setWorldMatrix(top, world);
+    }
+    scene.updateTransforms();
     markChanged();
 }
 
@@ -570,6 +837,20 @@ bool SceneDocument::reparent(Entity child, Entity newParent) {
     return true;
 }
 
+bool SceneDocument::moveBeside(Entity entity, Entity sibling, bool after) {
+    Scene& scene = engine_.scene;
+    if (!scene.isAlive(entity) || !scene.isAlive(sibling) || entity == sibling) return false;
+    const Transform* place = scene.get<Transform>(sibling);
+    if (!place || !reparent(entity, place->parent)) return false;
+    size_t from = scene.orderOf(entity), to = scene.orderOf(sibling);
+    // Taking it out first moves everything after it one place back.
+    if (from < to) to = after ? to : to - 1;
+    else to = after ? to + 1 : to;
+    scene.setOrder(entity, to);
+    markChanged();
+    return true;
+}
+
 void SceneDocument::frameSelection() {
     Scene& scene = engine_.scene;
     AABB bounds;
@@ -599,6 +880,19 @@ void SceneDocument::frameSelection() {
 }
 
 // ---------------------------------------------------------------- undo
+
+bool SceneDocument::recover(const std::string& sceneText) {
+    Scene probe;
+    std::vector<NamedMaterial> probeMaterials;
+    RenderSettings probeSettings;
+    if (isPlaying_ || !readScene(sceneText, probe, probeMaterials, probeSettings, SceneAssets{})) return false;
+    undo_.push_back(std::move(current_));
+    redo_.clear();
+    selection_.clear();
+    restore(sceneText);
+    current_ = snapshot();
+    return true;
+}
 
 void SceneDocument::undo() {
     if (!canUndo()) return;
@@ -652,10 +946,12 @@ void SceneDocument::setPlaying(bool playing) {
     } else {
         isPlaying_ = false;
         engine_.onSceneLoaded = nullptr;
+        engine_.endScene();                 // components hear onDestroy; the run's sounds, tasks and pools end with it
         engine_.clearValues();              // the score of one run is not the next one's
-        engine_.stopSounds();               // nor its engines and music
         engine_.isSimulationPaused = true;
         engine_.runsComponents = false;
+        engine_.time.timeScale = 1.0f;      // slow motion the game asked for ends with it
+        engine_.applySettings(engine_.settings);   // and gravity is the project's again, whatever the game did to it
         restore(beforePlay_);
     }
 }
@@ -775,8 +1071,9 @@ void SceneDocument::beginFrame() {
 }
 
 void SceneDocument::endFrame(bool interacting) {
+    if (!isPlaying_) keepCollidersFitted();
     // What was created or moved in this frame is drawn in this frame.
-    engine_.scene.flushDestroyed();
+    engine_.removeDestroyed();
     engine_.scene.updateTransforms();
     if (!touched_ || isPlaying_ || interacting) return;
     touched_ = false;

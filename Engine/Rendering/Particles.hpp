@@ -20,10 +20,18 @@ struct Particle {
     Vec3 velocity{0, 0, 0};
     float age = 0;
     float lifetime = 1;
+    float rotation = 0;                     // radians, of its picture
+    float spin = 0;                         // radians a second
+    float sizeScale = 1;                    // its own size, from the emitter's size variation
+    float shade = 1;                        // its own brightness, from the emitter's shade variation
+    float frame = 0;                        // the frame of the sheet it starts on
 };
 
-/// Component. The emitter sits at its entity's position and emits along `direction`
-/// in the entity's local space. Particles then live in world space.
+/// Component: a particle system, made of the same modules as Unity's. Main and Emission say
+/// how many and for how long; Shape where they are born; Velocity, Forces and Noise how they
+/// move; Collision what they meet; Color and Size how they look over their life; Renderer how
+/// they are drawn. The emitter sits at its entity and emits along `direction` in the entity's
+/// own axes; with `space` World a particle is then left where it is, with Local it moves with the entity.
 struct ParticleEmitter {
     // What to emit.
     float rate = 20.0f;                     // particles per second while isEmitting
@@ -49,8 +57,13 @@ struct ParticleEmitter {
     int burstAtStart = 0;
 
     // ---- where particles are born
-    enum class Shape : uint8_t { Sphere, Box, Ring };
-    Shape shape = Shape::Sphere;            // Sphere: inside `spawnRadius`. Ring: on a circle of that radius, across the direction
+    /// Cone: inside a ball of `spawnRadius`, leaving along `direction` within `spread` (what a
+    /// file without a shape means). Box, Ring and Line: inside a box, on a circle across the
+    /// direction, along a line `boxSize.x` long; they also leave along the direction. Sphere and
+    /// Hemisphere: on or in a ball, leaving outward from its middle.
+    enum class Shape : uint8_t { Cone, Box, Ring, Sphere, Hemisphere, Line };
+    Shape shape = Shape::Cone;
+    bool fromShell = false;                 // Sphere, Hemisphere, Box: born on the surface, not inside
     Vec3 boxSize{1, 1, 1};                  // Box: inside a box this large, in the entity's own axes
 
     // ---- a third color and size on the way from birth to death
@@ -69,9 +82,52 @@ struct ParticleEmitter {
     float stretch = 0;                      // drawn as a streak this many seconds of its movement long: rain, sparks (0: a dot)
     float turbulence = 0;                   // meters per second of swirling, as in smoke that curls
     float turbulenceSize = 1.0f;            // how large the swirls are, in meters
+    // Its picture: a file of Assets with clear around the shape (Particles/Smoke.png), drawn on
+    // each particle, tinted by its color. A sheet of frames (columns by rows) is played over its life.
+    std::string texture;
+    int sheetColumns = 1, sheetRows = 1;
+    bool randomRotation = false;            // each starts turned at random (smoke, debris)
+    float spinMin = 0, spinMax = 0;         // radians a second each turns at, chosen between these
+    bool collides = false;                  // bounces off the colliders of the scene (boxes, spheres, capsules)
     bool bounces = false;                   // off a level floor
     float floorHeight = 0;
     float bounciness = 0.4f;                // how much of its speed a particle keeps when it lands
+
+    // ---- main
+    enum class Space : uint8_t { World, Local };
+    Space space = Space::World;             // World: left behind as the entity moves (smoke, a trail). Local: carried along (a halo)
+    float simulationSpeed = 1.0f;           // 2 plays it twice as fast
+    float startDelay = 0;                   // seconds before it starts emitting
+    bool prewarm = false;                   // starts as if it had been running already: a fire already burning
+    float sizeVariation = 0;                // 0 to 1: each particle a little smaller or larger
+    float shadeVariation = 0;               // 0 to 1: each a little darker or brighter
+    float inheritVelocity = 0;              // the share of the entity's own movement each is born with
+    float ratePerMeter = 0;                 // emitted for every meter the entity moves: a trail
+
+    // ---- velocity and forces over the life
+    Vec3 drift{0, 0, 0};                    // meters a second every particle moves along, in the system's space
+    float radial = 0;                       // meters a second away from the emitter (below 0: toward it)
+    float orbital = 0;                      // turns round the emitter's direction, radians a second
+    float buoyancy = 0;                     // meters a second each second upward at birth, cooling to none: hot gas rises
+    float turbulenceSpeed = 1.0f;           // how fast the swirls themselves change
+    int turbulenceOctaves = 1;              // 1 to 3: swirls inside swirls, as real smoke has
+
+    // ---- collision
+    float friction = 0.2f;                  // how much of its speed along a surface a particle loses when it hits
+    float lifetimeLoss = 0;                 // the share of its life a particle loses each time it hits
+    bool diesOnHit = false;                 // gone when it hits: rain on a roof
+
+    // ---- frames of the picture
+    float sheetFps = 0;                     // frames a second; 0: the whole sheet once over its life
+    bool randomFrame = false;               // each starts on a frame of its own
+
+    // ---- renderer
+    /// Billboard: a square facing the camera. Stretched: a streak `stretch` seconds of its way long.
+    /// Horizontal: lying flat (ripples, a glow on the ground). Vertical: upright, turning to the camera round its up axis.
+    enum class RenderMode : uint8_t { Billboard, Stretched, Horizontal, Vertical };
+    RenderMode renderMode = RenderMode::Billboard;
+    float softness = 0;                     // meters: fades out where it meets a surface, instead of a hard line
+    float lit = 0;                          // 0: its own color, glowing; 1: lit by the sun and the sky like smoke or dust
 
     /// Emits `count` particles at once on the next update.
     void burst(int count) { pendingBurst += count; }
@@ -86,6 +142,9 @@ struct ParticleEmitter {
     float burstTimer = 0, age = 0;          // since the last burst, and since it began
     Random random{0};
     bool isSeeded = false;
+    Vec3 lastOrigin{0, 0, 0};               // where the emitter was the update before: what it emits is spread along the way
+    bool hasLastOrigin = false;
+    float distanceAccumulator = 0;          // meters moved, for the rate per meter
 };
 
 /// The color and the size of a particle at a share of its life from 0 (born) to 1 (gone).
@@ -98,12 +157,15 @@ std::string writeEffect(const ParticleEmitter& emitter);
 bool readEffect(const std::string& text, ParticleEmitter& emitter);
 /// One setting by name ("rate", "colorStart"...) from the numbers that follow it. False for a name nobody knows.
 bool setEffectValue(ParticleEmitter& emitter, const std::string& key, const std::vector<float>& values);
+/// The same for the settings that are words ("texture"). False for a name nobody knows.
+bool setEffectText(ParticleEmitter& emitter, const std::string& key, const std::string& value);
 /// The settings that the two `particles` lines of a scene file do not hold, as "key numbers" lines; only what is not the usual.
 std::vector<std::string> effectExtras(const ParticleEmitter& emitter);
 
-/// Effects to start from: "Fire", "Smoke", "Sparks", "Explosion", "Dust", "Rain", "Snow", "Magic", "Fountain".
-const std::vector<std::string>& effectPresets();
-ParticleEmitter effectPreset(const std::string& name);
+/// Where a particle is in the world: its own position, carried by the entity's matrix if it lives in its space.
+inline Vec3 particleWorldPosition(const ParticleEmitter& emitter, const Particle& particle, const Mat4& world) {
+    return emitter.space == ParticleEmitter::Space::Local ? transformPoint(world, particle.position) : particle.position;
+}
 
 /// The air's velocity at a point and a time: the scene's wind, stronger and weaker in
 /// gusts that travel with it. `gustiness` is 0 for a steady wind and 1 for one that

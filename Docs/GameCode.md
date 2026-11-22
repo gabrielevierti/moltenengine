@@ -2,7 +2,7 @@
 
 A project's `Source` folder holds the game's C++. The editor compiles every `.cpp` file in it into one library, loads it, and from then on the game's components behave like the engine's own: they are in Add Component, their fields are in the inspector, scenes save them, Undo covers them, and their code runs when the game plays.
 
-A new project has an empty `Assets/Scripts` folder: **Game > New Script** (or **+ New > Script** in the Explorer) makes the first one, with one component in it. This page explains every part.
+A new project has an empty `Assets/Scripts` folder: **Assets > New C++ Script...** (or **+ New > Script** in the Explorer) makes the first one, with one component in it. This page explains every part.
 
 ## A component
 
@@ -55,13 +55,13 @@ References to other entities and to assets are not field types yet; until they a
 
 ## A new script
 
-**Game > New Script...** asks for a name, makes `Source/<Name>.cpp` with a component of that name in it, opens the file in the program your Mac uses for C++ (Xcode, unless you chose another) and builds. Game > Scripts lists every script of the project; a click opens it.
+**Assets > New C++ Script...** asks for a name, makes `Assets/Scripts/<Name>.cpp` with a component of that name in it, opens the file in the program your Mac uses for C++ (Xcode, unless you chose another) and compiles. The scripts are in the Explorer like any other asset; Assets > Show Scripts Folder opens their folder in the Finder.
 
 Scripts that are drawn instead of written are in [VisualScripting.md](VisualScripting.md).
 
 ## Building
 
-**Saving a file is enough.** The editor watches the `Source` folder and rebuilds when something in it changes (Game > Rebuild When Code Is Saved turns this off). Game > Build Game Code, or Cmd+B, builds on demand; opening a project builds too.
+**Saving a file is enough.** The editor watches the scripts and compiles them when one changes. **Assets > Compile Scripts**, or Cmd+B, compiles on demand; opening a project compiles too. The **Scripts** light at the right of the tool bar is green when the code is compiled and loaded, red when it did not compile: a click on it then opens the Console on the errors.
 
 What the editor does: it writes the open scene to text, empties it, loads the new library, and reads the scene back. Components come back by name with the fields the new code has: a field you added starts at its default, one you removed is let go. The scene's undo history survives. If the code does not compile, the compiler's messages go to the console and the code that was loaded before stays.
 
@@ -79,7 +79,7 @@ Two things to know:
 ./build/molten-player ~/Games/MyGame Scenes/Level2.scene    # another one
 ```
 
-**Game > Export for macOS** asks for a folder and makes `MyGame.app` there: the player under the game's name, the engine's shaders and assets, the project's assets, and the built code. It is signed for the Mac it was made on. Giving it to other people needs a Developer ID signature and notarization with your own Apple account, which the editor does not do yet.
+**File > Build Settings...** (Shift+Cmd+B) exports the game: for a Mac it asks for a folder and makes `MyGame.app` there: the player under the game's name, the engine's shaders and assets, the project's assets, and the built code. It is signed for the Mac it was made on. Giving it to other people needs a Developer ID signature and notarization with your own Apple account, which the editor does not do yet.
 
 The first scene of the game is the project's First Scene (Edit > Project Settings); the first scene you save becomes it.
 

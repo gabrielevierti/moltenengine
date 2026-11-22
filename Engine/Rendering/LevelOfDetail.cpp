@@ -1,4 +1,5 @@
 // LevelOfDetail.cpp
+#include "Rendering/Quality.hpp"
 #include "Rendering/LevelOfDetail.hpp"
 
 #include "Rendering/Material.hpp"
@@ -23,7 +24,7 @@ void chooseLevelsOfDetail(Scene& scene, Vec3 eye) {
                 }
                 const Transform* place = scene.get<Transform>(at);
                 float distance = place ? simd::length(place->worldPosition() - eye) : 0.0f;
-                bool beyond = distance > group->distance;
+                bool beyond = distance > group->distance * detailDistanceScale();      // the project's quality: how far detail lasts
                 renderer.isBeyondItsDetail = isFar ? !beyond : beyond;
                 return;
             }

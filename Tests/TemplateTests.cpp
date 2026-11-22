@@ -7,6 +7,7 @@
 #include "Core/World.hpp"
 #include "Kit/Kit.hpp"
 #include "Script/Runtime.hpp"
+#include "Rendering/Particles.hpp"
 
 #include <cmath>
 #include <cstdlib>
@@ -14,6 +15,40 @@
 #include <filesystem>
 
 using namespace molten;
+
+namespace {
+// Particle systems as a game might make them, for the tests (the engine has no presets).
+ParticleEmitter testFire() {
+    ParticleEmitter e;
+    e.rate = 70, e.lifetimeMin = 0.5f, e.lifetimeMax = 1.1f, e.speedMin = 0.8f, e.speedMax = 1.8f, e.spread = radians(14.0f);
+    e.spawnRadius = 0.18f, e.gravity = Vec3{0, 1.2f, 0}, e.drag = 0.8f, e.turbulence = 0.7f, e.turbulenceSize = 0.5f;
+    e.hasMiddle = true, e.middleAt = 0.35f;
+    e.colorStart = Vec4{4.0f, 2.6f, 0.9f, 1}, e.colorMiddle = Vec4{3.2f, 1.0f, 0.15f, 0.85f}, e.colorEnd = Vec4{0.5f, 0.1f, 0.02f, 0};
+    e.sizeStart = 0.3f, e.sizeMiddle = 0.55f, e.sizeEnd = 0.2f, e.maxParticles = 400;
+    e.texture = "Particles/Flame.png", e.spinMax = 0.6f, e.buoyancy = 2.0f, e.softness = 0.3f;
+    return e;
+}
+ParticleEmitter testSparks() {
+    ParticleEmitter e;
+    e.rate = 60, e.lifetimeMin = 0.4f, e.lifetimeMax = 1.0f, e.speedMin = 3.0f, e.speedMax = 7.0f, e.spread = radians(40.0f);
+    e.gravity = Vec3{0, -9.8f, 0}, e.drag = 0.3f, e.bounces = true, e.bounciness = 0.35f, e.collides = true, e.stretch = 0.025f;
+    e.renderMode = ParticleEmitter::RenderMode::Stretched;
+    e.colorStart = Vec4{6.0f, 3.6f, 1.2f, 1}, e.colorEnd = Vec4{2.0f, 0.4f, 0.05f, 0}, e.sizeStart = 0.03f, e.sizeEnd = 0.012f;
+    return e;
+}
+ParticleEmitter testExplosion() {
+    ParticleEmitter e;
+    e.rate = 0, e.burstAtStart = 220, e.lifetimeMin = 0.5f, e.lifetimeMax = 1.4f, e.speedMin = 2.0f, e.speedMax = 11.0f, e.spread = radians(180.0f);
+    e.spawnRadius = 0.2f, e.gravity = Vec3{0, -1.5f, 0}, e.drag = 2.6f, e.turbulence = 1.0f, e.duration = 0.1f, e.maxParticles = 400;
+    return e;
+}
+ParticleEmitter testSmoke() {
+    ParticleEmitter e;
+    e.rate = 14, e.lifetimeMin = 2.5f, e.lifetimeMax = 4.5f, e.isAdditive = false, e.lit = 1.0f, e.buoyancy = 1.2f, e.turbulenceOctaves = 2;
+    e.texture = "Particles/Smoke.png", e.randomRotation = true, e.spinMin = 0.1f, e.spinMax = 0.5f, e.collides = true;
+    return e;
+}
+}  // namespace
 
 namespace {
 
@@ -339,6 +374,9 @@ TEST(input_actions_are_named_saved_and_read) {
 #include "Kit/Vehicles.hpp"
 
 TEST(template_driving_can_be_driven) {
+    // The example project drives with scripts of its own (its Motor, its DriveControls): played
+    // only by a program that has them linked in. The engine's own test program does not.
+    if (!ComponentRegistry::instance().find("RacerAI")) return;
     Play play("Driving");
     CHECK(play.isLoaded);
     play.frames(90);
@@ -696,16 +734,15 @@ TEST(touch_controls_drive_the_same_actions_as_keys) {
     CHECK(world.input.hasTouched());
 }
 
-TEST(effects_have_presets_files_and_a_life_of_three_colors) {
-    for (const std::string& name : effectPresets()) {
-        ParticleEmitter preset = effectPreset(name);
-        // Written and read back, it is the same effect.
+TEST(particle_systems_are_written_read_and_have_a_life_of_three_colors) {
+    for (const ParticleEmitter& made : {testFire(), testSparks(), testExplosion(), testSmoke()}) {
+        // Written and read back, it is the same system.
         ParticleEmitter back;
-        CHECK(readEffect(writeEffect(preset), back));
-        CHECK(writeEffect(back) == writeEffect(preset));
+        CHECK(readEffect(writeEffect(made), back));
+        CHECK(writeEffect(back) == writeEffect(made));
     }
     CHECK(!readEffect("not an effect", *std::make_unique<ParticleEmitter>()));
-    ParticleEmitter fire = effectPreset("Fire");
+    ParticleEmitter fire = testFire();
     CHECK(fire.hasMiddle);
     // At its middle a particle has the middle color; before and after, something between.
     Vec4 middle = particleColor(fire, fire.middleAt);
@@ -737,7 +774,7 @@ TEST(effects_have_presets_files_and_a_life_of_three_colors) {
     Scene play;
     Entity boom = play.create("Boom");
     play.add(boom, Transform{});
-    play.add(boom, effectPreset("Explosion"));
+    play.add(boom, testExplosion());
     play.updateTransforms();
     updateParticles(play, 0.016f);
     CHECK(play.get<ParticleEmitter>(boom)->particles.size() == 220);
@@ -748,7 +785,7 @@ TEST(effects_have_presets_files_and_a_life_of_three_colors) {
     Transform above;
     above.position = Vec3{0, 0.5f, 0};
     play.add(sparks, above);
-    ParticleEmitter falling = effectPreset("Sparks");
+    ParticleEmitter falling = testSparks();
     falling.direction = Vec3{0, -1, 0};
     falling.lifetimeMin = falling.lifetimeMax = 2.0f;
     play.add(sparks, falling);
@@ -970,6 +1007,9 @@ TEST(the_interface_scales_with_the_screen_it_is_shown_on) {
 }
 
 TEST(the_driving_car_is_driven_by_touch_on_a_phone) {
+    // The example project drives with scripts of its own (its Motor, its DriveControls): played
+    // only by a program that has them linked in. The engine's own test program does not.
+    if (!ComponentRegistry::instance().find("RacerAI")) return;
     // A phone held sideways, in points: the stick and the pedals are where they are drawn.
     Play play("Driving");
     CHECK(play.isLoaded);
