@@ -15,8 +15,10 @@
 //                   and whether fewer are drawn while the GPU cannot keep up
 //   Anti-Aliasing   how smooth the edges of things are
 //   Shadows         how far the sun's shadows reach, and how sharp they are
-//   Ray Tracing     the most of it a scene gets: none, the sun's shadows, the light around
-//                   things and reflections, or all a scene asks
+//   Ray Tracing     on or off, and how well. On, all of the light is found with rays where
+//                   the GPU can: the sun's shadows, the light around things and what it
+//                   bounces, reflections; a higher level sends more rays. The project's
+//                   alone: a scene does not choose it
 //   Effects         ambient occlusion, bloom, shafts of light
 //   Sky             whether clouds have depth, and how finely they are walked through
 //   Detail          how far the detail of far things lasts
@@ -56,8 +58,11 @@ struct GameQuality {
     float shadowDistance = 150;         // the farthest from the camera the sun's shadows reach, in meters: a scene may ask for less
     int shadowResolution = 2048;        // the shadow map's edge
     int shadowCascades = 4;             // slices: more is sharper near and far
-    // ---- Ray tracing
-    LightingQuality rayTracing = LightingQuality::High;     // the most a scene gets of what it asks
+    // ---- Ray tracing: on or off, and how well, for every scene. On, all of the light is found
+    // with rays: the sun's shadows, the light around things and what it bounces, reflections.
+    // Where the GPU cannot trace rays, shadow maps (the Shadows group).
+    bool rayTraced = true;
+    LightingQuality rayTracing = LightingQuality::High;     // how well: Low to Ultra, more rays at each
     // ---- Effects
     bool ambientOcclusion = true;       // the screen's own
     bool bloom = true;
@@ -82,6 +87,9 @@ struct GameQuality {
     void findLevel();
     /// What a group's values come to, in a line: "2048 px, 4 slices, up to 150 m".
     std::string summaryOf(Group group) const;
+
+    /// How well rays are traced (on or off stays as it is).
+    void setRayTracing(LightingQuality level);
 
     /// Puts it on the renderer's settings, over what the scene said.
     void applyTo(RenderSettings& settings) const;

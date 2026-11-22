@@ -74,3 +74,34 @@ TEST(a_boat_goes_ahead_and_turns_on_the_water) {
     CHECK(simd::dot(flat, safeNormalize(Vec3{forward.x, 0, forward.z}, flat)) > 0.85f);
     CHECK(tilt(world, entity) < 15);
 }
+
+TEST(what_floats_leaves_a_wake_where_it_went) {
+    kit::registerKit();
+    World world;
+    Entity entity = raft(world, Quat{});
+    kit::Boat boat;
+    boat.usesInput = false;
+    boat.throttle = 1;
+    world.scene.add(entity, boat);
+    for (int i = 0; i < 60 * 5; i++) world.advance(1.0 / 60.0);
+    CHECK(world.wakes.size() == 1);
+    if (world.wakes.empty()) return;
+    const World::Wake& wake = world.wakes.front();
+    // As large as its hull, going ahead (its -z), at the waterline.
+    CHECK(wake.body == entity && wake.halfWidth == 1.0f && wake.halfLength == 2.0f);
+    CHECK(wake.speed > 2.0f && wake.heading.y < -0.9f);
+    CHECK(std::abs(wake.middle.y) < 0.05f);
+    // Its stern laid down every so often, newest first, back the way it came.
+    CHECK(wake.trail.size() >= 8 && wake.trail.size() == wake.trailSpeed.size());
+    for (size_t i = 1; i < wake.trail.size(); i++) {
+        CHECK(wake.trail[i].w < wake.trail[i - 1].w);
+        CHECK(wake.trail[i].z > wake.trail[i - 1].z - 0.01f);
+    }
+    CHECK(wake.trail.front().z > wake.middle.z + 1.5f);          // behind it
+    // Out of the water, it leaves none.
+    world.scene.get<Transform>(entity)->position.y = 50;
+    world.scene.get<RigidBody>(entity)->velocity = Vec3{0, 0, 0};
+    world.scene.remove<kit::Boat>(entity);
+    for (int i = 0; i < 10; i++) world.advance(1.0 / 60.0);
+    CHECK(world.wakes.empty());
+}

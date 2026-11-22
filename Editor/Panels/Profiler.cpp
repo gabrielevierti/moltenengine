@@ -97,7 +97,7 @@ private:
         auto row = [](const char* name, size_t value, const char* icon) {
             ImVec2 at = ImGui::GetCursorScreenPos();
             ui::drawIcon(ImGui::GetWindowDrawList(), ImVec2(at.x + 8, at.y + ImGui::GetTextLineHeight() * 0.5f), 12, icon, ImGui::GetColorU32(ImGuiCol_Text));
-            ImGui::SetCursorScreenPos(ImVec2(at.x + 22, at.y));
+            ImGui::SetCursorScreenPos(ImVec2(at.x + 26, at.y));
             ImGui::TextUnformatted(name);
             ImGui::SameLine(200);
             ImGui::Text("%zu", value);
@@ -195,6 +195,40 @@ private:
             }
         }
         ImGui::TextDisabled("Bars: the CPU's time for each frame.  Blue line: the GPU's.  Click a bar to look at that frame.");
+
+        // ---- what each pass costs the GPU
+        std::vector<GpuTimer::Pass> passes = editor.engine.renderer().gpuPasses();
+        if (!passes.empty()) {
+            float total = 0;
+            for (const GpuTimer::Pass& pass : passes) total += pass.milliseconds;
+            char heading[96];
+            std::snprintf(heading, sizeof(heading), "The GPU, pass by pass: %.2f ms", double(total));
+            ImGui::SeparatorText(heading);
+            ui::tooltip("What each pass of the picture costs the graphics chip, averaged over the last frames, in the order they run. The longest are where to look first: Project Settings > Quality says how much each is asked for.");
+            if (ImGui::BeginTable("##gpu", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingStretchProp)) {
+                ImGui::TableSetupColumn("Pass", ImGuiTableColumnFlags_WidthStretch, 3.0f);
+                ImGui::TableSetupColumn("ms", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+                ImGui::TableSetupColumn("of the GPU's frame", ImGuiTableColumnFlags_WidthStretch, 1.6f);
+                ImGui::TableHeadersRow();
+                for (const GpuTimer::Pass& pass : passes) {
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(pass.name.c_str());
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%.3f", double(pass.milliseconds));
+                    ImGui::TableNextColumn();
+                    float share = total > 0 ? pass.milliseconds / total : 0;
+                    ImVec2 bar = ImGui::GetCursorScreenPos();
+                    const float numbers = ImGui::CalcTextSize("100% ").x;
+                    float room = std::max(ImGui::GetContentRegionAvail().x - numbers, 1.0f);
+                    ImGui::Text("%3.0f%%", double(share * 100));
+                    ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(bar.x + numbers, bar.y + 3),
+                                                              ImVec2(bar.x + numbers + room * std::min(share, 1.0f), bar.y + ImGui::GetTextLineHeight() - 2),
+                                                              IM_COL32(120, 190, 255, 170), 2);
+                }
+                ImGui::EndTable();
+            }
+        }
 
         // ---- the parts of the frame
         std::vector<const Profiler::Frame*> shown;

@@ -71,7 +71,7 @@ TEST(sunlight_goes_gold_and_red_as_the_sun_sinks) {
 TEST(a_decal_is_a_component_and_the_neutral_table_changes_nothing) {
     kit::registerKit();
     const ComponentType* type = ComponentRegistry::instance().find("Decal");
-    CHECK(type && type->category == "Effects" && type->findField("picture") && type->findField("darkens"));
+    CHECK(type && type->category == "Rendering" && type->findField("picture") && type->findField("darkens"));
     // The neutral table: red across each square, green down it, blue from square to square.
     int w = 0, h = 0, c = 0;
     unsigned char* pixels = stbi_load("Assets/Grading/Neutral 32.png", &w, &h, &c, 4);

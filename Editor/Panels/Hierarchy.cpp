@@ -6,12 +6,10 @@
 #include "Kit/Kit.hpp"
 #include "Kit/Network.hpp"
 #include "Kit/WhenThen.hpp"
-#include "Water/Water.hpp"
 #include "Kit/Spline.hpp"
 #include "Kit/Layout.hpp"
 #include "Kit/Terrain.hpp"
 #include "Kit/Foliage.hpp"
-#include "Kit/CameraShots.hpp"
 #include "Panels/Widgets.hpp"
 
 #include <algorithm>
@@ -80,9 +78,7 @@ public:
                                           {"Animated", "c:Animator", "anim"}, {"Particles", "c:ParticleEmitter", "spark"}, {"Interface", "c:UI", "ui"},
                                           {"Scripts", "c:VisualScript", "graph"}, {"Switched Off", "is:off", "eye"}};
                 for (auto& kind : kinds) {
-                    ImVec2 row = ImGui::GetCursorScreenPos();
-                    if (ImGui::Selectable((std::string("      ") + kind[0]).c_str(), filter_ == kind[1])) filter_ = kind[1];
-                    ui::drawIcon(ImGui::GetWindowDrawList(), ImVec2(row.x + 9, row.y + ImGui::GetTextLineHeight() * 0.5f), 13, kind[2], ImGui::GetColorU32(ImGuiCol_Text));
+                    if (ui::iconSelectable(kind[0], kind[2], filter_ == kind[1], 0.0f, 13.0f)) filter_ = kind[1];
                 }
                 ImGui::EndPopup();
             }
@@ -532,8 +528,12 @@ private:
         drawIcon(drawList, ImVec2(iconX, middle), kind, isHidden ? 0.4f : 1.0f);
 
         // The eye, at the right: shown when the pointer is on the row, or always when it is closed.
+        // (Whether the pointer is on the row is asked of where it is, not of the row's own button:
+        // over the eye, the eye is what is hovered, and asked that way the eye went away from under
+        // the pointer every other frame, and a click on it fell on the row.)
+        const bool pointerOnRow = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) && ImGui::IsMouseHoveringRect(min, max, false);
         float right = max.x - 6;
-        if (own && (isHovered || !own->isActive)) {
+        if (own && (isHovered || pointerOnRow || !own->isActive)) {
             ImVec2 eye(right - 9, middle);
             ImGui::SetCursorScreenPos(ImVec2(eye.x - 10, min.y));
             if (ImGui::InvisibleButton("##eye", ImVec2(20, kRowHeight))) {
@@ -634,7 +634,7 @@ Entity createFromEntry(EditorContext& editor, const CreateEntry& entry, Entity p
     return created;
 }
 
-void drawCreateMenu(EditorContext& editor, Entity parent, bool withEmpty) {
+std::vector<MenuEntry> createMenuEntries(EditorContext& editor, Entity parent, bool withEmpty) {
     // "Light/Point Light" becomes the item "Point Light" in the submenu "Light". Entries
     // are grouped in the order their groups first appear.
     std::vector<std::string> groups;
@@ -643,20 +643,33 @@ void drawCreateMenu(EditorContext& editor, Entity parent, bool withEmpty) {
         std::string group = slash == std::string::npos ? std::string() : item.value.path.substr(0, slash);
         if (std::find(groups.begin(), groups.end(), group) == groups.end()) groups.push_back(group);
     }
+    std::vector<MenuEntry> entries;
     for (const std::string& group : groups) {
-        bool isOpen = group.empty() || ImGui::BeginMenu(group.c_str());
-        if (!isOpen) continue;
+        std::vector<MenuEntry> made;
         for (const auto& item : editor.registry.createEntries) {
             size_t slash = item.value.path.find('/');
             std::string itemGroup = slash == std::string::npos ? std::string() : item.value.path.substr(0, slash);
             if (itemGroup != group) continue;
-            std::string label = slash == std::string::npos ? item.value.path : item.value.path.substr(slash + 1);
             if (!withEmpty && item.value.path == "Empty") continue;         // the menu has its own Create Empty, with keys
-            if (ImGui::MenuItem(label.c_str())) createFromEntry(editor, item.value, parent);
+            MenuEntry entry;
+            entry.label = slash == std::string::npos ? item.value.path : item.value.path.substr(slash + 1);
+            CreateEntry what = item.value;
+            entry.run = [&editor, what, parent] { createFromEntry(editor, what, parent); };
+            made.push_back(std::move(entry));
         }
-        if (!group.empty()) ImGui::EndMenu();
+        if (group.empty()) {
+            entries.insert(entries.end(), made.begin(), made.end());
+        } else if (!made.empty()) {
+            MenuEntry submenu;
+            submenu.label = group;
+            submenu.children = std::move(made);
+            entries.push_back(std::move(submenu));
+        }
     }
+    return entries;
 }
+
+void drawCreateMenu(EditorContext& editor, Entity parent, bool withEmpty) { drawMenuEntries(createMenuEntries(editor, parent, withEmpty)); }
 
 /// A point more on the Spline that is chosen (after its last point), or after the point that is
 /// chosen, halfway to the next. Its points are numbered again, in order.
@@ -759,31 +772,6 @@ void registerCreateEntries(EditorContext& editor) {
         context.scene.select(entity);
         return entity;
     });
-    // A shot, where the Scene view looks from now: the Camera Director glides to it.
-    editor.registry.addCreateEntry(nullptr, "Camera Shot", [](EditorContext& context) {
-        Scene& scene = context.engine.scene;
-        Entity entity = scene.create("Camera Shot");
-        Transform transform;
-        transform.position = context.scene.cameraPosition;
-        transform.rotation = context.scene.cameraRotation();
-        scene.add(entity, transform);
-        scene.add(entity, kit::CameraShot{});
-        // The first shot gives the scene's camera a director, so that it films the shots.
-        bool hasDirector = false;
-        scene.each<kit::CameraDirector>([&](Entity, kit::CameraDirector&) { hasDirector = true; });
-        if (!hasDirector) {
-            scene.each<Camera>([&](Entity camera, Camera&) {
-                if (!hasDirector) {
-                    scene.add(camera, kit::CameraDirector{});
-                    hasDirector = true;
-                }
-            });
-        }
-        scene.updateTransforms();
-        context.scene.markChanged();
-        context.scene.select(entity);
-        return entity;
-    });
     // The game's interface: each piece an entity with one component, placed in the Game view.
     auto addInterface = [&editor](const char* path, const char* name, const char* component) {
         editor.registry.addCreateEntry(nullptr, path, [name, component](EditorContext& context) {
@@ -844,39 +832,6 @@ void registerCreateEntries(EditorContext& editor) {
     addPath("Paths/Spline", "Spline", false);
     // One particle system, to make into whatever it should be: fire, smoke, rain are made, not picked.
     add("Effects/Particle System", Primitive::ParticleEmitter);
-
-    // A sheet of water with waves: a sea or a lake. Its material's shader is Water, and the Water
-    // component moves its surface; things with a Buoyancy float on it.
-    editor.registry.addCreateEntry(nullptr, "3D Object/Water", [](EditorContext& context) {
-        Scene& scene = context.engine.scene;
-        SceneDocument& document = context.scene;
-        Entity water = document.create(Primitive::Plane);
-        if (Name* name = scene.get<Name>(water)) name->value = "Water";
-        scene.remove<Collider>(water);                  // water stops nothing: things float by their Buoyancy
-        if (Transform* transform = scene.get<Transform>(water)) transform->scale = Vec3{400, 1, 400};
-        std::shared_ptr<Material> look;
-        for (const NamedMaterial& named : document.materials) {
-            if (named.name == "Water" && named.material && named.material->isWater) look = named.material;
-        }
-        if (!look) {
-            look = std::make_shared<Material>();
-            look->isWater = true;
-            // The color it ends up where it is deep, and how murky it is: a clear sea, that shows its bottom near the shore.
-            look->baseColor = Vec4{0.02f, 0.13f, 0.2f, 0.3f};
-            look->alphaMode = AlphaMode::Blend;
-            look->roughness = 0.05f;
-            document.materials.push_back(NamedMaterial{"Water", look});
-        }
-        if (MeshRenderer* renderer = scene.get<MeshRenderer>(water)) {
-            renderer->material = look;
-            renderer->castsShadows = false;
-        }
-        scene.add(water, Water{});
-        scene.updateTransforms();
-        document.select(water);
-        document.markChanged();
-        return water;
-    });
 
     // ---- starting points: something that already works, to take apart and make one's own
 

@@ -1,5 +1,7 @@
 #include "Assets/ImportSettings.hpp"
 #include "Core/World.hpp"
+#include "Kit/Weather.hpp"
+#include "Kit/Wakes.hpp"
 
 #include "Audio/Mixer.hpp"
 
@@ -820,6 +822,7 @@ namespace {
 /// fields, which every frame would otherwise copy for nothing.
 struct TypeCalls {
     std::string name, category;
+    bool isInterface = false;
     void* (*get)(Scene&, Entity) = nullptr;
     void (*collect)(Scene&, std::vector<Entity>& out) = nullptr;
     void (*start)(void*, World&, Entity) = nullptr;
@@ -832,7 +835,7 @@ struct TypeCalls {
     void (*draw)(void*, World&, Entity, Canvas&) = nullptr;
 };
 TypeCalls callsOf(const ComponentType& type) {
-    return TypeCalls{type.name, type.category, type.get, type.collect, type.start, type.update, type.fixedUpdate, type.lateUpdate,
+    return TypeCalls{type.name, type.category, type.isInterface(), type.get, type.collect, type.start, type.update, type.fixedUpdate, type.lateUpdate,
                      type.onDestroy, type.onCollision, type.onTriggerEnter, type.draw};
 }
 }  // namespace
@@ -913,10 +916,10 @@ void World::drawComponents(Canvas& canvas) {
             const ComponentType& declared = ComponentRegistry::instance().types()[i];
             if (!declared.draw) continue;
             TypeCalls type = callsOf(declared);
-            if (!type.draw || (type.category == "UI") != isInterface) continue;
+            if (!type.draw || type.isInterface != isInterface) continue;
             // While the game is not running (an editor, between plays) only the interface is
             // drawn: it has to be seen to be laid out. The rest draws what it does while it runs.
-            if (!runsComponents && (type.category != "UI" || !showsInterfaceWhileStopped)) continue;
+            if (!runsComponents && (!type.isInterface || !showsInterfaceWhileStopped)) continue;
             scratchEntities_.clear();
             type.collect(scene, scratchEntities_);
             std::vector<Entity> entities = scratchEntities_;
@@ -977,6 +980,11 @@ void World::removeDestroyed() {
 
 const RenderSettings& World::effectSettings() { return materials_->settings; }
 
+Vec3 World::wind() { return windWithWeather(effectSettings()); }
+const SeaSettings& World::sea() { return effectSettings().sea; }
+
+const WeatherSettings& World::weather() { return effectSettings().weather; }
+
 void World::simulateFrame(double realDelta) {
     input.isTakingText = wantsTextInput;        // as the last frame left it
     wantsTextInput = false;                     // until a text field that is typed in says so again
@@ -1027,7 +1035,12 @@ void World::simulateFrame(double realDelta) {
     {
         Profiler::Scope timed(profiler, "Particles");
         const RenderSettings& settings = effectSettings();
-        updateParticles(scene, time.delta, settings.wind, settings.windGustiness, time.elapsed);
+        if (simulatesEffects) {
+            effectsTime += time.delta;
+            kit::updateWeather(*this, time.delta);      // rain born and landed, lightning: before the particles move
+            kit::updateWakes(*this, time.delta);        // what floats, and where it has been: for the water to draw its wake
+            updateParticles(scene, time.delta, windWithWeather(settings), gustsWithWeather(settings), effectsTime);
+        }
     }
     hearRoom();
 }

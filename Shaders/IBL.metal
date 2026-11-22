@@ -37,8 +37,11 @@ static float3 aroundNormal(float3 local, float3 normal) {
 static float3 importanceSampleGGX(float2 u, float3 normal, float roughness) {
     float a = roughness * roughness;
     float phi = 2.0 * kPi * u.x;
-    float cosTheta = sqrt((1.0 - u.y) / (1.0 + (a * a - 1.0) * u.y));
-    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+    // Kept within 0 and 1: with no roughness the fraction is a number over itself, which the GPU's
+    // quick division can make a hair more than 1, and the root of what is then below zero is not a
+    // number. One such sample spoils the whole texel it is added to.
+    float cosTheta = sqrt(saturate((1.0 - u.y) / max(1.0 + (a * a - 1.0) * u.y, 1e-7)));
+    float sinTheta = sqrt(saturate(1.0 - cosTheta * cosTheta));
     return aroundNormal(float3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta), normal);
 }
 
@@ -75,6 +78,12 @@ fragment float4 fragment_prefilter(FullscreenOut in [[stage_in]],
     // The usual simplification: the view direction equals the normal.
     float3 N = normalize(cubeDirection(capture.face, in.uv));
     float3 V = N;
+    // A mirror (the first level) reflects one direction: the sky's own, read as it is. (Through the
+    // lobe below it came out not a number in places, and every water and smooth surface near the
+    // camera, which reads this level, went flat.)
+    if (capture.roughness <= 0.0) {
+        return float4(environment.sample(linearSampler, N, level(0.0)).rgb, 1.0);
+    }
 
     const uint sampleCount = 96u;
     float3 sum = float3(0.0);

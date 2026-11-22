@@ -43,8 +43,9 @@ The handles move it; **W**, **E** and **R** choose between moving, turning and s
 selected in a group. **Entity > 3D Object > Plane** is a floor, ten meters a side, that
 things stand on.
 
-A new scene already has a sun and a camera. **Window > Rendering > Lighting** has the sky,
-the clouds, the fog and the shadows.
+A new scene already has a sun, a camera and the sea, half a meter under its floor.
+**Window > Lighting** has the sun, the sky's light and the shadows; **Window >
+Environment** the world: the sky, the clouds, the fog, the weather and its wind, the sea.
 
 ## 4. Components make things do something
 
@@ -74,7 +75,7 @@ can be turned into the other:
 - **Visual scripts**: boxes joined by wires. **Assets > Create > Visual Script**, then drag it
   onto an entity. *On Update*, *On Collision*, *On Action Pressed* start things; *Translate*,
   *Destroy*, *Spawn*, *Play Sound* do them. See **Visual Scripting**.
-- **C++**: **Assets > New C++ Script...** makes a component with `start` and `update` to fill
+- **C++**: **Assets > Create > C++ Script...** makes a component with `start` and `update` to fill
   in. Saving the file compiles it and the editor uses it at once. See **Writing Game Code**.
 
 ## 6. The game's own settings

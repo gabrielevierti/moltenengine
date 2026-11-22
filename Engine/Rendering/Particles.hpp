@@ -87,6 +87,7 @@ struct ParticleEmitter {
     std::string texture;
     int sheetColumns = 1, sheetRows = 1;
     bool randomRotation = false;            // each starts turned at random (smoke, debris)
+    bool isRing = false;                    // without a picture: a thin ring instead of a round dot (a ripple on water)
     float spinMin = 0, spinMax = 0;         // radians a second each turns at, chosen between these
     bool collides = false;                  // bounces off the colliders of the scene (boxes, spheres, capsules)
     bool bounces = false;                   // off a level floor

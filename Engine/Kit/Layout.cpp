@@ -32,7 +32,7 @@ struct Placed {
 
 bool placedOf(World& world, Entity entity, Placed& out) {
     for (const ComponentType& type : ComponentRegistry::instance().types()) {
-        if (type.category != "UI" || !type.get) continue;
+        if (!type.isInterface() || !type.get) continue;
         const Field* anchor = type.findField("anchor");
         const Field* offset = type.findField("offset");
         if (!anchor || !offset || anchor->type != FieldType::Vec2 || offset->type != FieldType::Vec2) continue;

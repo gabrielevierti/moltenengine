@@ -1,89 +1,81 @@
 #include "Water/Water.hpp"
 
-#include "Assets/MeshData.hpp"
 #include "Game/Component.hpp"
+#include "Rendering/Renderer.hpp"
+#include "Scene/Components.hpp"
 
 #include <algorithm>
 #include <cmath>
 
 namespace molten {
 
-void Water::update(World& world, Entity self, float dt) {
-    if (!ocean || madeWind != windSpeed || madePatch != patchSize || madeDirection.x != windDirection.x || madeDirection.y != windDirection.y) {
-        OceanSettings settings;
-        settings.windSpeed = windSpeed;
-        settings.windDirection = windDirection;
-        settings.patchSize = patchSize;
-        ocean = std::make_shared<Ocean>(settings);
-        madeWind = windSpeed;
-        madePatch = patchSize;
-        madeDirection = windDirection;
-    }
-    time += dt;
-    ocean->update(time);
-
-    // The sheet: a grid of points, each moved as the ocean moves the water there.
-    const int cells = std::clamp(resolution, 2, 400), points = cells + 1;
-    const float step = std::max(size, 1.0f) / float(cells), half = std::max(size, 1.0f) * 0.5f;
-    MeshData sheet;
-    sheet.positions.reserve(size_t(points) * size_t(points));
-    sheet.normals.reserve(sheet.positions.capacity());
-    sheet.uvs.reserve(sheet.positions.capacity());
-    for (int j = 0; j < points; j++) {
-        for (int i = 0; i < points; i++) {
-            float x = float(i) * step - half, z = float(j) * step - half;
-            Vec3 moved = ocean->displacementAt(x, z);
-            // At the rim the water is still, so that the sheet meets its shore.
-            float rim = std::min({float(i), float(j), float(cells - i), float(cells - j)}) / 4.0f;
-            float calm = std::clamp(rim, 0.0f, 1.0f);
-            sheet.positions.push_back(Vec3{x + moved.x * choppiness * calm, moved.y * waveHeight * calm, z + moved.z * choppiness * calm});
-            // Straight up: the water's shader reads the slope of every wave, pixel by pixel, from the
-            // same sea (showOcean below), sharper than the sheet's points could hold it.
-            sheet.normals.push_back(Vec3{0, 1, 0});
-            // The water shader reads foam from here: 2 and above, so that it is not taken for a picture's coordinates.
-            sheet.uvs.push_back(Vec2{2.0f + std::clamp(ocean->foamAt(x, z) * foam * calm, 0.0f, 1.0f), 0.0f});
+void retireOldWater(Scene& scene, RenderSettings& settings) {
+    // What was water: a plane with a material that said so, or with a Water component.
+    std::vector<Entity> components, waters;
+    std::vector<float> sheets;                  // how wide each component's sheet was
+    scene.each<Water, Transform>([&](Entity entity, Water& water, Transform&) {
+        components.push_back(entity);
+        waters.push_back(entity);
+        sheets.push_back(water.size);
+        // Its wind was its own; there is one wind now, the scene's. A scene that has none takes the water's.
+        if (simd::length(settings.wind) < 0.01f) {
+            Vec2 along = water.windDirection;
+            float length = simd::length(along);
+            along = length > 1e-4f ? along / length : Vec2{1, 0};
+            settings.wind = Vec3{along.x, 0, along.y} * std::clamp(water.windSpeed, 0.0f, 40.0f);
         }
-    }
-    sheet.indices.reserve(size_t(cells) * size_t(cells) * 6);
-    for (int j = 0; j < cells; j++) {
-        for (int i = 0; i < cells; i++) {
-            uint32_t a = uint32_t(j * points + i), b = a + 1, c = a + uint32_t(points), d = c + 1;
-            sheet.indices.insert(sheet.indices.end(), {a, c, b, b, c, d});
-        }
-    }
-    world.showMesh(self, sheet);
-    const Transform* transform = world.scene.get<Transform>(self);
-    Vec3 origin = transform ? transform->worldPosition() : Vec3{0, 0, 0};
-    world.showOcean(*ocean, Vec2{origin.x, origin.z});
-}
-
-float Water::heightAt(const World& world, Entity self, Vec3 position) const {
-    const Transform* transform = world.scene.get<Transform>(self);
-    Vec3 origin = transform ? transform->worldPosition() : Vec3{0, 0, 0};
-    if (!ocean) return origin.y;
-    float half = std::max(size, 1.0f) * 0.5f;
-    float x = position.x - origin.x, z = position.z - origin.z;
-    float rim = std::min({x + half, z + half, half - x, half - z}) / (std::max(size, 1.0f) / float(std::clamp(resolution, 2, 400)) * 4.0f);
-    return origin.y + ocean->heightAt(x, z) * waveHeight * std::clamp(rim, 0.0f, 1.0f);
-}
-
-bool waterHeightAt(World& world, Vec3 position, float& height) {
-    bool found = false;
-    world.scene.each<Water, Transform>([&](Entity entity, Water& water, Transform& transform) {
-        if (found || !transform.isActiveInHierarchy) return;
-        Vec3 origin = transform.worldPosition();
-        float half = std::max(water.size, 1.0f) * 0.5f;
-        if (std::abs(position.x - origin.x) > half || std::abs(position.z - origin.z) > half) return;
-        height = water.heightAt(world, entity, position);
-        found = true;
     });
-    return found;
+    scene.each<MeshRenderer>([&](Entity entity, MeshRenderer& renderer) {
+        if (renderer.material && renderer.material->wasWater && std::find(waters.begin(), waters.end(), entity) == waters.end()) waters.push_back(entity);
+    });
+    for (Entity entity : components) scene.remove<Water>(entity);
+    if (waters.empty()) return;
+    scene.updateTransforms();
+    for (size_t i = 0; i < waters.size(); i++) {
+        Entity entity = waters[i];
+        MeshRenderer* renderer = scene.get<MeshRenderer>(entity);
+        const Transform* transform = scene.get<Transform>(entity);
+        // How wide it is: its mesh (the built-in plane is a meter square, when it is not loaded) times
+        // its scale; a component's sheet was as wide as it said.
+        float width = i < sheets.size() ? sheets[i] : 0.0f;
+        if (renderer && transform) {
+            Vec3 lowest{-0.5f, 0, -0.5f}, highest{0.5f, 0, 0.5f};
+            bool known = renderer->meshName == "plane";
+            if (renderer->mesh) lowest = renderer->mesh->bounds().min, highest = renderer->mesh->bounds().max, known = true;
+            if (known) {
+                float across = (highest.x - lowest.x) * simd::length(xyz(transform->world.columns[0]));
+                float along = (highest.z - lowest.z) * simd::length(xyz(transform->world.columns[2]));
+                width = std::max(width, std::max(across, along));
+            } else {
+                width = std::max(width, 1e9f);  // a mesh not known here: taken for a sea, as it was most likely
+            }
+        }
+        // A pool, a basin, a pond: too small to be a sea. It stays a plane, of clear blue, seen through.
+        if (renderer && width < 300.0f) {
+            if (renderer->material) {
+                renderer->material->alphaMode = AlphaMode::Blend;
+                renderer->material->roughness = std::min(renderer->material->roughness, 0.08f);
+            }
+            continue;
+        }
+        // The first large one is the sea, unless the scene has one already.
+        if (!settings.sea.enabled && transform) {
+            SeaSettings& sea = settings.sea;
+            sea.enabled = true;
+            float top = renderer && renderer->mesh ? renderer->mesh->bounds().max.y : 0.0f;
+            sea.level = transformPoint(transform->world, Vec3{0, top, 0}).y;
+            if (renderer && renderer->material) {
+                const Material& look = *renderer->material;
+                sea.color = Vec3{look.baseColor.x, look.baseColor.y, look.baseColor.z};
+                sea.clarity = SeaSettings::clarityOfMurk(look.baseColor.w);
+                sea.foam = std::max(look.foam, 0.0f);
+            }
+        }
+        if (renderer) renderer->isVisible = false;
+    }
 }
 
-MOLTEN_COMPONENT(Water, MOLTEN_FIELD(size).range(4, 20000).help("Meters along each side"),
-                 MOLTEN_FIELD(resolution).range(8, 400).help("Squares along each side of the sheet: more shows smaller waves and costs more"),
-                 MOLTEN_FIELD(windSpeed).range(0.5f, 30).help("Meters per second: 3 ripples a pond, 9 is a fresh breeze, 20 a gale"), MOLTEN_FIELD(windDirection),
-                 MOLTEN_FIELD(patchSize).range(10, 2000).help("Meters before the pattern of waves repeats"), MOLTEN_FIELD(choppiness).range(0, 2),
-                 MOLTEN_FIELD(waveHeight).range(0, 4).help("Times what that wind really raises"), MOLTEN_FIELD(foam).range(0, 4))
+MOLTEN_COMPONENT(Water, MOLTEN_FIELD(size), MOLTEN_FIELD(resolution), MOLTEN_FIELD(windSpeed), MOLTEN_FIELD(windDirection), MOLTEN_FIELD(patchSize),
+                 MOLTEN_FIELD(choppiness), MOLTEN_FIELD(waveHeight), MOLTEN_FIELD(foam))
 
 }  // namespace molten

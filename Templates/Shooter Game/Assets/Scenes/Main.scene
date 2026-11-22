@@ -5,12 +5,12 @@ settings
   skyGround 0.16 0.17 0.16
   skyIntensity 1
   environmentIntensity 1
-  fog 0.62 0.72 0.84 0
+  fog 0.62 0.72 0.84 0.0012
   shadows 1 80
   rayTracedShadows 0 4
   rayTracedLighting 0 1 0 0 1
   rayTracedReflections 0.3 1
-  fogShape 0 0
+  fogShape 0 1 1
   wind 0 0 0 0.4
   ambientOcclusion 1 0.6 1
   bloom 1 0.06 1
@@ -19,7 +19,7 @@ settings
   toneMapper 2
   vignette 0.25
   clouds 0.25 1 1500 1200
-  volumetrics 1 0
+  volumetrics 1 16
   lens 0 0 0
   lensFlare 0.6
 entity "Sun"
@@ -34,7 +34,7 @@ entity "Land"
   materialAsset "Materials/Grass.material"
   collider box 120 0.5 120 0 0 0 0
 entity "Floor"
-  transform 0 -0.5 0 0 0 0 1 51 1.02 51
+  transform 0 -0.5 0 0 0 0 1 51.01 1.03 51.01
   parent 1
   mesh "cube" -1 1 1 1 1 1 1
   materialAsset "Materials/Ground.material"
@@ -592,7 +592,7 @@ entity "Firing Line"
   materialAsset "Materials/Cover.material"
   collider box 5.5 0.5 0.25 0 0 0 0
 entity "Line Stripe"
-  transform 0 1.01 14.5 0 0 0 1 11 0.03 0.52
+  transform 0 1.01 14.5 0 0 0 1 11.02 0.049999997 0.53999996
   parent 1
   mesh "cube" -1 1 1 1 1 0 1
   materialAsset "Materials/Stripe.material"
@@ -1412,7 +1412,7 @@ entity "Rounds"
     field mostHealth "100"
     field sound "Audio/pickup.wav"
 entity "Lid"
-  transform 0 0.52 0 0 0 0 1 1.02 0.1 1.02
+  transform 0 0.52 0 0 0 0 1 1.04 0.120000005 1.04
   parent 257
   mesh "cube" -1 1 1 1 1 0 1
   materialAsset "Materials/Stripe.material"
@@ -1429,7 +1429,7 @@ entity "Rounds"
     field mostHealth "100"
     field sound "Audio/pickup.wav"
 entity "Lid"
-  transform 0 0.52 0 0 0 0 1 1.02 0.1 1.02
+  transform 0 0.52 0 0 0 0 1 1.04 0.120000005 1.04
   parent 259
   mesh "cube" -1 1 1 1 1 0 1
   materialAsset "Materials/Stripe.material"
@@ -1446,7 +1446,7 @@ entity "Rounds"
     field mostHealth "100"
     field sound "Audio/pickup.wav"
 entity "Lid"
-  transform 0 0.52 0 0 0 0 1 1.02 0.1 1.02
+  transform 0 0.52 0 0 0 0 1 1.04 0.120000005 1.04
   parent 261
   mesh "cube" -1 1 1 1 1 0 1
   materialAsset "Materials/Stripe.material"
@@ -1641,66 +1641,136 @@ entity "Count"
     field font ""
     field size "26"
     field color "1 0.62 0.28 1"
+entity "Help Pane"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 283
+  component "UIPanel"
+    field anchor "0 1"
+    field offset "117.5 -84.5"
+    field size "199 133"
+    field color "0.04 0.045 0.055 0.46"
+    field border "1"
+    field borderColor "1 1 1 0.1"
+entity "Help 1 Keys"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 283
+  component "HudText"
+    field text "W A S D"
+    field anchor "0 1"
+    field offset "30 -139"
+    field font ""
+    field size "12.5"
+    field color "1 0.72 0.45 0.95"
 entity "Help 1"
   transform 0 0 0 0 0 0 1 1 1 1
   parent 283
   component "HudText"
-    field text "W A S D   move"
+    field text "move"
     field anchor "0 1"
-    field offset "63.399998 -109"
+    field offset "93 -139"
     field font ""
-    field size "12"
-    field color "1 1 1 0.62"
+    field size "12.5"
+    field color "1 1 1 0.78"
+entity "Help 2 Keys"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 283
+  component "HudText"
+    field text "Shift"
+    field anchor "0 1"
+    field offset "30 -120"
+    field font ""
+    field size "12.5"
+    field color "1 0.72 0.45 0.95"
 entity "Help 2"
   transform 0 0 0 0 0 0 1 1 1 1
   parent 283
   component "HudText"
-    field text "Shift   run"
+    field text "run"
     field anchor "0 1"
-    field offset "54.1 -92"
+    field offset "93 -120"
     field font ""
-    field size "12"
-    field color "1 1 1 0.62"
+    field size "12.5"
+    field color "1 1 1 0.78"
+entity "Help 3 Keys"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 283
+  component "HudText"
+    field text "Space"
+    field anchor "0 1"
+    field offset "30 -101"
+    field font ""
+    field size "12.5"
+    field color "1 0.72 0.45 0.95"
 entity "Help 3"
   transform 0 0 0 0 0 0 1 1 1 1
   parent 283
   component "HudText"
-    field text "Space   jump"
+    field text "jump"
     field anchor "0 1"
-    field offset "57.199997 -75"
+    field offset "93 -101"
     field font ""
-    field size "12"
-    field color "1 1 1 0.62"
+    field size "12.5"
+    field color "1 1 1 0.78"
+entity "Help 4 Keys"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 283
+  component "HudText"
+    field text "Mouse"
+    field anchor "0 1"
+    field offset "30 -82"
+    field font ""
+    field size "12.5"
+    field color "1 0.72 0.45 0.95"
 entity "Help 4"
   transform 0 0 0 0 0 0 1 1 1 1
   parent 283
   component "HudText"
-    field text "Mouse   look, fire"
+    field text "look and fire"
     field anchor "0 1"
-    field offset "75.8 -58"
+    field offset "93 -82"
     field font ""
-    field size "12"
-    field color "1 1 1 0.62"
+    field size "12.5"
+    field color "1 1 1 0.78"
+entity "Help 5 Keys"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 283
+  component "HudText"
+    field text "R"
+    field anchor "0 1"
+    field offset "30 -63"
+    field font ""
+    field size "12.5"
+    field color "1 0.72 0.45 0.95"
 entity "Help 5"
   transform 0 0 0 0 0 0 1 1 1 1
   parent 283
   component "HudText"
-    field text "R   load"
+    field text "reload"
     field anchor "0 1"
-    field offset "44.8 -41"
+    field offset "93 -63"
     field font ""
-    field size "12"
-    field color "1 1 1 0.62"
+    field size "12.5"
+    field color "1 1 1 0.78"
+entity "Help 6 Keys"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 283
+  component "HudText"
+    field text "Esc"
+    field anchor "0 1"
+    field offset "30 -44"
+    field font ""
+    field size "12.5"
+    field color "1 0.72 0.45 0.95"
 entity "Help 6"
   transform 0 0 0 0 0 0 1 1 1 1
   parent 283
   component "HudText"
-    field text "Esc   free the pointer"
+    field text "free the pointer"
     field anchor "0 1"
-    field offset "88.2 -24"
+    field offset "93 -44"
     field font ""
-    field size "12"
-    field color "1 1 1 0.62"
+    field size "12.5"
+    field color "1 1 1 0.78"
 entity "Restart"
   transform 0 0 0 0 0 0 1 1 1 1
   parent 283

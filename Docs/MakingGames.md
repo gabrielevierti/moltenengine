@@ -41,35 +41,31 @@ The scene's settings turn everything on: ray traced shadows, reflections and bou
 
 ## The components that come with the engine
 
-They are under **Add Component** in the inspector, like a game's own. Each does one thing; a game is several of them on a few entities.
+Under **Add Component**, as in Unity, are the parts a game is built of; what the game does with
+them is its own code (a script, or a visual script):
 
-| Component | What it does |
+| Category | Components |
 | --- | --- |
-| **PlayerMover** | Moves its entity with W A S D or the arrows, Space to jump. `rolls` makes it a ball that is pushed; `movesAlongZ` off and `limitX` make it a paddle or a ship. |
-| **Follow** | Keeps its entity (a camera, usually) at an offset from another, smoothly. |
-| **Spin** | Turns at a steady rate. |
-| **Mover** | Moves at a steady velocity, or toward the entity named in `chases`. |
-| **Lifetime** | Removes its entity after some seconds: bullets, effects. |
-| **Collectible** | With a trigger collider: when `collector` touches it, a shared value goes up and it is gone. |
-| **Health** | Takes damage; at zero the entity is removed, optionally with points, an effect, and the scene starting over. |
-| **Damage** | Hurts the Health of what it touches; `onlyTo` limits it by name. |
-| **Shooter** | Spawns a prefab in front of its entity while a key or the pointer is held. |
-| **Spawner** | Spawns a prefab every few seconds, around its entity. |
-| **HudText** | Text on the screen. `{name}` shows a shared value: `Coins {score}`. |
-| **Goal** | When a shared value reaches a target: a message, and optionally the next scene. |
-| **RestartWhenBelow** | Starts the scene over when its entity falls below a height. |
-| **ConstantSpeed** | Keeps a body at one speed whatever it bounces off: the ball of a brick breaker. |
-| **Breakable** | Removed when hit, with points. |
-| **Explosion** | Pushes bodies away and hurts what has Health, once, when it appears. |
-| **Flicker** | Makes a light waver like a flame. |
-| **Shuttle** | Takes its entity to a place and back, again and again: a platform, a moving target, a gate. |
-| **CharacterController**, **CharacterMover**, **OrbitCamera** | Someone to walk with, seen from behind: see "Someone to walk with". |
-| **FirstPersonLook** | The same seen from its own eyes: the mouse turns the body and tips the camera. |
-| **Weapon** | A gun under a first-person camera: a magazine, a reserve, loading, a shot that lands on what the view looks at. |
-| **ShootingTarget**, **Hunter**, **Supply**, **DamageFlash** | A plate that falls when shot; a machine that hunts the player; rounds or health to pick up; red at the screen's edges when hurt. |
-| **NetworkSession**, **Networked** | A game on several machines: who is in it, and what is the same for all of them. See "Playing together". |
+| Mesh | Mesh Renderer |
+| Rendering | Camera, Light, Decal, Terrain, Foliage, LOD Group |
+| Physics | Box, Sphere, Capsule and Mesh Collider, Rigidbody, Joint, Character Controller, Buoyancy, Rope, Ragdoll |
+| Animation | Animator, Two Bone IK |
+| Audio | Audio Source, Reverb Zone |
+| Effects | Particle System, Liquid |
+| Navigation | Navigation Area, Nav Agent |
+| Paths | Spline, Spline Follower, Spline Road |
+| Vehicles | Vehicle Body, Wheel, Suspension, Deformable Tire, Bumper, Motor, Wing, Hinge, Propeller |
+| UI | Panel, Image, Text, Button, Toggle, Slider, Text Field, Bar, Arc, Layout, Stick, Loading Screen |
+| Network | Network Session, Networked |
+| Miscellaneous | Saveable |
 
-Their code is in `Engine/Kit` (`Kit.cpp` for the first of them, a file each for characters, shooting, vehicles, navigation and the network), written against the same interface a game's code uses. When one almost fits, copy it into the project's `Source` folder under another name and change it.
+A player that walks, a camera that follows, a pickup, a gun, a goal: those are the game's own
+scripts. The templates come with theirs (the Shooter Game's gun, plates, hunters and supplies are
+in its `Assets/Scripts`), to read, copy and change. The engine's components that once did such
+things (PlayerMover, Follow, Spin, Mover, Lifetime, Collectible, Health, Damage, Shooter, Spawner,
+Goal, Shuttle, Explosion, Flicker, Character Mover, Orbit Camera, First Person Look, Weapon,
+Boat and the vehicles' controls, When / Then...) still work in the scenes that have them, and
+their code is in `Engine/Kit` to copy from, but Add Component does not offer them any more.
 
 ### Shared values
 
@@ -177,7 +173,7 @@ chosen, they all go, in their order. Delete or Cmd+Backspace deletes what is cho
 
 **Inspector and Viewer.** The Inspector is for the things of the scene: what is chosen in the view or the Hierarchy, and nothing else. Each component has an icon by its name (a cube for a mesh, a bulb for a light, a speaker for a sound, braces for a script), so they are told apart at a glance; titles inside one (a material's Surface, Textures) are lines, not more folding headers. With nothing chosen, the Inspector shows the scene at a glance, what was chosen lately, and tiles to make the usual things. The Viewer is for the things of the Explorer, and it is part of the Explorer: choose an asset (or a folder) and it opens at the Explorer's right, as wide as its bar is dragged; close it with its **x** or by clicking empty space. A right click anywhere in the Explorer offers what can be made there. Choosing in one never unchooses the other, so a material in the Viewer can be dragged onto the entity in the Inspector.
 
-**Menus.** They are Unity's: **File** (scenes, projects, Build Settings), **Edit** (undo, cut, copy and paste, select, find, Play, Project Settings, Preferences), **Assets** (create and import files, compile the scripts), **Entity** (make things and arrange them in the Hierarchy: Unity's GameObject), **Component** (add one to what is selected), **Window** and **Help**. Every command is in one of them with its keys beside it, and Edit > **Search Everything** (Cmd+K) finds any of them by name, with the entities and the assets. Edit > **Preferences** (Cmd+,) has the editor's own settings: autosave, its look, and every shortcut (searchable, and changed by pressing the new keys). Edit > **Project Settings** has the project's: Game, Quality, Input, Physics, Tags and Layers. The Scene view's **Gizmos** button chooses what it shows besides the scene, the outline of every collider among it. The **Profiler** has three pages: the frame's time, what the scene holds (Scene), and what it weighs (Memory). The **Input** page of Project Settings shows a controller and a keyboard, lit as they are pressed (and whether a controller is connected), with what the chosen action is bound to in orange; **Bind by Pressing** takes the next key or button.
+**Menus.** On a Mac they are in the Mac's own menu bar, at the top of the screen, as every program's are, and only there, in full screen too. **Molten Engine v1.2** (the program's own menu, named with its version) has About, **Preferences** (Cmd+,: autosave, the editor's look, and every shortcut, searchable and changed by pressing the new keys) and Quit. **File** has the scenes (new, open, save), the projects (new, open, recent, close, Save Project as Template) and **Build Settings** (Shift+Cmd+B), which makes the game into an application. **Edit** has undo, cut, copy and paste, the selection, Find and **Search Everything** (Cmd+K, which finds any command by name, with the entities and the assets), Play, and **Project Settings**: what the game is (its name, version, icon and first scene), Quality, Input, Physics, Tags and Layers. **Assets** makes and imports files; **Entity** makes things and arranges them (Unity's GameObject); **Component** adds one to what is selected; **Window** opens the windows (the layouts are at the top right), and has **Full Screen** (as the window's green button does): the whole screen but the Mac's menu bar, which stays with the menus in it, and no title bar; the Dock hides until the pointer goes down to it; **Help** has the manuals. Each command is in one place, with its keys beside it. The Scene view's **Gizmos** button chooses what it shows besides the scene, the outline of every collider among it. **Simulate** (in the Scene view and the Game view) lets what moves by itself move while you edit: particles, water's waves, plants swaying in the wind, the clouds. It is off by default, and then all of it stands still except while such a thing is selected (a particle system, a water or swaying material), so that it can be tuned while it is seen moving; the button is lit whenever it moves. The **Profiler** has three pages: the frame's time, what the scene holds (Scene), and what it weighs (Memory). The **Input** page of Project Settings shows a controller and a keyboard, lit as they are pressed (and whether a controller is connected), with what the chosen action is bound to in orange; **Bind by Pressing** takes the next key or button.
 
 **Text fields name nothing.** Wherever a field names something (a sound, a scene, a prefab, a timeline, an entity, a tag, a bone, an animation, a state or parameter of the Animator, an input action, a key, a shared value, a message), the Inspector and the Visual Script boxes offer a list of what it can actually be, with a search box when the list is long; files can also be dropped on it from the Explorer. A name that is no longer there shows in orange as missing. Values and messages, which are new names a game invents, have **A new name** at the end of their list. Only words people read (a button's label, a text on screen, a win message) are typed.
 
@@ -211,15 +207,6 @@ In the Scene view, several selected objects move, turn and scale together. **Cen
 
 In the scene view a camera is drawn as the pyramid of what it sees, a directional light as its rays, a spot light as its cone. A camera's scale changes nothing about its picture.
 
-## Shots, and a camera that glides between them
-
-**Entity > Camera Shot** makes a shot where the Scene view looks from now (and, the first time,
-gives the scene's Camera a **Camera Director**). The director films the shot of the highest
-`priority` among those switched on, and glides to a new one over its `blendSeconds` (0 cuts),
-slowing out and in, its field of view too. Switch a close shot on (from a trigger, a script, a
-timeline's Show track) and the camera goes to it; switch it off and it goes back. A shot can move:
-give it Follow or Orbit Camera and the camera follows it, blends included.
-
 ## Cutscenes
 
 A cutscene is an animation like any other: of an entity that holds what moves in it (the camera,
@@ -230,13 +217,9 @@ script. Scenes made before keep their Timeline Players and `.timeline` files, wh
 
 ## Morning, noon and night
 
-**Day and Night** (Add Component > Environment), on any entity, moves the scene's sun (the
-Directional Light named in `sun`) across the sky as `hour` goes from 0 to 24: up in the east at
-6, highest at noon (`highest` degrees), down in the west at 18; `facing` turns its path. Its light
-warms near the horizon and goes at night, when a dim blue moon lights the scene instead. The sky,
-the light it gives and the fog follow; by day they are the scene's own, as set in Rendering.
-`dayMinutes` makes the clock run (real minutes for a whole day; 0 stops it). It sets the shared
-values `hour` and `night` (0 by day, 1 in the deep night): turn on lamps and headlights with it.
+The sky follows the sun by itself (Environment > Sky > Automatic): turn the sun, its rotation, and
+the day goes by, gold at sunset, then night with its moon and stars. A day that passes while the
+game runs is the game's own code: a script that turns the sun a little every frame.
 
 ## Hills and valleys: Terrain
 
@@ -327,7 +310,7 @@ Save the scene before committing it.
 
 ## Your keys, your colors
 
-**Edit > Preferences** (Cmd+,). Under **Shortcuts**, click an action and press its new keys:
+**Molten Engine > Preferences** (Cmd+,). Under **Shortcuts**, click an action and press its new keys:
 Backspace leaves it without one, Esc keeps what it had. An action whose keys another one uses
 says so in orange. **Reset** puts one back; **All as They Were** puts them all back. The menus
 and Cmd+K show the keys as you set them. Under **Look**: Forge (the orange of hot iron), Ocean,
@@ -362,7 +345,7 @@ Take a `World&` when the component only needs the scene, physics, input, time an
 
 ## Game logic without code: When / Then
 
-**When / Then** (Add Component > Logic) does up to four things when something happens. All of
+**When / Then** (kept for the scenes that have it; Add Component no longer offers it: a visual script does the same) does up to four things when something happens. All of
 it is chosen from lists in the Inspector.
 
 - **when**: *Something enters* its trigger (a Collider with Is Trigger on the same entity; `who`
@@ -379,7 +362,7 @@ A door that opens with three keys: *A value reaches* `keys` 3, then *Hide* `Door
 
 ## Saving the game without writing what to save
 
-Give **Saveable** (Add Component > Logic) to what should be kept: a chest, a door, the player,
+Give **Saveable** (Add Component > Miscellaneous) to what should be kept: a chest, a door, the player,
 each coin. `kit::saveState(world, "Slot 1")` keeps, for each of them, where it is (unless
 `keepsPlace` is off), whether it is on, the values of its components (a door's state, an agent's
 speed) and whether it was destroyed (a coin picked up stays picked up), with the shared values
@@ -515,47 +498,99 @@ place; if the code does not build, the engine's own is used, so the game still r
 
 A visual script can be written out as C++, and C++ made that way can go back to boxes: see [To C++ and back](VisualScripting.md#to-c-and-back).
 
-## Lighting, Rendering and Quality
+## Lighting, Environment, Rendering and Quality
 
-**Lighting** is one page: the Sun; the **Sky**, from a simulated atmosphere by default (sunlight
-scattered by the air and the haze, as on the Earth: blue by day; gold, orange and red round a low
-sun with the earth's shadow rising opposite; dark at night; all from the sun's height, so turn the
-sun); **Clouds** (with depth, at a height and a thickness of your choosing: a camera can fly in,
-through and above them, and inside them the world fades into white); Fog; Wind; how the light is
-worked out (shadow maps, ray tracing, ambient occlusion); and the scene's lights in a list that
-opens when wanted. The Hierarchy's funnel button shows only one kind of thing (lights, cameras...).
+**Lighting** is what lights the scene: the Sun, how much the sky lights it (**Sky Light**), how far
+its **Shadows** reach, and the scene's lights in a list that opens when wanted. **Environment** is
+the world of the game: the **Sky**, from a simulated atmosphere by default (sunlight scattered by
+the air and the haze, as on the Earth: blue by day; gold, orange and red round a low sun with the
+earth's shadow rising opposite; dark at night; all from the sun's height, so turn the sun);
+**Clouds** (with depth, at a height and a thickness of your choosing: a camera can fly in, through
+and above them, and inside them the world fades into white); **Fog** and its light shafts; the
+**Weather**, with the **Wind** (how hard, which way, how gusty), which the weather raises; and the
+sea (**Water**). How all of it is drawn (shadow maps or ray tracing, how sharp, how many rays) is
+not set here: it is the project's, in Project Settings > Quality.
 
-**Rendering** is the camera: bloom, exposure and tone mapping (none by default), grading, color
-(contrast, saturation, temperature, tint, sharpen), depth of field, motion blur, and the **lens
-flare**: the sun's light scattered in the glass, a glow, a star, a halo and ghosts, while the sun
-is in view and not hidden.
+The sky is **Automatic** by default: turn the sun and the sky follows it, day, sunset, then night
+with the moon (across the sky from the sun, taking over once the sun's last light has gone) and
+the stars; the fog is **lit by the sun** with it (its color is its color at noon: gold at sunset,
+dark at night), and so are the clouds. **Fixed colors** keeps the sky as its colors say, whatever
+the sun does. The clouds go with the scene's **Wind**: carried along it, drawn out along it,
+slowly changing shape; and the fewer there are, the more they gather in groups, as fair-weather
+clouds do. **Light Shafts** lets the air glow where the sun reaches it, so that what stands in
+its way casts beams through it.
+
+**Weather** is built in, none by default, and the wind rises with it (a shower freshens it, a
+storm makes a gale of it: the clouds, the waves, the rain and what sways all go the same way).
+**Rain** falls round the camera with the wind; each drop is aimed, as it is born, at what it will
+hit (any collider, the ground's mesh, a car's roof) or at the water, and ends there: a splash of
+droplets thrown off the way the surface faces, a widening ring on water, and on what is steep (a
+wall, a windscreen, the side of a car) drops that run down it. What is out in the rain gets wet:
+darker where it soaks the water up, glossier, with rings spreading where the drops land on what
+lies flat and thin trails running down what stands upright; under a roof, a porch or inside a car
+it stays dry (the scene round the camera is seen from above to know). As it rains the sky clouds
+over, the sun dims and the air thickens. **Storm** adds lightning, a few kilometers away or
+nearer: some strokes stay inside the clouds and light them from within, round where they are;
+the others are a bolt down from the clouds to the ground, zigzagging, with branches, flashing a
+few times in quick succession, the clouds glowing round it and the scene lit the more the nearer
+it is (the moment of each stroke is in `World::weatherNow`, for a game's thunder). **Snow** falls
+as rain does but slowly: flakes that sway, go with the wind, and melt a moment after they land
+(nothing settles yet). A game that wants a weather of its own leaves all three at 0 and makes its
+own from the Rain effect. The Hierarchy's funnel button shows only one kind of thing (lights, cameras...).
+
+**Rendering** is what is drawn of the scene beyond its light: ambient occlusion (how the screen's
+own looks), depth of field and motion blur. **Post Processing** is what is done to the picture
+afterwards, as a camera does: exposure and tone mapping (none by default), bloom, color (contrast,
+saturation, temperature, tint, grading, sharpen), and the lens and the film: the **lens flare**
+(the sun's light scattered in the glass, a glow, a star, a halo and ghosts, while the sun is in
+view and not hidden), vignette, grain.
 
 **Project Settings > Quality** is how well the game draws as it ships, the same for every scene.
 A scene says what it wants to look like (where its sun is, whether its clouds have depth, how
-far its shadows should reach, which of its light is ray traced); the quality says how much of
-that the machine is asked for. Four levels, **Low, Medium, High** (where a project starts) and
+far its shadows should reach); the quality says how much of that the machine is asked for, and
+all that a scene has no say in, ray tracing first. Four levels, **Low, Medium, High** (where a project starts) and
 **Ultra**, and under them seven groups that can each be at a level of their own with the
-L M H U buttons at the right of their row, or opened to set their values one by one:
+L M H U buttons at the right of their row, or opened to set their values one by one (Ray Tracing has
+one more button before them, **Off**):
 
 | Group | What it decides |
 |---|---|
 | Resolution | How many pixels are drawn before the picture is made the screen's size (MetalFX keeps it sharp), and **dynamic resolution**: fewer pixels while the GPU cannot keep the frame rate, more again when it can |
 | Anti-Aliasing | Multisampling: off, 2x or 4x |
-| Shadows | The farthest the sun's shadows reach (a scene may ask for less: Window > Lighting > Shadow Maps), the shadow map's size, how many slices |
-| Ray Tracing | The most of it a scene gets: none, the sun's shadows, the light around things and reflections, or all a scene asks |
+| Shadows | Shadow maps on or off, the farthest the sun's shadows reach (a scene may ask for less: Window > Lighting > Shadows), the shadow map's size, how many slices |
+| Ray Tracing | **Off**, or on at **Low, Medium, High or Ultra**. On, all of the light is found with rays at every level: the sun's **shadows** (sharp where things touch, soft away from them), the **light around things** (the sky's light hidden where it really is, and **bounced light**: a red wall in the sun tints the floor) and **reflections**. A higher level sends more rays along shadows' edges and for the light around things, and mirrors rougher things. Off, or where the GPU cannot trace rays: shadow maps, the screen's ambient occlusion, reflections of the sky. The whole project's Low level has it off |
 | Effects | The screen's ambient occlusion, bloom, the steps of light shafts |
 | Sky | Clouds with depth or flat, in how many steps, into how large a picture |
 | Detail | How far the far levels of LOD groups and painted foliage last |
 
-Where a scene asks for more than the level gives, the Lighting panel says so, with a button to
-this page. The quality is kept in Settings/Quality.settings and goes into the exported game.
+**Low** is meant to still look good on the slowest machine the game runs on: a little smaller and
+made sharp by MetalFX, shadow maps to 60 m, the screen's ambient occlusion, light shafts and
+clouds with depth, walked coarsely; only ray tracing is off. **Ultra** is the best the engine
+draws at 60 frames a second on a recent Mac (an M3): 4x multisampling, shadows to 250 m at 4096,
+the most rays (twelve along a shadow's edge, three for the light around things, mirrors on
+rougher things), clouds with depth in 64 steps, the finest light shafts, and detail that lasts
+half as far again; every pixel while the GPU keeps up, a few fewer, made sharp by MetalFX, while
+it cannot. Every level keeps its frame rate that way.
 
-**Ray tracing costs about a ray a pixel**, at any level: one ray toward the sun from each pixel
-that faces it, and more only along the edges of shadows; the light around things (the sky's,
-hidden in corners and under cars, and what is bounced off lit walls) is traced for one pixel in
-four before the scene is drawn, and smoothed. On a laptop at the size of its own screen that is
-still millions of rays a frame: leave Dynamic Resolution on, and a GPU that cannot keep up
-draws fewer pixels instead of fewer frames.
+What makes it cheap: the clouds are walked for one pixel in four each frame, in turn, and the rest
+kept from the frames before, moved to where they are now seen (a quarter of the cost, and smoother
+than walking them all); the sea says its own light and the colors that get through it, and the
+blending puts them over what is under it, so with multisampling it is shaded once a pixel rather
+than once a sample; with the sun's shadow traced, the shadow maps are drawn only for the light
+shafts, smaller and with two slices. **Profiler > Frame** shows what each pass of
+the picture costs the GPU (the shadow maps, the clouds, the scene, the bloom...), in milliseconds:
+where to look first when a frame is slow.
+
+Where a scene asks for shadows farther than the level reaches, the Lighting panel says so. The quality is kept in Settings/Quality.settings and goes into the exported game.
+
+**Ray tracing costs about a ray and a half a pixel**: one ray toward the sun from each pixel
+that faces it, from the pixel's own place and the same in every frame (so shadows stand still
+while the camera moves), and more only along the edges of shadows; the light around things (the
+sky's, hidden in corners and under cars, and what is bounced off lit walls) is traced for one
+pixel in four before the scene is drawn, gathered over frames and smoothed; and one ray from each
+smooth pixel for what it mirrors. On a laptop at the size of its own screen that is still
+millions of rays a frame: leave Dynamic Resolution on, and a GPU that cannot keep up draws fewer
+pixels instead of fewer frames.
 
 **Area lights** (Entity > Light > Area Light) are glowing rectangles: a window, a ceiling panel, a
 screen, shining from their front, softly, as much as their size.
@@ -595,29 +630,28 @@ stars when the sun is down, turning slowly and twinkling.
 above, between a **Height** and a **Thickness**: the sun lights them through, gold and red when it
 is low, and a camera can fly under, into and above them.
 
-**Decals.** A **Decal** (Add Component > Effects) projects a picture down its entity's box onto
+**Decals.** A **Decal** (Add Component > Rendering) projects a picture down its entity's box onto
 whatever is under it: the entity's scale is its size, and its y how deep it reaches (turn it to
 put a sign on a wall). **Darkens** multiplies what is there, as dirt, cracks, tire marks and
 damp do; off, it is painted over it.
 
-**Wind.** A material's **Sway** lets the scene's **Wind** (Rendering > Wind) move it, the more
+**Wind.** A material's **Sway** lets the scene's **Wind** (Environment > Weather > Wind) move it, the more
 the higher above the model's base: 1 for grass, 0.1 for a tree, in waves that cross the field
 and gusts as gusty as the wind's gustiness. Painted Foliage sways with its material.
 
 ## Water, mist and traced light
 
-- **Water** is a material: choose the shader *Water* (waves cross it, it mirrors the sky at a glancing angle). `Buoyancy` on a body makes it float at a water level.
-- **Fog** has *Thins With Height* (it lies low, as mist does), *Glow Toward Sun* and *Light Shafts*, in Lighting > Environment:
+- **Water** is the scene's sea (Environment > Water; its waves are the wind's and the weather's), or a shader of the game's own (Assets > New > Water Shader). `Buoyancy` on a body makes it float on the sea.
+- **Fog** has *Thins With Height* (it lies low, as mist does), *Glow Toward Sun* and *Light Shafts*, in Environment > Fog:
   with shafts the fog glows only where the sun reaches it, and what stands in the sun's way casts beams of shadow through the mist
   (with shadow maps, not with ray traced sun shadows).
-- **Clouds Have Depth** (Lighting > Environment > Sky) makes the clouds volumes one looks through, lit from the sun's side.
-- **Lighting > Quality** has four levels, Low, Medium, High and Ultra, from shadow maps alone to every traced effect
-  with four rays: choose one to start, then change any setting under it (the level then reads Custom).
-- With **ray traced sun shadows** on: *Ambient Light* hides the sky's light where something is really in the way;
-  *Bounced Light* is global illumination, one bounce: the same rays bring back the light of what they hit, so a red wall in the sun
-  tints the floor beside it; *Reflections* makes smooth surfaces mirror what is around them: only those smoother than
-  *Up To Roughness* (0.3 to begin with), fading toward it, and as much as *Strength* says. Rougher surfaces keep the sky's soft reflection. What a ray hits is seen in its material's
-  color (not its textures), lit by the sky and the sun. More *Ambient Rays* give less grain: there is no denoiser yet.
+- **Clouds Have Depth** (Environment > Clouds) makes the clouds volumes one looks through, lit from the sun's side.
+- **Ray tracing** is in Project Settings > Quality: off, or on at Low, Medium, High or Ultra, and on it traces all of
+  the light: the sun's shadows; the sky's light hidden where something is really in the way; bounced light (global
+  illumination, one bounce: the same rays bring back the light of what they hit, so a red wall in the sun tints the
+  floor beside it); and reflections of what is around on smooth surfaces (rougher ones keep the sky's soft
+  reflection; how rough a surface still mirrors grows with the level). What a ray hits is seen in its material's
+  color (not its textures), lit by the sky and the sun.
 
 These shaders are compiled first with the extras and, if that fails on a system, again without: the console says which.
 
@@ -718,8 +752,11 @@ A view turned by the mouse with no button held needs the pointer: it is hidden a
 window, and only how the mouse moves is told. **First Person Look** (and an **Orbit Camera**
 with **Captures Mouse**) take it when the game starts; **Esc** (the action `pause`) gives it
 back, so that the buttons on the screen can be clicked, and a click on the game takes it
-again. In the editor it is held only while the Game window has the keys; there, the first Esc gives
-the pointer back and the next one stops the game. From code: `world.input.setPointerCaptured(true)`.
+again. In the editor the game hears the keys, the mouse and the controllers only while it has
+them: from Run, or from a click on its picture, until Esc, a click anywhere else (a menu, another
+window, the bar over the picture) or another program in front. It keeps running meanwhile, and the
+pointer is given back. Esc again, with the Game window still the one in use, stops the game. From
+code: `world.input.setPointerCaptured(true)`.
 
 ### A weapon
 
@@ -760,9 +797,10 @@ Two components do it:
 - **Network Session** (**Entity > Gameplay > Network Session**), one in the scene: who is in the
   game. Everyone who is in gets a copy of its **Player Prefab**, theirs to move, at the next of
   the entities whose names start with **Spawn Points**. Its **Mode** says what happens when
-  the game starts: **Menu** asks on the screen (Host a game, or Join one at an address),
-  **Host**, **Join** and **Server** do that at once, **Off** waits for code
-  (`session->host(world)`, `join`, `serve`, `leave`).
+  the game starts: **Menu** asks on the screen (Host a game, Join one at an address, or Play
+  alone), **Host**, **Join**, **Server** and **Alone** do that at once, **Off** waits for code
+  (`session->host(world)`, `join`, `serve`, `playAlone`, `leave`). Alone, the game is its own
+  server and only player, with no network at all: a game made for several is also one for one.
 - **Networked**, on every entity that must be the same thing for everyone: where it is goes
   from the machine that owns it to the others (and what its Animator was told, so that a
   figure is seen walking); destroyed on the server, it is gone everywhere.
@@ -789,7 +827,7 @@ and Health takes the message `damage` off itself.
 
 To try it on one Mac: run the game twice (the editor's Run for one, the built game for the
 other, or the built game twice), host in one and join `127.0.0.1` in the other. From a
-terminal, `MOLTEN_NET=host`, `MOLTEN_NET=server` or `MOLTEN_NET=join:192.168.1.20` before the
+terminal, `MOLTEN_NET=host`, `MOLTEN_NET=server`, `MOLTEN_NET=alone` or `MOLTEN_NET=join:192.168.1.20` before the
 program's name starts it that way without the menu. Keep both windows in view: macOS slows a
 window that is covered, and a host that stands still for eight seconds is taken to have gone. On a home network the others type the
 host's address, which its screen shows; from outside it, the host's router must send UDP port
@@ -816,30 +854,59 @@ fine for a few characters and too slow for a crowd. Its textures are not read ye
 
 ## A sea that moves
 
-A material with the **Water** shader on any plane is a sea: the plane is drawn as a fine grid
-that rises and falls with the waves (from the scene's wind), shallow water is clear and takes the
-color of what is under it, and foam rings whatever stands in it (a rock, a pier, a hull) and laps
-against the shore.
+**The scene's sea** is in Window > Environment > **Water**: water everywhere below a **Level**, out
+to the horizon, unless it is turned off. A new scene has it, half a meter under its floor; a
+scene of before, or one a game makes in code, has none until it is turned on. Its waves are not
+set there at all: they are **the wind's and the weather's** (Environment > Weather > Wind: 2
+meters a second ripples it, 6 is a breeze with small waves, 12 a strong wind with white crests,
+20 a gale; a storm raises the wind to one). There is one wind: the one that sways the grass and
+carries the smoke. How it looks is set there, from a real sea to a cartoon lagoon:
 
-Add **Water** to an entity that draws a mesh with a Water material: the mesh becomes a sheet whose surface is an ocean worked out with a
-Fourier transform, from the wind you give it. `windSpeed` is in meters per second and raises the waves that wind really raises (3 ripples
-a pond, 9 is a fresh breeze with waves of two meters, 20 a gale); `choppiness` sharpens the crests; where they fold over, foam shows.
-`resolution` is how fine the sheet is and `patchSize` how far before the pattern repeats. A body with **Buoyancy** over a Water rides
-its waves. From code: `waterHeightAt(world, position, height)`. For water you can see through, set the material's blending to Blend
-and lower its alpha; it does not bend what is behind it yet.
+| Water | |
+|---|---|
+| **Deep** | Its color where it is deep: what is left of white light after a long way through it |
+| **Shallow** | The color it takes over a light bottom a meter or two down: turquoise over sand |
+| **Clarity** | How far one sees through it, in meters: down from above, and across under it |
+| **Scattering** | How much light its body sends back up: 0 dark ink, 1 a real sea, 2 a glowing lagoon |
+| **Reflections** | How much it mirrors the sky and what stands over it |
+| **Ripples** | The small waves over the swell: 0 glassy, 1 a real sea's, 2 choppy |
+| **Caustics** | The lines of light its waves gather on its bottom: 0 none, 1 as real, 3 drawn strong |
+| **Shore** | Foam where it meets the shore and what stands in it |
+| **Whitecaps** | White on the crests of waves that break: none below a fresh breeze, more the harder it blows |
 
-**Every water material has the sea's waves**, worked out by the same Fourier transform: on a
-plain plane with the Water material too, from the scene's Wind (or a fresh breeze without one),
-moving in the editor as well. Each pixel is shaded with the slope of the waves there, read
-twice at two sizes so that the repeat does not show; it mirrors the sky as it was captured
-(clouds and sunset included), glows green-blue through the crests the sun shines through,
-glitters where the sun catches it, and foams where waves break. With a **Water** component the
-sheet also rises and falls with the same waves.
+Things float on it (Buoyancy), the rain rings it, a boat leaves its wake on it. The waves rise
+and fall for real: the sea is drawn with a grid that follows the eye, fine nearby and coarser far
+off, so the water beside the boat has every wave and the water at the horizon costs little.
+Under its level all is under water: seen through it from above, the deeper the bluer; lit through
+it, dimmer and bluer the deeper, with the sun's light gathered by the very waves above into bright
+lines that crawl over the bottom and over whatever lies there, as they do in a real sea (they move
+as the waves move, sharp a little way down, blurred deeper); and with the camera under it, the
+world is seen from inside the water: hazy, blue, its surface overhead a mirror but for a round
+window where the sky shows through, bent.
+
+**Water of a game's own** (a pond, a pool, a lake above the sea, a cartoon lagoon) is a surface
+shader, as in Unity: **Assets > New > Water Shader** (or New Water Shader... in a material's Shader)
+makes one that already works, to change: it is told how deep the water is at each pixel
+(`in.behind`), the scene's wind (`in.wind`) and the time, and says the color, how much shows
+through, the ripples, the foam. Put it on a plane. (Scenes of before, whose water was a material,
+read with their sea where that water was, in its colors, if it was as large as a sea; a pool of
+before stays a plane of clear blue, until it is given a water shader.)
+
+**What floats leaves a wake.** Each body with a Buoyancy that is in the water has foam where the
+water meets its hull (as large as the Buoyancy's hull, or else its collider), thrown up at the
+bow as it moves; behind it, the churned trail it leaves, white right behind the stern and
+breaking into streaks of foam over paler water as it spreads and fades over a few seconds; and
+the two arms of its wake opening at the angle every wake opens at, which break white at speed.
+It follows the way the boat really went, turns and all. Nothing to add: a boat, a buoy and a
+crate have it as they float.
+
+A body with **Buoyancy** over the sea rides its waves: the same sea is worked out for it, from
+the same wind. From code: `waterHeightAt(world, position, height)`.
 
 **Floating things and boats.** Give a Buoyancy a **Hull** (half its size each way) and a
 RigidBody that rotates: it is held up at its four lower corners, each as deep as the water is
 there, so it rocks on the waves, lists and rights itself. **Current** carries it along, as a
-river does. A **Boat** (Add Component > Vehicles) beside them goes ahead with W and turns with
+river does. A **Boat** (in the Boat Game template's scenes; no longer offered by Add Component) beside them goes ahead with W and turns with
 A and D (or the left stick) while it floats, the rudder biting the more the faster it goes;
 from code, untick Uses Input and set `throttle` and `steer`.
 
@@ -1157,7 +1224,7 @@ layer Breath additive weight 0.5
     motion Breathe
 ```
 
-**Ragdolls.** A **Ragdoll** (Add Component > Characters) beside the Animator makes the
+**Ragdolls.** A **Ragdoll** (Add Component > Physics) beside the Animator makes the
 character go limp when it is ticked, at `ragdoll->limp(world, self, push)` or at the message
 "limp": a capsule body for each main bone of the skeleton (or those named in Bones), joined to
 the one above by a joint that bends at most Bend degrees, and the bones follow the bodies as they

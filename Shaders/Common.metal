@@ -26,6 +26,30 @@ static float pixelNoise(float2 pixel) {
     return fract(52.9829189 * fract(dot(pixel, float2(0.06711056, 0.00583715))));
 }
 
+// ---------------------------------------------------------------- the sea (Lighting > Water)
+
+static bool hasSea(constant FrameUniforms &frame) {
+    return frame.seaAbsorb.w > 0.5;
+}
+
+// The light the sea's water scatters toward the eye, `below` meters under its surface: the sky's
+// and the sun's from above, in the water's own color, dimmer and bluer the deeper.
+static float3 seaHaze(constant FrameUniforms &frame, float below) {
+    float3 sky = (frame.skyZenithColor * 0.55 + frame.skyHorizonColor * 0.45) * frame.skyIntensity * frame.environmentIntensity;
+    float3 sun = frame.sunColor * saturate(-frame.sunDirection.y) * 0.3;
+    return frame.seaColor.rgb * (sky + sun) * 1.5 * exp(-frame.seaAbsorb.xyz * max(below, 0.0) * 0.8);
+}
+
+// What is under the sea's level, seen from a camera that is under it too: the water between them
+// takes the colors away, red first, and puts its own haze in their place. What is above the level
+// is seen through the surface, and the water's surface does that for it (Water.metal).
+static float3 seenInSea(float3 color, float3 worldPosition, constant FrameUniforms &frame) {
+    if (!hasSea(frame) || frame.cameraUnderwater <= 0.0 || worldPosition.y > frame.seaColor.w) return color;
+    float range = length(worldPosition - frame.cameraPosition);
+    float3 kept = exp(-frame.seaAbsorb.xyz * range);
+    return color * kept + seaHaze(frame, frame.cameraUnderwater) * (1.0 - kept);
+}
+
 // ---------------------------------------------------------------- full-screen triangle
 
 struct FullscreenOut {

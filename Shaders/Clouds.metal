@@ -16,6 +16,14 @@
 // a little differently, so that what a few dozen steps miss becomes fine grain instead of
 // bands.
 //
+// And only one pixel in four is walked each frame, a different one of each two by two in turn
+// (fragment_clouds, into a picture half as wide and high); the other three are the last frame's,
+// moved to where their line of sight is seen now, and kept within what was just walked round
+// them, so that nothing that has moved trails behind (fragment_clouds_resolve). Each pixel is
+// walked anew every four frames, with a start of its own each time, and what it keeps of the
+// times before smooths the grain away. Clouds move slowly: the four frames do not show. It costs
+// a quarter of walking them all.
+//
 // Part of the extras: without them the clouds are the flat layer of Sky.metal.
 
 #include "Sky.metal"
@@ -38,19 +46,37 @@ static float cloudDensity(float3 at, constant FrameUniforms &frame, texture3d<fl
         return 0.0;
     }
     float scale = max(frame.cloudScale, 0.05);
-    float3 p = at + float3(frame.cloudOffset.x, 0.0, frame.cloudOffset.y) * 2400.0;     // where the wind has carried them
+    // Where the wind has carried them: read upwind of here, so that they go the way the wind blows
+    // (the way the waves run, Mesh.metal).
+    float3 p = at - float3(frame.cloudOffset.x, 0.0, frame.cloudOffset.y) * 2400.0;
+    // The wind draws them out along it, the harder the more (up to twice as long as wide), and
+    // leans their tops downwind: the shapes are read in the wind's own frame.
+    float speed = length(frame.cloudWind);
+    float2 along = speed > 0.1 ? frame.cloudWind / speed : float2(1.0, 0.0);
+    float stretch = 1.0 + min(speed, 30.0) * 0.033;
+    p.xz -= along * (height * (frame.cloudTop - frame.cloudBase) * min(speed, 30.0) * 0.012);
+    float2 windward = float2(dot(p.xz, along) / stretch, dot(p.xz, float2(-along.y, along.x)));
 
     // Where the clouds are: the same noise read very large, so that the sky has stretches
-    // with many and stretches with few, each several kilometers across.
-    float where = shapeNoise.sample(noiseSampler, float3(p.x, p.z, 0.0) * (scale / 61000.0) + float3(0.31, 0.57, 0.4), level(1.0)).r;
-    float cover = saturate(frame.cloudCoverage + (where - 0.5) * 0.7 * (1.0 - abs(frame.cloudCoverage * 2.0 - 1.0) * 0.6));
+    // with many and stretches with few, each several kilometers across; and, the fewer the
+    // clouds, the more they gather into groups between wide clear stretches, as fair-weather
+    // clouds do, instead of standing evenly over the whole sky.
+    float where = shapeNoise.sample(noiseSampler, float3(windward.x, windward.y, 0.0) * (scale / 61000.0) + float3(0.31, 0.57, 0.4), level(1.0)).r;
+    float4 group = shapeNoise.sample(noiseSampler, float3(windward.x, windward.y, 0.0) * (scale / 17000.0) + float3(0.73, 0.19, 0.62), level(1.0));
+    float coverage = frame.cloudCoverage;
+    float cover = saturate(coverage + (where - 0.5) * 0.7 * (1.0 - abs(coverage * 2.0 - 1.0) * 0.6)
+                         + (group.r - 0.5) * 1.1 * pow(1.0 - coverage, 1.5));
     if (cover <= 0.0) {
         return 0.0;
     }
 
     // Their body: swells (half of the block is above 0.5) with round lumps on them. The
-    // block repeats every 6.4 km across and 1.6 km up.
-    float3 inBlock = float3(p.x, p.z, p.y * 4.0) * (scale / 6400.0);
+    // block repeats every 6.4 km across and 1.6 km up; read a little bent (so that its
+    // pattern does not show), and moving slowly up through it with the time, so that each
+    // cloud slowly changes its shape as it goes.
+    float3 inBlock = float3(windward.x, windward.y, p.y * 4.0) * (scale / 6400.0);
+    inBlock.xy += (group.gb - 0.5) * 0.3;
+    inBlock.z += frame.starTime * 0.00035;
     float4 shape = shapeNoise.sample(noiseSampler, inBlock, level(blur));
     float lumps = shape.g * 0.625 + shape.b * 0.25 + shape.a * 0.125;
     float body = shape.r + (lumps - 0.5) * 0.42;
@@ -64,7 +90,8 @@ static float cloudDensity(float3 at, constant FrameUniforms &frame, texture3d<fl
         return amount;
     }
     // Wisps: fine lumps eat into the edges, as rags underneath and as billows on top.
-    float3 fine = detailNoise.sample(noiseSampler, float3(p.x, p.z, p.y) * (scale / 800.0), level(blur)).rgb;
+    // Torn faster than the body moves: the wisps run on downwind, and fray.
+    float3 fine = detailNoise.sample(noiseSampler, float3(windward.x - frame.starTime * speed * 0.15, windward.y, p.y) * (scale / 800.0), level(blur)).rgb;
     float bites = fine.r * 0.625 + fine.g * 0.25 + fine.b * 0.125;
     bites = mix(bites, 1.0 - bites, saturate(height * 5.0));
     return saturate(cloudRemap(amount, bites * 0.6, 1.0));
@@ -119,6 +146,9 @@ static float4 cloudsAlong(float3 direction, float start, uint stepCount, constan
     float3 skyBelow = frame.skyHorizonColor * 0.34 * dark + frame.skyGroundColor * 0.25 * dark + float3(0.03, 0.02, 0.04) * dusk;
 
     const int steps = int(clamp(stepCount, 8u, 128u));
+    const int lightLooks = steps >= 56 ? 6 : steps >= 36 ? 5 : 4;
+    const float lookGrowth = lightLooks == 6 ? 1.75 : lightLooks == 5 ? 2.1 : 2.9;
+    const float lookBlur = 3.0 / float(lightLooks);
     // Short steps near the eye, longer with the distance: the same detail on the screen for each.
     float growth = clamp(log2(max(reach / 2400.0, 1.0)), 0.0, 3.6);
     float spread = exp2(growth) - 1.0;
@@ -144,12 +174,13 @@ static float4 cloudsAlong(float3 direction, float start, uint stepCount, constan
         if (amount <= 0.002) {
             continue;
         }
-        // How much cloud lies between here and the light: six looks toward it, each further than the last.
+        // How much cloud lies between here and the light: a few looks toward it, each further than
+        // the last, over the same kilometer and a half however many (fewer at a lower quality).
         float between = 0.0, lightStep = 45.0, lightAt = 0.0;
-        for (int k = 0; k < 6; k++) {
+        for (int k = 0; k < lightLooks; k++) {
             lightAt += lightStep;
-            between += cloudDensity(at + toLight * lightAt, frame, shapeNoise, detailNoise, noiseSampler, false, 0.3 + float(k) * 0.5) * lightStep;
-            lightStep *= 1.75;
+            between += cloudDensity(at + toLight * lightAt, frame, shapeNoise, detailNoise, noiseSampler, false, 0.3 + float(k) * lookBlur) * lightStep;
+            lightStep *= lookGrowth;
         }
         float depth = between * extinction;
         // The light that came straight through, and the light scattered again and again on the
@@ -162,6 +193,8 @@ static float4 cloudsAlong(float3 direction, float start, uint stepCount, constan
         float heightIn = saturate((at.y - base) / (top - base));
         float3 sky = mix(skyBelow, skyAbove, smoothstep(0.0, 0.85, heightIn)) * (0.5 + 0.5 * exp(-amount * 2.2));
         float3 light = sun * 7.5 + sky * 0.42;
+        // A storm's lightning: the cloud lit from inside round the stroke, brightest where it is thick.
+        if (frame.lightning > 0.0) light += float3(0.78, 0.82, 1.0) * (lightningGlow(at, frame) * 12.0 * (0.35 + 0.65 * saturate(amount * 2.0)));
 
         // What this step adds, exactly, for a step this long through cloud this thick.
         float thick = amount * extinction;
@@ -212,7 +245,74 @@ fragment float4 fragment_clouds(SkyOut in [[stage_in]],
     if (frame.volumetricClouds == 0) {
         return float4(0.0, 0.0, 0.0, 1.0);
     }
-    return cloudsAlong(in.direction, pixelNoise(in.position.xy), frame.volumetricClouds, frame, shapeNoise, detailNoise, noiseSampler);
+    // A start of its own each frame: over the frames its pixel keeps, the grain smooths away.
+    float2 turn = float2(float(frame.frameIndex % 61u) * 7.31, float(frame.frameIndex % 53u) * 3.17);
+    return cloudsAlong(in.direction, pixelNoise(in.position.xy + turn), frame.volumetricClouds, frame, shapeNoise, detailNoise, noiseSampler);
+}
+
+// A picture read between its pixels without blurring it: a curve through four pixels each way
+// (Catmull-Rom), in five reads that each blend four. Read so frame after frame, what is kept
+// stays as sharp as it was walked.
+static float4 sampleSharp(texture2d<float> picture, sampler linearSampler, float2 uv, float2 size) {
+    float2 at = uv * size;
+    float2 middle = floor(at - 0.5) + 0.5;
+    float2 f = at - middle;
+    float2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    float2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    float2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    float2 w3 = f * f * (-0.5 + 0.5 * f);
+    float2 w12 = w1 + w2;
+    float2 between = w2 / w12;
+    float2 at0 = (middle - 1.0) / size, at3 = (middle + 2.0) / size, at12 = (middle + between) / size;
+    float4 sum = picture.sample(linearSampler, float2(at12.x, at0.y)) * w12.x * w0.y
+               + picture.sample(linearSampler, float2(at0.x, at12.y)) * w0.x * w12.y
+               + picture.sample(linearSampler, at12) * w12.x * w12.y
+               + picture.sample(linearSampler, float2(at3.x, at12.y)) * w3.x * w12.y
+               + picture.sample(linearSampler, float2(at12.x, at3.y)) * w12.x * w3.y;
+    float weight = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
+    return sum / weight;
+}
+
+// The clouds of the picture, whole: the pixels walked this frame where they are (one of each two
+// by two, `fresh`), and the others from the last frame's picture (`before`), where their line of
+// sight was seen then, kept within what was walked round them.
+fragment float4 fragment_clouds_resolve(FullscreenOut in [[stage_in]],
+                                        constant CloudResolveUniforms &resolve [[buffer(MMBufferPass)]],
+                                        texture2d<float> fresh [[texture(0)]],
+                                        texture2d<float> before [[texture(1)]],
+                                        sampler linearSampler [[sampler(MMSamplerLinearClamp)]]) {
+    float2 size = float2(before.get_width(), before.get_height());
+    uint2 pixel = uint2(in.position.xy);
+    int2 block = int2(pixel / 2u);
+    int2 freshSize = int2(fresh.get_width(), fresh.get_height());
+    // What was walked round here this frame: the range the clouds now have here.
+    float4 lowest = float4(1e9), highest = float4(-1e9), walked = float4(0.0);
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            float4 seen = fresh.read(uint2(clamp(block + int2(x, y), int2(0), freshSize - 1)));
+            lowest = min(lowest, seen);
+            highest = max(highest, seen);
+            if (x == 0 && y == 0) walked = seen;
+        }
+    }
+    bool isWalked = all(float2(pixel % 2u) == resolve.offset);
+    // Where this pixel's line of sight was in the last frame's picture.
+    float2 ndc = (in.position.xy / size) * float2(2.0, -2.0) + float2(-1.0, 1.0);
+    float4 far = resolve.inverseViewProjection * float4(ndc, 1.0, 1.0);
+    float3 direction = far.xyz / far.w - resolve.camera.xyz;
+    float4 then = resolve.previousViewProjection * float4(direction, 0.0);
+    float2 thenNdc = then.xy / max(then.w, 1e-6);
+    bool wasSeen = resolve.hasHistory > 0.5 && then.w > 0.0 && all(abs(thenNdc) < 1.0);
+    if (!wasSeen) {
+        // Nothing kept: the walked picture, smoothed up (its pixels sit at the walked ones of each two by two).
+        if (isWalked) return walked;
+        float2 at = (in.position.xy - 0.5 - resolve.offset) * 0.5 + 0.5;
+        return fresh.sample(linearSampler, at / float2(freshSize));
+    }
+    float2 uv = thenNdc * float2(0.5, -0.5) + 0.5;
+    float4 kept = clamp(sampleSharp(before, linearSampler, uv, size), lowest, highest);
+    // A pixel walked anew takes some of its new walk; the others keep theirs.
+    return isWalked ? mix(kept, walked, 0.4) : kept;
 }
 
 // One face of the sky's cubemap with the same clouds in it, so that what water and chrome

@@ -18,8 +18,6 @@
 #include "Kit/Spline.hpp"
 #include "Kit/Layout.hpp"
 #include "Kit/Terrain.hpp"
-#include "Kit/CameraShots.hpp"
-#include "Kit/DayNight.hpp"
 #include "Kit/Foliage.hpp"
 #include "Kit/WhenThen.hpp"
 #include "Kit/Saveable.hpp"

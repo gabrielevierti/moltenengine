@@ -29,7 +29,7 @@ TEST(a_group_can_be_at_a_level_of_its_own) {
     quality.setGroup(Group::Shadows, Level::Low);
     CHECK(quality.level == Level::Custom);
     CHECK(quality.levelOf(Group::Shadows) == Level::Low);
-    CHECK(quality.shadowResolution == 1024 && quality.shadowCascades == 2 && quality.shadowDistance == 40);
+    CHECK(quality.shadowResolution == 2048 && quality.shadowCascades == 2 && quality.shadowDistance == 60);
     // The rest is where it was.
     CHECK(quality.levelOf(Group::Resolution) == Level::High && quality.renderScale == 1.0f);
     CHECK(quality.levelOf(Group::RayTracing) == Level::High && quality.rayTracing == LightingQuality::High);
@@ -51,7 +51,14 @@ TEST(a_group_can_be_at_a_level_of_its_own) {
     CHECK(low.renderScale < medium.renderScale && medium.renderScale < high.renderScale && high.renderScale <= ultra.renderScale);
     CHECK(low.shadowDistance < medium.shadowDistance && medium.shadowDistance < high.shadowDistance && high.shadowDistance < ultra.shadowDistance);
     CHECK(int(low.rayTracing) < int(medium.rayTracing) && int(medium.rayTracing) < int(high.rayTracing) && int(high.rayTracing) < int(ultra.rayTracing));
-    CHECK(!low.volumetricClouds && medium.cloudSteps < high.cloudSteps && high.cloudSteps < ultra.cloudSteps);
+    CHECK(!low.rayTraced && medium.rayTraced && high.rayTraced && ultra.rayTraced);
+    CHECK(low.cloudSteps < medium.cloudSteps && medium.cloudSteps < high.cloudSteps && high.cloudSteps < ultra.cloudSteps);
+    CHECK(low.cloudResolution < medium.cloudResolution && medium.cloudResolution < high.cloudResolution && high.cloudResolution <= ultra.cloudResolution);
+    CHECK(low.lightShafts < medium.lightShafts && medium.lightShafts < high.lightShafts && high.lightShafts < ultra.lightShafts);
+    // Low is still a good picture: clouds with depth, the screen's ambient occlusion, light shafts.
+    CHECK(low.volumetricClouds && low.ambientOcclusion && low.lightShafts > 0 && low.metalFX);
+    // Every level keeps the frame rate by drawing fewer pixels while the GPU cannot: Ultra too, at 60.
+    CHECK(low.dynamicResolution && ultra.dynamicResolution && ultra.targetFrameRate == 60 && ultra.renderScale == 1.0f);
     CHECK(low.detailDistance < medium.detailDistance && medium.detailDistance < high.detailDistance && high.detailDistance < ultra.detailDistance);
 }
 
@@ -80,10 +87,10 @@ TEST(the_quality_goes_through_its_file) {
     CHECK(custom->shadowResolution == 2048 && custom->rayTracing == LightingQuality::High);
     // A new file that names a level and one value: the level's, with that value.
     std::optional<GameQuality> partial = GameQuality::parse("molten-quality 2\nlevel Low\ncloudSteps 99\n");
-    CHECK(partial && partial->antiAliasing == 1 && partial->cloudSteps == 99 && partial->shadowResolution == 1024);
+    CHECK(partial && partial->antiAliasing == 1 && partial->cloudSteps == 99 && partial->shadowDistance == 60);
 }
 
-TEST(the_quality_limits_what_a_scene_asks_and_adds_nothing_to_it) {
+TEST(the_quality_limits_what_a_scene_asks_and_decides_its_ray_tracing) {
     // A scene that asks for everything.
     RenderSettings scene;
     scene.cascades.shadowDistance = 110;
@@ -94,14 +101,14 @@ TEST(the_quality_limits_what_a_scene_asks_and_adds_nothing_to_it) {
     RenderSettings atLow = scene;
     GameQuality::preset(Level::Low).applyTo(atLow);
     CHECK(!atLow.rayTracedShadows && !atLow.rayTracedOcclusion && !atLow.rayTracedReflections && !atLow.rayTracedBounce);
-    CHECK(atLow.cascades.shadowDistance == 40 && atLow.cascades.resolution == 1024 && atLow.cascades.count == 2);
-    CHECK(!atLow.sky.cloudsHaveDepth && atLow.fogShaftSteps == 0 && !atLow.ambientOcclusionEnabled);
-    CHECK(atLow.sampleCount == 1 && atLow.renderScale == 0.75f && atLow.dynamicResolution);
+    CHECK(atLow.cascades.shadowDistance == 60 && atLow.cascades.resolution == 2048 && atLow.cascades.count == 2);
+    CHECK(atLow.sky.cloudsHaveDepth && atLow.sky.cloudSteps == 24 && atLow.fogShaftSteps == 8 && atLow.ambientOcclusionEnabled);
+    CHECK(atLow.sampleCount == 1 && atLow.renderScale == 0.8f && atLow.dynamicResolution);
 
     RenderSettings atMedium = scene;
     GameQuality::preset(Level::Medium).applyTo(atMedium);
     CHECK(lightingQualityOf(atMedium) == LightingQuality::Medium);
-    CHECK(atMedium.cascades.shadowDistance == 80 && atMedium.sky.cloudsHaveDepth && atMedium.sky.cloudSteps == 32 && atMedium.fogShaftSteps == 8);
+    CHECK(atMedium.cascades.shadowDistance == 100 && atMedium.sky.cloudsHaveDepth && atMedium.sky.cloudSteps == 32 && atMedium.fogShaftSteps == 12);
 
     RenderSettings atHigh = scene;
     GameQuality::preset(Level::High).applyTo(atHigh);
@@ -113,8 +120,10 @@ TEST(the_quality_limits_what_a_scene_asks_and_adds_nothing_to_it) {
     GameQuality::preset(Level::Ultra).applyTo(atUltra);
     CHECK(lightingQualityOf(atUltra) == LightingQuality::Ultra);
     CHECK(atUltra.sampleCount == 4 && atUltra.cascades.resolution == 4096 && atUltra.fogShaftSteps == 24);
+    CHECK(atUltra.sky.cloudSteps == 64 && atUltra.sky.cloudResolution == 0.5f && atUltra.shadowRayCount == 12 && atUltra.occlusionRayCount == 3);
 
-    // A scene that asks for little gets no more than it asks, at any level.
+    // A scene that asks for little gets no more than it asks, at any level; but ray tracing is
+    // the project's alone, whatever the scene's file says of it.
     RenderSettings plain;
     plain.sky.cloudsHaveDepth = false;
     plain.fogShaftSteps = 0;
@@ -122,7 +131,31 @@ TEST(the_quality_limits_what_a_scene_asks_and_adds_nothing_to_it) {
     plain.cascades.shadowDistance = 25;
     RenderSettings plainAtUltra = plain;
     GameQuality::preset(Level::Ultra).applyTo(plainAtUltra);
-    CHECK(!plainAtUltra.rayTracedShadows && !plainAtUltra.sky.cloudsHaveDepth && plainAtUltra.fogShaftSteps == 0 && !plainAtUltra.bloomEnabled);
+    CHECK(!plainAtUltra.sky.cloudsHaveDepth && plainAtUltra.fogShaftSteps == 0 && !plainAtUltra.bloomEnabled);
+    CHECK(lightingQualityOf(plainAtUltra) == LightingQuality::Ultra);
+    // On at a level no whole level has it at (Low is off at Low): all of it traced still, with the
+    // fewest rays; kept and written so.
+    GameQuality chosen = GameQuality::preset(Level::High);
+    chosen.setRayTracing(LightingQuality::Low);
+    chosen.findLevel();
+    CHECK(chosen.levelOf(Group::RayTracing) == Level::Custom && chosen.level == Level::Custom);
+    std::optional<GameQuality> read = GameQuality::parse(chosen.toText());
+    CHECK(read && read->rayTraced && read->rayTracing == LightingQuality::Low && read->levelOf(Group::RayTracing) == Level::Custom);
+    RenderSettings drawn;
+    drawn.bounceIntensity = 0.2f;
+    chosen.applyTo(drawn);
+    CHECK(drawn.rayTracedShadows && drawn.rayTracedOcclusion && drawn.rayTracedBounce && drawn.rayTracedReflections && drawn.bounceIntensity == 1.0f);
+    CHECK(lightingQualityOf(drawn) == LightingQuality::Low && drawn.shadowRayCount == 4 && drawn.occlusionRayCount == 1);
+    // Off: nothing traced, and the ray tracing group is where Low has it.
+    chosen.rayTraced = false;
+    chosen.findLevel();
+    CHECK(chosen.isAt(Group::RayTracing, Level::Low));
+    RenderSettings plainDrawn;
+    chosen.applyTo(plainDrawn);
+    CHECK(!plainDrawn.rayTracedShadows && !plainDrawn.rayTracedOcclusion && !plainDrawn.rayTracedReflections && !plainDrawn.rayTracedBounce);
+    // A file of before, that chose its values one by one: off if the sun's shadows were.
+    std::optional<GameQuality> before = GameQuality::parse("molten-quality 2\nlevel Custom\nrayTracing Ultra\ntracedShadows 0\nshadowRays 9\n");
+    CHECK(before && !before->rayTraced && before->rayTracing == LightingQuality::Ultra);
     CHECK(plainAtUltra.cascades.shadowDistance == 25);
 
     // A scene's own smaller picture (a game's menu sets it) and the level's multiply; its own dynamic resolution is kept.
@@ -134,10 +167,11 @@ TEST(the_quality_limits_what_a_scene_asks_and_adds_nothing_to_it) {
     GameQuality::preset(Level::Medium).applyTo(small);
     CHECK_NEAR(small.renderScale, 0.63, 1e-5);
     CHECK(small.dynamicResolution && small.targetFrameRate == 30 && small.lowestDynamicScale == 0.8f);
-    // Custom values that no level has still limit: three shadow rays allowed, and only shadows.
+    // A level limits what a scene asks to its own rays: every level traces all of it.
     RenderSettings custom = scene;
     limitLightingQuality(custom, LightingQuality::Medium);
-    CHECK(custom.rayTracedShadows && custom.shadowRayCount == 3 && !custom.rayTracedOcclusion);
+    CHECK(custom.rayTracedShadows && custom.shadowRayCount == 6 && custom.rayTracedOcclusion && custom.occlusionRayCount == 1);
+    CHECK(custom.rayTracedReflections && custom.reflectionMaxRoughness == 0.25f && custom.rayTracedBounce);
     RenderSettings untouched = scene;
     limitLightingQuality(untouched, LightingQuality::Ultra);
     CHECK(lightingQualityOf(untouched) == LightingQuality::Ultra);
@@ -183,7 +217,7 @@ TEST(lighting_levels_saved_when_they_sent_more_rays_come_back_as_the_same_level)
     std::vector<NamedMaterial> none2;
     RenderSettings back;
     CHECK(readScene(writeScene(empty, none2, saved), read, none2, back, SceneAssets{}));
-    CHECK(lightingQualityOf(back) == LightingQuality::Ultra && back.occlusionRayCount == 2 && back.shadowRayCount == 6);
+    CHECK(lightingQualityOf(back) == LightingQuality::Ultra && back.occlusionRayCount == 3 && back.shadowRayCount == 12);
 }
 
 TEST(dynamic_resolution_goes_to_the_size_that_fits_and_does_not_swing) {
@@ -220,8 +254,11 @@ TEST(dynamic_resolution_goes_to_the_size_that_fits_and_does_not_swing) {
     // The level decides for a scene that does not ask; one that asks keeps what it says.
     bool isOn = false;
     float target = 0, lowest = 0;
+    GameQuality::preset(Level::High).dynamicResolutionFor(isOn, target, lowest);
+    CHECK(isOn && target == 60 && lowest == 0.5f);
+    isOn = false;
     GameQuality::preset(Level::Ultra).dynamicResolutionFor(isOn, target, lowest);
-    CHECK(isOn && target == 60 && lowest == 0.6f);
+    CHECK(isOn && target == 60 && lowest == 0.65f);
     isOn = true, target = 30, lowest = 0.9f;
     GameQuality::preset(Level::Low).dynamicResolutionFor(isOn, target, lowest);
     CHECK(isOn && target == 30 && lowest == 0.9f);

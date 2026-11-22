@@ -190,6 +190,12 @@ public:
         pictureScale_ = scale > 0 ? scale : 1.0f;
     }
     float scrollDelta() const { return isListening ? scrollDelta_ : 0.0f; }
+    /// The mouse's buttons as they are now are not the game's: a click that began on something
+    /// else (an editor's own buttons, a menu opened over the game) is not heard, from its press
+    /// to its release. The next press is heard again.
+    void keepMouseButtonsOut() {
+        for (ButtonState& state : mouseButtons_) state = ButtonState{};
+    }
 
     /// The characters typed during this frame, as UTF-8: what a text field should insert.
     /// Unlike key presses, this respects the keyboard layout, Shift and key repeat.

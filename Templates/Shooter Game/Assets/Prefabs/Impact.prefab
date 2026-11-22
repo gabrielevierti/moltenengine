@@ -5,12 +5,12 @@ settings
   skyGround 0.11 0.14 0.19
   skyIntensity 1
   environmentIntensity 1
-  fog 0.38 0.52 0.72 0
+  fog 0.38 0.52 0.72 0.0012
   shadows 1 60
   rayTracedShadows 0 4
   rayTracedLighting 0 1 0 0 1
   rayTracedReflections 0.3 1
-  fogShape 0 0
+  fogShape 0 1 1
   wind 0 0 0 0.4
   ambientOcclusion 1 0.6 1
   bloom 1 0.06 1
@@ -19,7 +19,7 @@ settings
   toneMapper 2
   vignette 0.25
   clouds 0 1 1500 1200
-  volumetrics 0 0
+  volumetrics 0 16
   lens 0 0 0
   lensFlare 0.6
 entity "Impact"

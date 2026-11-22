@@ -228,6 +228,12 @@ target_compile_options(molten PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-m
 target_link_libraries(molten PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,moltenengine>" "$<LINK_LIBRARY:WHOLE_ARCHIVE,moltenimgui>"
                       "-framework UniformTypeIdentifiers")
 set_target_properties(molten PROPERTIES ENABLE_EXPORTS ON)
+# Its name for the Mac when it is started as it is (./build/molten), not from its .app: the menu
+# bar's first menu is "Molten Engine v1.2", with the version of this project.
+set(MOLTEN_VERSION_SHORT "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
+configure_file(${CMAKE_SOURCE_DIR}/Editor/Info.plist ${CMAKE_BINARY_DIR}/EditorInfo.plist @ONLY)
+target_link_options(molten PRIVATE "LINKER:-sectcreate,__TEXT,__info_plist,${CMAKE_BINARY_DIR}/EditorInfo.plist")
+set_property(TARGET molten APPEND PROPERTY LINK_DEPENDS ${CMAKE_BINARY_DIR}/EditorInfo.plist)
 
 # The player: what an exported game is. It loads a project and the library its code was built into.
 add_executable(molten-player Player/Main.cpp)

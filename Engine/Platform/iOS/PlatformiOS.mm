@@ -418,6 +418,8 @@ void Window::setFullscreen(bool) {}
 void Window::setCursorCaptured(bool) {}
 void Window::setTitle(const std::string&) {}
 void Window::setIcon(const std::string&) {}
+void Window::whileEventsAreHeld(void (*)(void*), void*) {}          // nothing holds them on a phone
+bool Window::isFocused() const { return true; }
 
 double Window::now() {
     return CACurrentMediaTime();

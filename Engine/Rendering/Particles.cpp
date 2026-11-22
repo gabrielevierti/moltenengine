@@ -116,6 +116,7 @@ const EffectFlag kFlags[] = {
     {"sheetColumns", [](const ParticleEmitter& e) { return float(e.sheetColumns); }, [](ParticleEmitter& e, float v) { e.sheetColumns = std::max(int(v), 1); }, true},
     {"sheetRows", [](const ParticleEmitter& e) { return float(e.sheetRows); }, [](ParticleEmitter& e, float v) { e.sheetRows = std::max(int(v), 1); }, true},
     {"randomRotation", [](const ParticleEmitter& e) { return e.randomRotation ? 1.0f : 0.0f; }, [](ParticleEmitter& e, float v) { e.randomRotation = v != 0; }, true},
+    {"isRing", [](const ParticleEmitter& e) { return e.isRing ? 1.0f : 0.0f; }, [](ParticleEmitter& e, float v) { e.isRing = v != 0; }, true},
     {"collides", [](const ParticleEmitter& e) { return e.collides ? 1.0f : 0.0f; }, [](ParticleEmitter& e, float v) { e.collides = v != 0; }, true},
     {"fromShell", [](const ParticleEmitter& e) { return e.fromShell ? 1.0f : 0.0f; }, [](ParticleEmitter& e, float v) { e.fromShell = v != 0; }, true},
     {"space", [](const ParticleEmitter& e) { return float(int(e.space)); }, [](ParticleEmitter& e, float v) { e.space = ParticleEmitter::Space(std::clamp(int(v), 0, 1)); }, true},

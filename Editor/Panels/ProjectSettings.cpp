@@ -8,6 +8,7 @@
 // Assets/Input.actions, Settings/Game.settings.
 #include "Editor.hpp"
 
+#include "Core/Paths.hpp"
 #include "Core/TextFile.hpp"
 #include "Panels/Widgets.hpp"
 #include "Platform.hpp"
@@ -49,7 +50,7 @@ public:
             return;
         }
         static const char* const pages[][3] = {
-            {"Game", "person", "The game's name, its version and the scene it starts with."},
+            {"Game", "person", "What the game is: its name, version, icon and the scene it starts with. File > Build Settings makes it into an application."},
             {"Quality", "eye", "How well the game draws as it ships: the same for every scene."},
             {"Input", "logic", "The actions the game asks about, and the keys, buttons and sticks that move them."},
             {"Physics", "physics", "Gravity, how often physics steps, and which layers collide with which."},
@@ -68,10 +69,7 @@ public:
         ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0, 0.5f));
         ImGui::BeginChild("##pages", ImVec2(176, 0), ImGuiChildFlags_AlwaysUseWindowPadding);
         for (int i = 0; i < count; i++) {
-            ImVec2 row = ImGui::GetCursorScreenPos();
-            if (ImGui::Selectable((std::string("       ") + pages[i][0]).c_str(), page_ == i, 0, ImVec2(0, 26))) page_ = i;
-            ui::drawIcon(ImGui::GetWindowDrawList(), ImVec2(row.x + 13, row.y + 13), 14, pages[i][1],
-                         ImGui::GetColorU32(page_ == i ? ImGuiCol_Text : ImGuiCol_TextDisabled));
+            if (ui::iconSelectable(pages[i][0], pages[i][1], page_ == i)) page_ = i;
         }
         ImGui::EndChild();
         ImGui::PopStyleVar();
@@ -120,12 +118,44 @@ private:
         ui::tooltip("The scene the exported game opens on");
         changed |= ui::checkbox("Splash Screen", project.showsSplash);
         ui::tooltip("The exported game opens with the engine's splash screen");
+        {
+            // Its icon: the engine's until the game has one of its own.
+            std::string iconFile = project.iconFile(findRootDirectory());
+            ImTextureID icon = editor.pictureAt ? editor.pictureAt(iconFile) : ImTextureID(0);
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted("Icon");
+            ImGui::SameLine(ImGui::GetContentRegionAvail().x * 0.34f + ImGui::GetCursorPosX() - ImGui::GetStyle().ItemSpacing.x - ImGui::CalcTextSize("Icon").x);
+            if (icon) ImGui::Image(icon, ImVec2(56, 56));
+            else ImGui::Dummy(ImVec2(56, 56));
+            ImGui::SameLine();
+            ImGui::BeginGroup();
+            if (ImGui::Button("Choose a Picture...")) {
+                std::vector<std::string> chosen = platform::chooseFiles("Choose a square picture for the game's icon (1024 x 1024 is best)", {"png", "jpg", "jpeg"}, false, {});
+                if (!chosen.empty()) {
+                    // Kept in the project, so that it travels with it.
+                    std::string name = "Icon" + std::filesystem::path(chosen.front()).extension().string();
+                    std::error_code code;
+                    std::filesystem::copy_file(chosen.front(), std::filesystem::path(project.assetsDirectory()) / name, std::filesystem::copy_options::overwrite_existing, code);
+                    if (code) {
+                        editor.notify("Cannot copy the picture: " + code.message(), ConsoleMessage::Level::Error);
+                    } else {
+                        project.icon = name;
+                        changed = true;
+                        editor.assets.refresh();
+                    }
+                }
+            }
+            ImGui::BeginDisabled(project.icon.empty());
+            if (ImGui::Button("Use the Engine's")) {
+                project.icon.clear();
+                changed = true;
+            }
+            ImGui::EndDisabled();
+            ImGui::EndGroup();
+        }
         ui::info("Folder", project.directory);
         ImGui::Spacing();
         if (ImGui::Button("Show in Finder")) platform::revealInFinder(project.directory);
-        ImGui::SameLine();
-        if (ImGui::Button("Build Settings...")) editor.commands.run("export");
-        ui::tooltip("The game's icon, the platform it is built for, and the export itself");
 
         if (changed) {
             if (project.name.empty()) project.name = "Untitled";
@@ -172,7 +202,7 @@ private:
             "How many pixels the scene is drawn with before the picture is made the screen's size. Fewer is the surest way to a faster frame.",
             "How smooth the edges of things are.",
             "How far from the camera the sun's shadows reach, and how sharp they are. A scene may ask for less far.",
-            "The most ray tracing a scene gets of what it asks for (Window > Lighting > Ray Tracing).",
+            "All of the light found with rays, where the GPU can: the sun's shadows, the light around things and what it bounces, reflections. Off, or how well. For every scene.",
             "The screen's ambient occlusion, bloom, and shafts of light through fog, where a scene has them.",
             "Clouds with depth, where a scene has them, and how finely they are walked through.",
             "How far the detail of far things lasts: the levels of LOD groups, painted foliage.",
@@ -185,8 +215,11 @@ private:
             ImGui::PushID(index);
             ImVec2 corner = ImGui::GetCursorScreenPos();
             float rowWidth = ImGui::GetContentRegionAvail().x;
+            // Ray tracing has one more choice before its levels: none at all.
+            const bool isRayTracing = group == Group::RayTracing;
+            const float offWidth = isRayTracing ? 38.0f : 0.0f;
             // The row: a click opens it.
-            if (ImGui::InvisibleButton("##row", ImVec2(rowWidth - levelsWidth - 14, rowHeight))) isOpen[index] = !isOpen[index];
+            if (ImGui::InvisibleButton("##row", ImVec2(rowWidth - levelsWidth - offWidth - 14, rowHeight))) isOpen[index] = !isOpen[index];
             bool isHovered = ImGui::IsItemHovered();
             if (isHovered) ui::tooltip(about[index]);
             draw->AddRectFilled(corner, ImVec2(corner.x + rowWidth, corner.y + rowHeight), ImGui::GetColorU32(isHovered ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg), 6);
@@ -200,7 +233,7 @@ private:
             float lineHeight = ImGui::GetTextLineHeight();
             draw->AddText(ImVec2(corner.x + 58, middle - lineHeight - 1), text, GameQuality::groupName(group));
             std::string summary = quality.summaryOf(group);
-            ImGui::PushClipRect(corner, ImVec2(corner.x + rowWidth - levelsWidth - 18, corner.y + rowHeight), true);
+            ImGui::PushClipRect(corner, ImVec2(corner.x + rowWidth - levelsWidth - offWidth - 18, corner.y + rowHeight), true);
             draw->AddText(ImVec2(corner.x + 58, middle + 2), dim, summary.c_str());
             ImGui::PopClipRect();
 
@@ -209,21 +242,40 @@ private:
             static const char* const letters[4] = {"L", "M", "H", "U"};
             ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4);
             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 4));
+            if (isRayTracing) {
+                // Off, and then how well: each of the four traces all of the light.
+                ImGui::SetCursorScreenPos(ImVec2(corner.x + rowWidth - levelsWidth - 8 - offWidth - 1, middle - 12));
+                ImGui::PushStyleColor(ImGuiCol_Button, !quality.rayTraced ? ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive) : ImGui::GetStyleColorVec4(ImGuiCol_WindowBg));
+                if (ImGui::Button("Off", ImVec2(offWidth, 24))) {
+                    quality.rayTraced = false;
+                    quality.findLevel();
+                    changed = true;
+                }
+                ImGui::PopStyleColor();
+                ui::tooltip("No ray tracing: shadow maps (the Shadows group), the screen's ambient occlusion, reflections of the sky");
+            }
             for (int level = 0; level < 4; level++) {
                 ImGui::SetCursorScreenPos(ImVec2(corner.x + rowWidth - levelsWidth - 8 + float(level) * (levelWidth + 1), middle - 12));
-                bool isOn = quality.isAt(group, Level(level));
+                bool isOn = isRayTracing ? quality.rayTraced && quality.rayTracing == LightingQuality(level) : quality.isAt(group, Level(level));
                 ImGui::PushStyleColor(ImGuiCol_Button, isOn ? ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive) : ImGui::GetStyleColorVec4(ImGuiCol_WindowBg));
                 ImGui::PushID(level);
                 if (ImGui::Button(letters[level], ImVec2(levelWidth, 24))) {
-                    quality.setGroup(group, Level(level));
+                    if (isRayTracing) {
+                        quality.rayTraced = true;
+                        quality.setRayTracing(LightingQuality(level));
+                        quality.findLevel();
+                    } else {
+                        quality.setGroup(group, Level(level));
+                    }
                     changed = true;
                 }
                 ImGui::PopID();
                 ImGui::PopStyleColor();
                 if (ImGui::IsItemHovered()) {
                     GameQuality shown = quality;
-                    shown.setGroup(group, Level(level));
-                    ui::tooltip((std::string(GameQuality::levelName(Level(level))) + ": " + shown.summaryOf(group)).c_str());
+                    if (isRayTracing) shown.rayTraced = true, shown.setRayTracing(LightingQuality(level));
+                    else shown.setGroup(group, Level(level));
+                    ui::tooltip((isRayTracing ? shown.summaryOf(group) : std::string(GameQuality::levelName(Level(level))) + ": " + shown.summaryOf(group)).c_str());
                 }
             }
             ImGui::PopStyleVar(2);
@@ -274,15 +326,22 @@ private:
                         break;
                     }
                     case Group::RayTracing: {
-                        int most = quality.rayTracing == LightingQuality::Low ? 0 : quality.rayTracing == LightingQuality::Medium ? 1 : quality.rayTracing == LightingQuality::Ultra ? 3 : 2;
-                        if (ui::combo("The Most a Scene Gets", most, {"None: shadow maps", "The sun's shadows", "And the light around things, reflections", "All it asks: bounced light too"})) {
-                            quality.rayTracing = most == 0 ? LightingQuality::Low : most == 1 ? LightingQuality::Medium : most == 3 ? LightingQuality::Ultra : LightingQuality::High;
-                            edited = true;
+                        // All of it here, for every scene: what is found with rays, and how many.
+                        const bool canTrace = editor.engine.renderer().canTraceRays();
+                        if (!canTrace) {
+                            ImGui::PushTextWrapPos(0.0f);
+                            ImGui::TextDisabled("%s", editor.engine.renderer().device().supportsRayTracing()
+                                                          ? "The ray tracing shaders did not compile here (see the console): shadow maps are used."
+                                                          : "This GPU does not trace rays: shadow maps are used here, whatever is chosen. Games keep the choice for the GPUs that can.");
+                            ImGui::PopTextWrapPos();
                         }
                         ImGui::PushTextWrapPos(0.0f);
-                        ImGui::TextDisabled("%s", editor.engine.renderer().canTraceRays()
-                                                      ? "A scene asks for ray tracing in Window > Lighting. It costs about a ray a pixel: with Dynamic Resolution on (Resolution, above) a GPU that cannot keep up draws fewer pixels, not fewer frames."
-                                                      : "This GPU does not trace rays: every scene is drawn with shadow maps here, whatever is chosen.");
+                        ImGui::TextDisabled("%s", quality.rayTraced
+                                                      ? "On, all of the light is found with rays: the sun's shadows, sharp where things touch and soft away from them; the light around things, hidden under a car or in a corner, and the light a sunlit wall throws on the floor; reflections of what is around. A higher level sends more rays along shadows' edges and for the light around things, and mirrors rougher things."
+                                                      : "Off: shadow maps (the Shadows group), the screen's own ambient occlusion, and reflections of the sky.");
+                        ImGui::PopTextWrapPos();
+                        ImGui::PushTextWrapPos(0.0f);
+                        ImGui::TextDisabled("About a ray and a half a pixel. With Dynamic Resolution on (Resolution, above) a GPU that cannot keep up draws fewer pixels, not fewer frames.");
                         ImGui::PopTextWrapPos();
                         break;
                     }

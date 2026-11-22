@@ -47,7 +47,7 @@ class AnimatorPanel final : public Panel {
 public:
     AnimatorPanel() {
         title = "Animator";
-        isOpen = false;                 // Window > Animation > Animator, or Open Animator on an Animator
+        isOpen = false;                 // Window > Animator, or Open Animator on an Animator
     }
 
     void draw(EditorContext& editor) override {

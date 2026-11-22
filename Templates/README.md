@@ -10,7 +10,7 @@ taken apart in the Inspector. None has code of its own: they are made of the kit
 |---|---|---|
 | **Car Game** | A car, a circuit through a park, eight stars to collect, a yard with a ramp and crates to knock about | Vehicle Body, Wheel, Suspension, Motor, Drive Controls; Follow; Collectible, Goal; UI Gauge |
 | **Plane Game** | A light aeroplane, a runway, eight rings in the sky | Vehicle Body, Wing, Hinge, Propeller, Flight Controls (with the flying actions in Assets/Input.actions) |
-| **Boat Game** | A speedboat on a sea with waves, islands, ten buoys that float | Water, Rigidbody, Buoyancy, Boat |
+| **Boat Game** | A speedboat on a sea with waves, islands, ten buoys that float | a Water material, Rigidbody, Buoyancy, Boat |
 | **Third Person Game** | A figure that walks, runs and jumps, with its animations, a camera the mouse turns, ten gems about a garden of stone | Character Controller, Character Mover, Orbit Camera; Animator with a controller (Animations/Player.animator) on a model with bones (Models/Figure.glb) |
 | **Shooter Game** | Seen from your own eyes: a rifle with a magazine to load, twelve plates to shoot down, four machines that hunt you about a training yard | Character Mover, First Person Look, Weapon; Shooting Target, Shuttle; Hunter, Health; Supply, Damage Flash; prefabs for what a shot and a machine leave (with its own keys in Assets/Input.actions) |
 

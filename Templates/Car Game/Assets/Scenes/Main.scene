@@ -10,7 +10,7 @@ settings
   rayTracedShadows 0 4
   rayTracedLighting 0 1 0 0 1
   rayTracedReflections 0.3 1
-  fogShape 0 0
+  fogShape 0 1 1
   wind 0 0 0 0.4
   ambientOcclusion 1 0.6 1
   bloom 1 0.06 1
@@ -19,7 +19,7 @@ settings
   toneMapper 2
   vignette 0.25
   clouds 0.38 1 1500 1200
-  volumetrics 1 0
+  volumetrics 1 16
   lens 0 0 0
   lensFlare 0.6
 entity "Sun"
@@ -80,17 +80,17 @@ entity "Hill 9"
 entity "Circuit"
   transform 0 0 0 0 0 0 1 1 1 1
 entity "Road"
-  transform 0 0 0 0 0 0 1 1 1 1
+  transform 0 0.012 0 0 0 0 1 1 1 1
   parent 12
   mesh "Models/Road.obj" -1 1 1 1 1 0 1
   materialAsset "Materials/Asphalt.material"
 entity "Center Line"
-  transform 0 0 0 0 0 0 1 1 1 1
+  transform 0 0.024 0 0 0 0 1 1 1 1
   parent 12
   mesh "Models/Center Line.obj" -1 1 1 1 1 0 1
   materialAsset "Materials/Road Paint.material"
 entity "Curbs"
-  transform 0 0 0 0 0 0 1 1 1 1
+  transform 0 0.024 0 0 0 0 1 1 1 1
   parent 12
   mesh "Models/Curbs.obj" -1 1 1 1 1 0 1
   materialAsset "Materials/Curb.material"
@@ -239,7 +239,7 @@ entity "Star 8"
 entity "Yard"
   transform 0 0 0 0 0 0 1 1 1 1
 entity "Pad"
-  transform 0 -0.24 0 0 0 0 1 64 0.56 44
+  transform 0 -0.24 0 0 0 0 1 64.01 0.57 44.01
   parent 29
   mesh "cube" -1 1 1 1 1 0 1
   materialAsset "Materials/Asphalt.material"
@@ -1443,7 +1443,7 @@ entity "Paint"
   mesh "Models/Car Body.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Car Paint.material"
 entity "Windows"
-  transform 0 0 0 0 0 0 1 1 1 1
+  transform 0 0.012 0 0 0 0 1 1 1 1
   parent 276
   mesh "Models/Car Cabin.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Glass.material"
@@ -1453,7 +1453,7 @@ entity "Head Lamp L"
   mesh "cube" -1 1 1 1 1 0 1
   materialAsset "Materials/Head Lamps.material"
 entity "Tail Lamp L"
-  transform -0.56 0.2 2.11 0 0 0 1 0.34 0.1 0.06
+  transform -0.56 0.2 2.11 0 0 0 1 0.35 0.11 0.07
   parent 276
   mesh "cube" -1 1 1 1 1 0 1
   materialAsset "Materials/Tail Lamps.material"
@@ -1463,7 +1463,7 @@ entity "Head Lamp R"
   mesh "cube" -1 1 1 1 1 0 1
   materialAsset "Materials/Head Lamps.material"
 entity "Tail Lamp R"
-  transform 0.56 0.2 2.11 0 0 0 1 0.34 0.1 0.06
+  transform 0.56 0.2 2.11 0 0 0 1 0.35 0.11 0.07
   parent 276
   mesh "cube" -1 1 1 1 1 0 1
   materialAsset "Materials/Tail Lamps.material"
@@ -1559,42 +1559,82 @@ entity "Dial"
     field redFrom "0"
     field label "km/h"
     field showsValue "1"
-    field anchor "0.5 1"
-    field offset "0 -98"
+    field anchor "1 1"
+    field offset "-112 -108"
     field radius "78"
     field thickness "7"
     field color "1 0.5 0.18 1"
     field backColor "0.04 0.045 0.055 0.7"
+entity "Help Pane"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 292
+  component "UIPanel"
+    field anchor "0 1"
+    field offset "142 -56"
+    field size "248 76"
+    field color "0.04 0.045 0.055 0.46"
+    field border "1"
+    field borderColor "1 1 1 0.1"
+entity "Help 1 Keys"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 292
+  component "HudText"
+    field text "W"
+    field anchor "0 1"
+    field offset "30 -82"
+    field font ""
+    field size "12.5"
+    field color "1 0.72 0.45 0.95"
 entity "Help 1"
   transform 0 0 0 0 0 0 1 1 1 1
   parent 292
   component "HudText"
-    field text "W  S    gas and brake, reverse"
+    field text "S  gas, brake and reverse"
     field anchor "0 1"
-    field offset "113 -58"
+    field offset "79 -82"
     field font ""
-    field size "12"
-    field color "1 1 1 0.62"
+    field size "12.5"
+    field color "1 1 1 0.78"
+entity "Help 2 Keys"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 292
+  component "HudText"
+    field text "A"
+    field anchor "0 1"
+    field offset "30 -63"
+    field font ""
+    field size "12.5"
+    field color "1 0.72 0.45 0.95"
 entity "Help 2"
   transform 0 0 0 0 0 0 1 1 1 1
   parent 292
   component "HudText"
-    field text "A  D    steer"
+    field text "D  steer"
     field anchor "0 1"
-    field offset "60.3 -41"
+    field offset "79 -63"
     field font ""
-    field size "12"
-    field color "1 1 1 0.62"
+    field size "12.5"
+    field color "1 1 1 0.78"
+entity "Help 3 Keys"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 292
+  component "HudText"
+    field text "Space"
+    field anchor "0 1"
+    field offset "30 -44"
+    field font ""
+    field size "12.5"
+    field color "1 0.72 0.45 0.95"
 entity "Help 3"
   transform 0 0 0 0 0 0 1 1 1 1
   parent 292
   component "HudText"
-    field text "Space    handbrake: drift"
+    field text "handbrake: drift"
     field anchor "0 1"
-    field offset "97.5 -24"
+    field offset "79 -44"
     field font ""
-    field size "12"
-    field color "1 1 1 0.62"
+    field size "12.5"
+    field color "1 1 1 0.78"
 entity "Restart"
   transform 0 0 0 0 0 0 1 1 1 1
   parent 292

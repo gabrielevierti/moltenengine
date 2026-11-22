@@ -4,6 +4,7 @@
 
 #include "Core/World.hpp"
 #include "Scene/Components.hpp"
+#include "Script/CppBoxes.hpp"
 
 #include <cstdio>
 #include <set>
@@ -216,8 +217,19 @@ struct Writer {
 
 }  // namespace
 
+std::string boxAsCppStatement(const Graph& graph, const Node& node) {
+    registerStandardNodes();
+    const NodeDef* definition = NodeLibrary::instance().find(node.type);
+    if (!definition) return "// A box of a kind this program does not know: " + node.type;
+    Writer writer{graph, {}, {}};
+    return "{ static script::ScriptState boxes; script::Call call(world, self, world.time.delta, boxes); call(" + quotedText(node.type) + ", " +
+           writer.inputs(node, *definition, 0) + "); }    // the box " + definition->title;
+}
+
 std::string graphToCpp(const Graph& graph, const std::string& name, const std::string& source) {
     registerStandardNodes();
+    // A graph of C++ boxes is the file itself, laid out: written back as it says (Script/CppBoxes.hpp).
+    if (hasCppBoxes(graph)) return cppFromBoxes(graph);
     Writer writer{graph, {}, {}};
     // Which events the graph has, by the function of a component each belongs in.
     std::string start, update, collision, trigger, members;
@@ -314,6 +326,8 @@ std::string unescaped(const std::string& text) {
 }  // namespace
 
 std::string graphToCppKeepingGraph(const Graph& graph, const std::string& name, const std::string& source) {
+    // C++ boxes need no graph kept beside the code: the code is the graph, and goes back to it as it is.
+    if (hasCppBoxes(graph)) return cppFromBoxes(graph);
     return graphToCpp(graph, name, source) + "\n" + kKeptBegin + name + "|" + source + "\n" +
            "The visual script this was made from, so that it can be turned back into one (Explorer: Convert to Visual Script).\n" +
            escaped(graph.toText()) + kKeptEnd + "\n";

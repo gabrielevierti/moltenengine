@@ -122,7 +122,7 @@ The next game after Driving: someone who walks, runs and jumps.
       it goes up), stands on slopes it can walk and slides off steeper ones, shoves bodies that move
 - [x] **Character mover and orbit camera**: walk and run where the input says, seen from the camera; jump, with a moment's
       grace after an edge; a camera turned with the mouse or the right stick that comes closer rather than go through a wall.
-      [x] Blending from one camera to another: Camera Shots and a Camera Director (Entity > Camera Shot)
+      [-] Blending from one camera to another: Camera Shots and a Camera Director (taken out in 1.2: a game's own code)
 - [x] **Animator with states**: a `.animator` file of parameters, states (one clip, or a blend tree of clips by a number,
       kept in step), and transitions on conditions, after an exit time, eased over a time of their own; the character mover
       sets `speed`, `grounded`, `verticalSpeed` and `jump` by itself
@@ -154,7 +154,7 @@ The next game after Driving: someone who walks, runs and jumps.
 - [ ] **Clustered lights**: many point and spot lights at once
 - [ ] **Decals**: skid marks, puddles, dirt, without extra meshes
 - [ ] **Depth of field, motion blur, colour grading (LUT), auto exposure**
-- [x] **A day and night cycle**: the sun crosses the sky, warms at dawn and dusk, a moon at night; sky and fog follow (Day and Night)
+- [x] **Day and night**: the sky follows the sun by itself, warms at dawn and dusk, a moon at night; sky and fog follow (the Day and Night component was taken out in 1.2: turning the sun is a script's)
 - [ ] **Physical sky** (scattering in the shader), stars at night
 - [ ] **Particles on the GPU**: many more, with textures, trails and collisions
 - [ ] **Ray tracing denoiser**; shadows of point and spot lights traced

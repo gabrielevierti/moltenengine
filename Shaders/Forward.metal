@@ -19,8 +19,7 @@ struct MaterialSample {
     float occlusion;
     float water;            // above zero: water, and how fine its waves are
     float waveHeight;
-    float4 sea;             // water with the sea's waves: their slope (x, z), foam, height; w of the second scale below
-    float hasSea;           // 1 when `sea` was read
+    float waterFoam;        // how much white shows where its waves break and where it meets what stands in it
     float waterDepth;       // meters of water under this pixel, along the view (what is under it seen through); large if unknown
 #if MOLTEN_EXTRAS
     float mirror;           // the share of the mirrored light a traced ray found and brings: 0 when no ray was sent
@@ -75,19 +74,8 @@ static MaterialSample sampleMaterial(MeshVertexOut in, bool isFrontFacing,
     result.emissive = material.emissive * emissiveTexture.sample(materialSampler, uv).rgb;
     result.water = material.water;
     result.waveHeight = material.waveHeight;
-    result.hasSea = 0.0;
+    result.waterFoam = material.foam;
     result.waterDepth = 1000.0;
-    result.sea = float4(0.0);
-    if (material.water > 0.0 && material.oceanScale > 0.0) {
-        // The sea's waves, a patch that repeats, read twice: as it is, and smaller and turned, so
-        // that the repeat does not show and the near water has ripples on its swell.
-        float2 at = (in.worldPosition.xz + material.oceanOffset) * material.oceanScale;
-        float4 large = normalTexture.sample(materialSampler, at);
-        float2 turned = float2(at.x * 0.8 - at.y * 0.6, at.x * 0.6 + at.y * 0.8) * 4.7 + float2(0.37, 0.71);
-        float4 small = normalTexture.sample(materialSampler, turned);
-        result.sea = float4(large.xy + small.xy * 0.45, saturate(large.z + small.z * 0.3), large.w + small.w * 0.2);
-        result.hasSea = 1.0;
-    }
 #if MOLTEN_EXTRAS
     result.mirror = 0.0;                // no traced reflection: the sky is what is mirrored
     result.mirrored = float3(0.0);
@@ -101,6 +89,129 @@ static MaterialSample sampleMaterial(MeshVertexOut in, bool isFrontFacing,
     }
 #endif
     return result;
+}
+
+// ---------------------------------------------------------------- under the sea
+
+// Which way, and how far across for each meter down, the sun's light goes on under the sea's
+// surface where it came through it at `place`: bent by the slope of the waves there.
+static float2 seaRefractedDrift(float2 place, float3 sunWay, constant PassUniforms &pass, float finest, float ripples) {
+    WaterSwell swell = waterSwell(place, pass.time, pass.wind, 1.0, 1.0, finest);
+    float2 slope = swell.slope + waterRipples(place, pass.time, pass.wind, 1.0, 1.0, finest) * ripples;
+    // And the small waves no train of them is: a sea is never as regular as its trains, and its
+    // lines of light would be a grid without this. Two sizes of bumps, carried with the wind.
+    float2 along = waterWindDirection(pass.wind);
+    float strength = clamp(length(float2(pass.wind.x, pass.wind.z)) / 7.0, 0.35, 1.6);
+    for (int j = 0; j < 2; j++) {
+        float size = j == 0 ? 0.55 : 0.21;
+        if (size < finest * 1.5) break;
+        float2 p = (place - along * (pass.time * (j == 0 ? 0.45 : 0.8))) / size + float2(j * 17.3, j * 41.9);
+        float2 warp = float2(waterNoise(p * 0.37 + 3.1), waterNoise(p * 0.37 + 9.7)) * 1.8;
+        float here = waterNoise(p + warp);
+        float2 change = float2(waterNoise(p + warp + float2(0.3, 0.0)) - here, waterNoise(p + warp + float2(0.0, 0.3)) - here);
+        slope += change * ((j == 0 ? 0.38 : 0.24) * strength * ripples);
+    }
+    float3 n = normalize(float3(-slope.x, 1.0, -slope.y));
+    float3 bent = refract(sunWay, n, 1.0 / 1.333);
+    return bent.xz / max(-bent.y, 0.05);
+}
+
+// The sun's light on the bottom of the sea and on what is in it, `below` meters under the
+// surface: the waves gather it into bright lines that crawl as they move, as lenses would, and
+// leave it dim between them. The light that came through a small patch of the surface spreads
+// over a patch of the bottom as large as the waves' slopes, there, make it: as bright as it is
+// gathered (one over how much that patch is stretched). 1 on average, up to several on a line.
+// `footprint` is how much the pixel covers: what is finer is left out, and so is what the
+// sun's own width blurs away, the more the deeper.
+static float seaCaustics(float3 at, float below, float3 sunWay, constant PassUniforms &pass, float footprint, float ripples) {
+    float3 still = refract(sunWay, float3(0.0, 1.0, 0.0), 1.0 / 1.333);
+    float2 across = still.xz / max(-still.y, 0.05);
+    float2 entered = at.xz - across * below;                // where its light came through, were the sea still
+    float finest = max(footprint * 2.0, below * 0.012 + 0.03);
+    float e = finest * 0.35;
+    float2 here = seaRefractedDrift(entered, sunWay, pass, finest, ripples);
+    float2 dx = (seaRefractedDrift(entered + float2(e, 0.0), sunWay, pass, finest, ripples) - here) * (below / e);
+    float2 dz = (seaRefractedDrift(entered + float2(0.0, e), sunWay, pass, finest, ripples) - here) * (below / e);
+    float stretched = abs((1.0 + dx.x) * (1.0 + dz.y) - dx.y * dz.x);
+    return min(1.0 / max(stretched, 0.12), 6.0);
+}
+
+// ---------------------------------------------------------------- rain on surfaces
+
+// How much of the rain reaches this place: 1 out in the open, 0 under a roof. The rain map is the
+// scene round the camera seen from above, nearest first: a place is out in the rain if nothing
+// in it is above. Looked up a little off the surface (more off a wall, which from above is a
+// line), in four looks for a soft edge to a roof's shelter.
+static float rainReaches(float3 worldPosition, float3 normal, constant FrameUniforms &frame, depth2d<float> rainMap, sampler shadowSampler) {
+    if (is_null_texture(rainMap)) return 1.0;
+    float off = mix(0.05, 0.28, 1.0 - abs(normal.y));
+    float4 clip = frame.rainViewProjection * float4(worldPosition + normal * off, 1.0);
+    float2 uv = clip.xy * float2(0.5, -0.5) + 0.5;
+    if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return 1.0;          // beyond the square: out in it, as far as is known
+    float depth = clip.z - 0.0004;                                                   // 16 cm: what lies just on it is no roof
+    float texel = 1.0 / float(rainMap.get_width());
+    float open = rainMap.sample_compare(shadowSampler, uv + float2(-0.5, -0.5) * texel, depth) +
+                 rainMap.sample_compare(shadowSampler, uv + float2(0.5, -0.5) * texel, depth) +
+                 rainMap.sample_compare(shadowSampler, uv + float2(-0.5, 0.5) * texel, depth) +
+                 rainMap.sample_compare(shadowSampler, uv + float2(0.5, 0.5) * texel, depth);
+    return open * 0.25;
+}
+
+static float rainHash(float2 p) {
+    return fract(sin(dot(p, float2(127.1, 311.7))) * 43758.5453);
+}
+
+// What the rain does to a surface out in it: what soaks water up (stone, wood, asphalt, cloth)
+// darkens; a film of water makes it smoother, most where it lies flat and the water pools; on
+// what faces up, the drops' rings spread on that film; down what is steep (a wall, the side of
+// a car) the water runs in thin wandering trails, a drop at the head of each.
+static void wetten(thread MaterialSample &m, MeshVertexOut in, constant FrameUniforms &frame, float time, float reached) {
+    float3 n = normalize(in.normal);
+    float wet = frame.wetness * reached * smoothstep(-0.45, 0.05, n.y);
+    if (wet <= 0.002) return;
+    float up = saturate(n.y);
+    float soaks = (1.0 - m.metallic) * saturate(m.roughness * 1.5);
+    m.baseColor.rgb *= 1.0 - 0.45 * wet * soaks;
+    float film = wet * mix(0.6, 1.0, up * up);
+    m.roughness = mix(m.roughness, min(m.roughness, mix(0.3, 0.07, up)), film);
+    m.normal = normalize(mix(m.normal, n, film * up * 0.7));
+
+    if (up < 0.75 && in.viewDepth < 45.0) {
+        float steep = (1.0 - up / 0.75) * (1.0 - smoothstep(30.0, 45.0, in.viewDepth));
+        float2 level = float2(-n.z, n.x);
+        level = dot(level, level) > 1e-6 ? normalize(level) : float2(1.0, 0.0);
+        float across = dot(in.worldPosition.xz, level) * 12.0;
+        float column = floor(across);
+        float r = rainHash(float2(column, 7.31));
+        // Trails wander from side to side as they run.
+        float within = fract(across) - 0.5 + 0.18 * sin(in.worldPosition.y * 3.0 + r * 6.28);
+        float speed = 0.8 + 1.6 * rainHash(float2(column, 1.7));
+        float trail = fract(in.worldPosition.y * 1.6 + time * speed + r * 13.0);
+        float head = smoothstep(0.0, 0.02, trail) * (1.0 - smoothstep(0.04, 0.09, trail)) * (1.0 - smoothstep(0.1, 0.26, abs(within)));
+        float behind = (1.0 - smoothstep(0.05, 0.6, trail)) * (1.0 - smoothstep(0.04, 0.12, abs(within))) * 0.6;
+        float running = step(1.0 - 0.65 * wet, r) * steep * max(head, behind);
+        m.roughness = mix(m.roughness, 0.03, running);
+        m.baseColor.rgb *= 1.0 - 0.2 * running * soaks;
+        m.normal = normalize(m.normal - float3(level.x, 0.0, level.y) * (within * 2.5 * head * running));
+    }
+    if (up > 0.6 && in.viewDepth < 30.0) {
+        float2 p = in.worldPosition.xz * 2.5;               // cells of 40 cm, a drop now and then in each
+        float2 tilt = float2(0.0);
+        for (int layer = 0; layer < 2; layer++) {
+            float2 q = p + float(layer) * float2(0.37, 0.61);
+            float2 cell = floor(q) + float(layer) * 17.0;
+            float2 center = float2(rainHash(cell + 3.1), rainHash(cell + 9.7)) * 0.6 + 0.2;
+            float phase = fract(time * 1.1 + rainHash(cell + 5.3));
+            float2 away = fract(q) - center;
+            float r = length(away);
+            float radius = phase * 0.35;
+            float band = saturate(1.0 - abs(r - radius) * 12.0);
+            float ring = sin(clamp((r - radius) * 40.0, -3.14159, 3.14159));
+            tilt += away / max(r, 1e-3) * (ring * band * (1.0 - phase) * (1.0 - phase));
+        }
+        float pools = wet * smoothstep(0.6, 0.95, up) * (1.0 - smoothstep(12.0, 30.0, in.viewDepth));
+        m.normal = normalize(m.normal + float3(tilt.x, 0.0, tilt.y) * (0.35 * pools));
+    }
 }
 
 // Surface shaders written by hand (`.shader` assets) are put here by the engine, each in a
@@ -118,32 +229,21 @@ static float4 shadePixel(MeshVertexOut in, MaterialSample m,
 #if MOLTEN_CUSTOM
     // The material's own shader has its say first: what it returns is what is lit.
     if (m.custom > 0.5) {
-        m = moltenCustomSurface(m, in, pass.cameraPosition, pass.time);
+        m = moltenCustomSurface(m, in, pass.cameraPosition, pass.time, pass.wind, m.waterDepth);
     }
 #endif
     // Water is part of every variant of the shaders: it needs nothing the plainest lacks.
     if (m.water > 0.0) {
-        // Water: the slope of its waves (the sea's own, worked out by a Fourier transform, or a
-        // handful of crossing waves where there is none), then the sky it mirrors, the light
-        // that comes out of it from below, the sun's glitter, and foam where waves break.
+        // Water: the slope of its waves (the sea the wind raises, see Mesh.metal, and the small
+        // waves only a pixel shows), then the sky it mirrors, the light that comes out of it
+        // from below, the sun's glitter, and foam where waves break.
         float t = pass.time;
-        float2 p = in.worldPosition.xz * m.water;
-        float2 slope;
-        float crest = 0.0;
-        float seaFoam = 0.0;
-        if (m.hasSea > 0.5) {
-            slope = m.sea.xy;
-            seaFoam = m.sea.z;
-            crest = m.sea.w;
-        } else {
-            slope = float2(0.0);
-            slope += float2(0.80, 0.60) * (cos(dot(p, float2(0.80, 0.60)) * 0.9 + t * 0.9) * 0.050);
-            slope += float2(-0.50, 0.86) * (cos(dot(p, float2(-0.50, 0.86)) * 2.3 + t * 1.5) * 0.040);
-            slope += float2(0.30, -0.95) * (cos(dot(p, float2(0.30, -0.95)) * 5.7 + t * 2.4) * 0.028);
-            slope += float2(-0.90, -0.40) * (cos(dot(p, float2(-0.90, -0.40)) * 12.1 + t * 3.7) * 0.018);
-            slope += float2(0.10, 0.99) * (cos(dot(p, float2(0.10, 0.99)) * 27.0 + t * 5.9) * 0.010);
-        }
-        slope *= m.waveHeight;
+        float2 rest = waterRestingPlace(in);
+        float footprint = max(length(dfdx(rest)), length(dfdy(rest)));
+        WaterSwell raised = waterSwell(rest, t, pass.wind, m.water, m.waveHeight, footprint * 1.5);      // (none shorter than two pixels)
+        float2 slope = raised.slope + waterRipples(rest, t, pass.wind, m.water, m.waveHeight, footprint);
+        float crest = raised.crest;
+        float seaFoam = waterBreaking(raised.crowding, pass.wind) * m.waterFoam;
         // Far away the small waves blur into a smoother sheet, as they do to the eye.
         slope *= mix(1.0, 0.45, saturate(in.viewDepth / 600.0));
         float3 swell = normalize(in.normal);
@@ -186,17 +286,15 @@ static float4 shadePixel(MeshVertexOut in, MaterialSample m,
         float sheen = pow(saturate(dot(mirrored, toSun)), 40.0) * 0.15;
         float3 water = mix(body, sky, fresnel) + sun * (glitter + sheen) * saturate(dot(N, toSun) * 4.0);
 
-        // Foam where waves break: the sea's own, or what a Water's moving sheet says (its texture
-        // coordinate, from 2 up); patchy, as foam is.
-        float sheetFoam = saturate(in.uv.x - 2.0);
-        float foam = max(sheetFoam, saturate(seaFoam * 1.2 - 0.2) * saturate(m.waveHeight));
+        // Foam where waves break; patchy, as foam is.
+        float foam = saturate(seaFoam);
         // Where the water meets something that stands in it (a rock, a pier, a hull, the shore):
         // a ring of foam that the waves push and pull, thicker the rougher the sea.
         float wash = 0.35 + 0.25 * saturate(m.waveHeight);
         float lap = 0.5 + 0.5 * sin(t * 1.6 + dot(in.worldPosition.xz, float2(0.9, 0.7)) * 2.0);
         float shore = (1.0 - smoothstep(0.0, wash * (0.7 + 0.6 * lap), depthIn)) * step(0.0, depthIn);
         float shoreRipples = 0.55 + 0.45 * sin(depthIn * 28.0 - t * 3.0);
-        foam = max(foam, shore * shoreRipples);
+        foam = max(foam, shore * shoreRipples * saturate(m.waterFoam));
         float breakup = 0.65 + 0.35 * sin(dot(in.worldPosition.xz, float2(3.1, 1.7)) + t * 0.7) * sin(dot(in.worldPosition.xz, float2(-1.3, 2.9)) - t * 0.4);
         foam = saturate(foam * breakup * 1.3);
         float3 white = float3(0.9, 0.93, 0.95) * (around + sun * (0.35 + 0.35 * saturate(dot(N, toSun))));
@@ -212,6 +310,25 @@ static float4 shadePixel(MeshVertexOut in, MaterialSample m,
         }
         return float4(applyFog(water, in.viewDepth, frame), opacity);
     }
+    // Under the sea's level, the sea is between this place and the sky: the sun's light reaches
+    // it dimmer and bluer the deeper (and gathered into lines by the waves), the sky's too.
+    float3 sunThroughSea = float3(1.0), aroundThroughSea = float3(1.0);
+    float footprint = max(length(dfdx(in.worldPosition)), length(dfdy(in.worldPosition)));
+    if (hasSea(frame)) {
+        float below = frame.seaColor.w - in.worldPosition.y;
+        if (below > 0.0) {
+            float3 sunWay = normalize(frame.sunDirection);
+            float3 still = refract(sunWay, float3(0.0, 1.0, 0.0), 1.0 / 1.333);
+            sunThroughSea = exp(-frame.seaAbsorb.xyz * (below / max(-still.y, 0.2)));
+            aroundThroughSea = exp(-frame.seaAbsorb.xyz * below * 1.3);
+            if (sunWay.y < -0.03 && below < 40.0 && in.viewDepth < 160.0 && frame.seaLook.w > 0.0) {
+                float lines = seaCaustics(in.worldPosition, below, sunWay, pass, footprint, frame.seaLook.z);
+                float fade = smoothstep(0.0, 0.25, below) * (1.0 - smoothstep(90.0, 160.0, in.viewDepth));
+                sunThroughSea *= mix(1.0, max(1.0 + (lines - 1.0) * frame.seaLook.w, 0.0), fade);
+            }
+        }
+    }
+
     Surface surface;
     surface.position = in.worldPosition;
     surface.normal = m.normal;
@@ -232,7 +349,7 @@ static float4 shadePixel(MeshVertexOut in, MaterialSample m,
         if (i == 0) {
             // By convention the shadow-casting sun is the first light. Without sun
             // shadows `sunLight` is 1 and this changes nothing.
-            light.radiance *= sunLight;
+            light.radiance *= sunLight * sunThroughSea;
         }
         // (Each part is kept between nothing and a great deal: one that is not a number
         // would otherwise blacken the whole pixel, and the bloom around it.)
@@ -245,14 +362,16 @@ static float4 shadePixel(MeshVertexOut in, MaterialSample m,
     // barely mirrors anything, chrome mirrors everything.
     EnvironmentParts environment = environmentParts(surface, frame, irradianceMap, prefilteredMap, brdfLUT, linearSampler);
     float traced = saturate(m.mirror);
-    color += clamp(environment.diffuse + environment.specular * (1.0 - traced), 0.0, 60000.0);
+    color += clamp(environment.diffuse + environment.specular * (1.0 - traced), 0.0, 60000.0) * aroundThroughSea;
     color += clamp(m.mirrored * environment.specularWeight * traced * frame.reflectionStrength, 0.0, 60000.0);
     // And the light bounced to it from its surroundings, taken up by what is not metal in it.
-    color += clamp(m.bounced * m.baseColor.rgb * (1.0 - m.metallic) * m.occlusion, 0.0, 60000.0);
+    color += clamp(m.bounced * m.baseColor.rgb * (1.0 - m.metallic) * m.occlusion, 0.0, 60000.0) * aroundThroughSea;
+    // Seen from under the sea, through its water; otherwise through the air, and its fog.
+    if (hasSea(frame) && frame.cameraUnderwater > 0.0) return float4(seenInSea(color, in.worldPosition, frame), m.baseColor.a);
     return float4(applyFogAlong(color, in.worldPosition, pass.cameraPosition, m.fogSun, frame), m.baseColor.a);
 #else
-    color += clamp(environmentLight(surface, frame, irradianceMap, prefilteredMap, brdfLUT, linearSampler), 0.0, 60000.0);
-
+    color += clamp(environmentLight(surface, frame, irradianceMap, prefilteredMap, brdfLUT, linearSampler), 0.0, 60000.0) * aroundThroughSea;
+    if (hasSea(frame) && frame.cameraUnderwater > 0.0) return float4(seenInSea(color, in.worldPosition, frame), m.baseColor.a);
     return float4(applyFog(color, in.viewDepth, frame), m.baseColor.a);
 #endif
 }
@@ -276,16 +395,23 @@ fragment float4 fragment_pbr(MeshVertexOut in [[stage_in]],
                              texture2d<float> brdfLUT [[texture(MMTextureBRDF)]],
                              texture2d<float> ambientOcclusion [[texture(MMTextureAmbientOcclusion)]],
                              depth2d<float> sceneDepth [[texture(MMTextureSceneDepth)]],
+                             depth2d<float> rainMap [[texture(MMTextureRainMap)]],
                              sampler materialSampler [[sampler(MMSamplerMaterial)]],
                              sampler shadowSampler [[sampler(MMSamplerShadow)]],
                              sampler linearSampler [[sampler(MMSamplerLinearClamp)]]) {
     MaterialSample m = sampleMaterial(in, isFrontFacing, material, baseColorTexture, normalTexture,
                                       metallicRoughnessTexture, occlusionTexture, emissiveTexture, materialSampler);
+    if (frame.wetness > 0.0 && m.water <= 0.0) wetten(m, in, frame, pass.time, rainReaches(in.worldPosition, normalize(in.normal), frame, rainMap, shadowSampler));
     float sunLight = sunVisibility(in.worldPosition, normalize(in.normal), in.viewDepth, frame, shadowMap, shadowSampler);
 #if MOLTEN_EXTRAS
     m.fogSun = fogInSunlight(in.worldPosition, pass.cameraPosition, in.viewDepth, in.position.xy, frame, shadowMap, shadowSampler);
 #endif
+#if MOLTEN_CUSTOM
+    // How far what is behind it is: for water, and for a shader of the game's own that asks (in.behind).
+    if (m.water > 0.0 || m.custom > 0.5) m.waterDepth = waterDepthAt(in, pass, frame, sceneDepth);
+#else
     if (m.water > 0.0) m.waterDepth = waterDepthAt(in, pass, frame, sceneDepth);
+#endif
     return shadePixel(in, m, pass, frame, lights, sunLight, irradianceMap, prefilteredMap, brdfLUT,
                       ambientOcclusion, linearSampler);
 }
@@ -310,6 +436,7 @@ fragment float4 fragment_pbr_masked(MeshVertexOut in [[stage_in]],
                                     texturecube<float> prefilteredMap [[texture(MMTexturePrefiltered)]],
                                     texture2d<float> brdfLUT [[texture(MMTextureBRDF)]],
                                     texture2d<float> ambientOcclusion [[texture(MMTextureAmbientOcclusion)]],
+                                    depth2d<float> rainMap [[texture(MMTextureRainMap)]],
                                     sampler materialSampler [[sampler(MMSamplerMaterial)]],
                                     sampler shadowSampler [[sampler(MMSamplerShadow)]],
                                     sampler linearSampler [[sampler(MMSamplerLinearClamp)]]) {
@@ -319,6 +446,7 @@ fragment float4 fragment_pbr_masked(MeshVertexOut in [[stage_in]],
         discard_fragment();
     }
     m.baseColor.a = 1.0;
+    if (frame.wetness > 0.0 && m.water <= 0.0) wetten(m, in, frame, pass.time, rainReaches(in.worldPosition, normalize(in.normal), frame, rainMap, shadowSampler));
     float sunLight = sunVisibility(in.worldPosition, normalize(in.normal), in.viewDepth, frame, shadowMap, shadowSampler);
 #if MOLTEN_EXTRAS
     m.fogSun = fogInSunlight(in.worldPosition, pass.cameraPosition, in.viewDepth, in.position.xy, frame, shadowMap, shadowSampler);
@@ -348,16 +476,23 @@ fragment float4 fragment_pbr_traced(MeshVertexOut in [[stage_in]],
                              texture2d<float> tracedLight [[texture(MMTextureTracedLight)]],
                              texture2d<float> tracedSurface [[texture(MMTextureTracedSurface)]],
 #endif
+                             depth2d_array<float> shadowMap [[texture(MMTextureShadowMap)]],
                              texturecube<float> irradianceMap [[texture(MMTextureIrradiance)]],
                              texturecube<float> prefilteredMap [[texture(MMTexturePrefiltered)]],
                              texture2d<float> brdfLUT [[texture(MMTextureBRDF)]],
                              texture2d<float> ambientOcclusion [[texture(MMTextureAmbientOcclusion)]],
                              depth2d<float> sceneDepth [[texture(MMTextureSceneDepth)]],
+                             depth2d<float> rainMap [[texture(MMTextureRainMap)]],
                              sampler materialSampler [[sampler(MMSamplerMaterial)]],
+                             sampler shadowSampler [[sampler(MMSamplerShadow)]],
                              sampler linearSampler [[sampler(MMSamplerLinearClamp)]]) {
     MaterialSample m = sampleMaterial(in, isFrontFacing, material, baseColorTexture, normalTexture,
                                       metallicRoughnessTexture, occlusionTexture, emissiveTexture, materialSampler);
-    float sunLight = sunVisibilityTraced(in.worldPosition, normalize(in.normal), -frame.sunDirection, in.viewDepth, in.position.xy, frame, tracedScene);
+    if (frame.wetness > 0.0 && m.water <= 0.0) wetten(m, in, frame, pass.time, rainReaches(in.worldPosition, normalize(in.normal), frame, rainMap, shadowSampler));
+    // The sun's shadow: a ray from this pixel's own place toward the sun (more along an edge),
+    // from the side of the surface that is seen.
+    float3 seenSide = isFrontFacing ? normalize(in.normal) : -normalize(in.normal);
+    float sunLight = sunVisibilityTraced(in.worldPosition, seenSide, -frame.sunDirection, in.viewDepth, in.position.xy, frame, tracedScene);
 #if MOLTEN_EXTRAS
     // The light around the pixel: traced before this pass at half the size where that could
     // be done (a quarter of the rays, and smoothed), and otherwise here, a pixel at a time.
@@ -366,10 +501,12 @@ fragment float4 fragment_pbr_traced(MeshVertexOut in [[stage_in]],
         float3 facing = isFrontFacing ? normalize(in.normal) : -normalize(in.normal);
         around = tracedAmbientAt(in.position.xy, in.worldPosition, facing, in.viewDepth, pass, tracedLight, tracedSurface);
     } else {
-        around = ambientTraced(in.worldPosition, normalize(in.normal), in.viewDepth, in.position.xy, frame, tracedScene, tracedSurfaces, irradianceMap, linearSampler);
+        around = ambientTraced(in.worldPosition, normalize(in.normal), in.viewDepth, in.position.xy, false, frame, tracedScene, tracedSurfaces, irradianceMap, linearSampler);
     }
     m.occlusion *= around.a;
     m.bounced = around.rgb;
+    // The light shafts: shadow maps drawn for them alone, near the camera (see renderView).
+    m.fogSun = fogInSunlight(in.worldPosition, pass.cameraPosition, in.viewDepth, in.position.xy, frame, shadowMap, shadowSampler);
     if (m.roughness < frame.reflectionMaxRoughness) {
         float4 seen = reflectionTraced(in.worldPosition, m.normal, normalize(pass.cameraPosition - in.worldPosition), m.roughness, in.viewDepth, in.position.xy, frame,
                                        tracedScene, tracedSurfaces, irradianceMap, linearSampler);
@@ -379,7 +516,12 @@ fragment float4 fragment_pbr_traced(MeshVertexOut in [[stage_in]],
         m.mirrored = seen.rgb;
     }
 #endif
+#if MOLTEN_CUSTOM
+    // How far what is behind it is: for water, and for a shader of the game's own that asks (in.behind).
+    if (m.water > 0.0 || m.custom > 0.5) m.waterDepth = waterDepthAt(in, pass, frame, sceneDepth);
+#else
     if (m.water > 0.0) m.waterDepth = waterDepthAt(in, pass, frame, sceneDepth);
+#endif
     return shadePixel(in, m, pass, frame, lights, sunLight, irradianceMap, prefilteredMap, brdfLUT,
                       ambientOcclusion, linearSampler);
 }
@@ -402,11 +544,14 @@ fragment float4 fragment_pbr_masked_traced(MeshVertexOut in [[stage_in]],
                                     texture2d<float> tracedLight [[texture(MMTextureTracedLight)]],
                                     texture2d<float> tracedSurface [[texture(MMTextureTracedSurface)]],
 #endif
+                                    depth2d_array<float> shadowMap [[texture(MMTextureShadowMap)]],
                                     texturecube<float> irradianceMap [[texture(MMTextureIrradiance)]],
                                     texturecube<float> prefilteredMap [[texture(MMTexturePrefiltered)]],
                                     texture2d<float> brdfLUT [[texture(MMTextureBRDF)]],
                                     texture2d<float> ambientOcclusion [[texture(MMTextureAmbientOcclusion)]],
+                                    depth2d<float> rainMap [[texture(MMTextureRainMap)]],
                                     sampler materialSampler [[sampler(MMSamplerMaterial)]],
+                                    sampler shadowSampler [[sampler(MMSamplerShadow)]],
                                     sampler linearSampler [[sampler(MMSamplerLinearClamp)]]) {
     MaterialSample m = sampleMaterial(in, isFrontFacing, material, baseColorTexture, normalTexture,
                                       metallicRoughnessTexture, occlusionTexture, emissiveTexture, materialSampler);
@@ -414,7 +559,11 @@ fragment float4 fragment_pbr_masked_traced(MeshVertexOut in [[stage_in]],
         discard_fragment();
     }
     m.baseColor.a = 1.0;
-    float sunLight = sunVisibilityTraced(in.worldPosition, normalize(in.normal), -frame.sunDirection, in.viewDepth, in.position.xy, frame, tracedScene);
+    if (frame.wetness > 0.0 && m.water <= 0.0) wetten(m, in, frame, pass.time, rainReaches(in.worldPosition, normalize(in.normal), frame, rainMap, shadowSampler));
+    // The sun's shadow: a ray from this pixel's own place toward the sun (more along an edge),
+    // from the side of the surface that is seen.
+    float3 seenSide = isFrontFacing ? normalize(in.normal) : -normalize(in.normal);
+    float sunLight = sunVisibilityTraced(in.worldPosition, seenSide, -frame.sunDirection, in.viewDepth, in.position.xy, frame, tracedScene);
 #if MOLTEN_EXTRAS
     // The light around the pixel: traced before this pass at half the size where that could
     // be done (a quarter of the rays, and smoothed), and otherwise here, a pixel at a time.
@@ -423,10 +572,12 @@ fragment float4 fragment_pbr_masked_traced(MeshVertexOut in [[stage_in]],
         float3 facing = isFrontFacing ? normalize(in.normal) : -normalize(in.normal);
         around = tracedAmbientAt(in.position.xy, in.worldPosition, facing, in.viewDepth, pass, tracedLight, tracedSurface);
     } else {
-        around = ambientTraced(in.worldPosition, normalize(in.normal), in.viewDepth, in.position.xy, frame, tracedScene, tracedSurfaces, irradianceMap, linearSampler);
+        around = ambientTraced(in.worldPosition, normalize(in.normal), in.viewDepth, in.position.xy, false, frame, tracedScene, tracedSurfaces, irradianceMap, linearSampler);
     }
     m.occlusion *= around.a;
     m.bounced = around.rgb;
+    // The light shafts: shadow maps drawn for them alone, near the camera (see renderView).
+    m.fogSun = fogInSunlight(in.worldPosition, pass.cameraPosition, in.viewDepth, in.position.xy, frame, shadowMap, shadowSampler);
     if (m.roughness < frame.reflectionMaxRoughness) {
         float4 seen = reflectionTraced(in.worldPosition, m.normal, normalize(pass.cameraPosition - in.worldPosition), m.roughness, in.viewDepth, in.position.xy, frame,
                                        tracedScene, tracedSurfaces, irradianceMap, linearSampler);

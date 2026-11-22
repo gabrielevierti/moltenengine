@@ -10,7 +10,7 @@ settings
   rayTracedShadows 0 4
   rayTracedLighting 0 1 0 0 1
   rayTracedReflections 0.3 1
-  fogShape 0 0
+  fogShape 0 1 1
   wind 0 0 0 0.4
   ambientOcclusion 1 0.6 1
   bloom 1 0.06 1
@@ -19,7 +19,7 @@ settings
   toneMapper 2
   vignette 0.25
   clouds 0.45 1 900 900
-  volumetrics 1 0
+  volumetrics 1 16
   lens 0 0 0
   lensFlare 0.6
 entity "Sun"
@@ -93,1222 +93,1197 @@ entity "Mountain 12"
   mesh "Models/Mountain.obj" -1 1 1 1 1 0 1
   materialAsset "Materials/Mountains.material"
 entity "Field 1"
-  transform -191.2284 0.03 -1364.5706 0 0.56585276 0 0.82450634 171.52399 1 104.131004
+  transform -191.2284 0.042 -1364.5706 0 0.56585276 0 0.82450634 171.52399 1 104.131004
   parent 2
   mesh "plane" -1 1 1 1 1 0 1
   materialAsset "Materials/Fields.material"
 entity "Field 2"
-  transform 1514.9166 0.04 -497.641 0 0.31656474 0 0.9485709 189.21046 1 188.4545
+  transform 1514.9166 0.042 -497.641 0 0.31656474 0 0.9485709 189.21046 1 188.4545
   parent 2
   mesh "plane" -1 1 1 1 1 0 1
-  materialAsset "Materials/Leaves.material"
+  materialAsset "Materials/Meadow.material"
 entity "Field 3"
-  transform 457.98892 0.049999997 -331.4253 0 0.17681322 0 0.9842444 163.70532 1 180.39384
+  transform 457.98892 0.042 -331.4253 0 0.17681322 0 0.9842444 163.70532 1 180.39384
   parent 2
   mesh "plane" -1 1 1 1 1 0 1
   materialAsset "Materials/Fields.material"
-entity "Field 4"
-  transform 175.1936 0.03 95.22589 0 0.16827133 0 0.9857407 209.5137 1 146.53995
-  parent 2
-  mesh "plane" -1 1 1 1 1 0 1
-  materialAsset "Materials/Leaves.material"
 entity "Field 5"
-  transform -845.3529 0.04 -1368.3813 0 0.3384085 0 0.9409993 142.35228 1 106.30941
+  transform -845.3529 0.042 -1368.3813 0 0.3384085 0 0.9409993 142.35228 1 106.30941
   parent 2
   mesh "plane" -1 1 1 1 1 0 1
   materialAsset "Materials/Fields.material"
 entity "Field 6"
-  transform -859.69385 0.049999997 409.9579 0 0.12706554 0 0.9918943 163.83502 1 191.61533
+  transform -859.69385 0.042 409.9579 0 0.12706554 0 0.9918943 163.83502 1 191.61533
   parent 2
   mesh "plane" -1 1 1 1 1 0 1
-  materialAsset "Materials/Leaves.material"
+  materialAsset "Materials/Meadow.material"
 entity "Field 7"
-  transform 1154.9851 0.03 522.2921 0 0.2686759 0 0.96323067 200.26512 1 159.03125
+  transform 1154.9851 0.042 522.2921 0 0.2686759 0 0.96323067 200.26512 1 159.03125
   parent 2
   mesh "plane" -1 1 1 1 1 0 1
   materialAsset "Materials/Fields.material"
 entity "Field 8"
-  transform -526.5316 0.04 32.91339 0 0.54151297 0 0.8406924 236.84587 1 217.01328
+  transform -526.5316 0.042 32.91339 0 0.54151297 0 0.8406924 236.84587 1 217.01328
   parent 2
   mesh "plane" -1 1 1 1 1 0 1
-  materialAsset "Materials/Leaves.material"
-entity "Field 9"
-  transform -194.07635 0.049999997 -1178.8135 0 0.5016174 0 0.8650896 274.52747 1 93.36055
-  parent 2
-  mesh "plane" -1 1 1 1 1 0 1
-  materialAsset "Materials/Fields.material"
+  materialAsset "Materials/Meadow.material"
 entity "Field 10"
-  transform 702.86926 0.03 -22.30188 0 0.65087384 0 0.7591859 212.44685 1 191.6276
+  transform 702.86926 0.042 -22.30188 0 0.65087384 0 0.7591859 212.44685 1 191.6276
   parent 2
   mesh "plane" -1 1 1 1 1 0 1
-  materialAsset "Materials/Leaves.material"
+  materialAsset "Materials/Meadow.material"
 entity "Field 11"
-  transform 1023.40625 0.04 -135.17877 0 0.3704876 0 0.9288374 134.96645 1 98.51767
+  transform 1023.40625 0.042 -135.17877 0 0.3704876 0 0.9288374 134.96645 1 98.51767
   parent 2
   mesh "plane" -1 1 1 1 1 0 1
   materialAsset "Materials/Fields.material"
-entity "Field 12"
-  transform 373.4766 0.049999997 -163.70258 0 0.15467323 0 0.9879657 244.36041 1 163.60959
-  parent 2
-  mesh "plane" -1 1 1 1 1 0 1
-  materialAsset "Materials/Leaves.material"
 entity "Field 13"
-  transform 521.4396 0.03 526.9829 0 0.19731927 0 0.9803393 167.9531 1 112.987564
+  transform 521.4396 0.042 526.9829 0 0.19731927 0 0.9803393 167.9531 1 112.987564
   parent 2
   mesh "plane" -1 1 1 1 1 0 1
   materialAsset "Materials/Fields.material"
 entity "Field 14"
-  transform 1595.0381 0.04 79.95337 0 0.42668766 0 0.90439904 202.51404 1 203.79626
+  transform 1595.0381 0.042 79.95337 0 0.42668766 0 0.90439904 202.51404 1 203.79626
   parent 2
   mesh "plane" -1 1 1 1 1 0 1
-  materialAsset "Materials/Leaves.material"
+  materialAsset "Materials/Meadow.material"
 entity "Field 15"
-  transform -602.74713 0.049999997 -1813.6166 0 0.39818618 0 0.91730464 160.486 1 188.56949
+  transform -602.74713 0.042 -1813.6166 0 0.39818618 0 0.91730464 160.486 1 188.56949
   parent 2
   mesh "plane" -1 1 1 1 1 0 1
   materialAsset "Materials/Fields.material"
 entity "Field 17"
-  transform 1908.9266 0.04 -1924.4547 0 0.4085639 0 0.91272974 195.53271 1 163.80948
+  transform 1908.9266 0.042 -1924.4547 0 0.4085639 0 0.91272974 195.53271 1 163.80948
   parent 2
   mesh "plane" -1 1 1 1 1 0 1
   materialAsset "Materials/Fields.material"
 entity "Field 18"
-  transform 1779.6733 0.049999997 -936.33813 0 0.58955085 0 0.8077313 207.7123 1 113.72971
+  transform 1779.6733 0.042 -936.33813 0 0.58955085 0 0.8077313 207.7123 1 113.72971
   parent 2
   mesh "plane" -1 1 1 1 1 0 1
-  materialAsset "Materials/Leaves.material"
+  materialAsset "Materials/Meadow.material"
 entity "Field 19"
-  transform 1292.746 0.03 -1167.612 0 0.31473476 0 0.94917965 239.6895 1 137.52263
+  transform 1292.746 0.042 -1167.612 0 0.31473476 0 0.94917965 239.6895 1 137.52263
   parent 2
   mesh "plane" -1 1 1 1 1 0 1
   materialAsset "Materials/Fields.material"
 entity "Field 20"
-  transform 725.4576 0.04 -687.284 0 0.43273777 0 0.90151983 184.47327 1 209.657
+  transform 725.4576 0.042 -687.284 0 0.43273777 0 0.90151983 184.47327 1 209.657
   parent 2
   mesh "plane" -1 1 1 1 1 0 1
-  materialAsset "Materials/Leaves.material"
+  materialAsset "Materials/Meadow.material"
 entity "Field 21"
-  transform -1165.6318 0.049999997 -719.15704 0 0.41443723 0 0.91007787 251.1725 1 107.119736
-  parent 2
-  mesh "plane" -1 1 1 1 1 0 1
-  materialAsset "Materials/Fields.material"
-entity "Field 22"
-  transform 1802.4386 0.03 -2064.6177 0 0.4204535 0 0.90731406 225.7668 1 213.28145
-  parent 2
-  mesh "plane" -1 1 1 1 1 0 1
-  materialAsset "Materials/Leaves.material"
-entity "Field 23"
-  transform -465.93896 0.04 130.67554 0 0.5621375 0 0.8270438 272.8426 1 94.3261
+  transform -1165.6318 0.042 -719.15704 0 0.41443723 0 0.91007787 251.1725 1 107.119736
   parent 2
   mesh "plane" -1 1 1 1 1 0 1
   materialAsset "Materials/Fields.material"
 entity "Field 24"
-  transform 1919.8229 0.049999997 959.2146 0 0.22908323 0 0.97340685 273.31534 1 146.59473
+  transform 1919.8229 0.042 959.2146 0 0.22908323 0 0.97340685 273.31534 1 146.59473
   parent 2
   mesh "plane" -1 1 1 1 1 0 1
-  materialAsset "Materials/Leaves.material"
+  materialAsset "Materials/Meadow.material"
 entity "Field 25"
-  transform -826.5696 0.03 -632.4627 0 0.070514336 0 0.9975108 126.01576 1 179.97617
+  transform -826.5696 0.042 -632.4627 0 0.070514336 0 0.9975108 126.01576 1 179.97617
   parent 2
   mesh "plane" -1 1 1 1 1 0 1
   materialAsset "Materials/Fields.material"
 entity "Field 26"
-  transform 1020.56085 0.04 -561.8451 0 0.6750289 0 0.73779124 213.85478 1 161.29034
+  transform 1020.56085 0.042 -561.8451 0 0.6750289 0 0.73779124 213.85478 1 161.29034
   parent 2
   mesh "plane" -1 1 1 1 1 0 1
-  materialAsset "Materials/Leaves.material"
+  materialAsset "Materials/Meadow.material"
 entity "Airfield"
   transform 0 0 0 0 0 0 1 1 1 1
 entity "Runway"
-  transform 0 -0.2 0 0 0 0 1 20 0.5 900
-  parent 40
+  transform 0 -0.2 0 0 0 0 1 20.01 0.51 900.01
+  parent 35
   mesh "cube" -1 1 1 1 1 0 1
   materialAsset "Materials/Asphalt.material"
 entity "Runway Marks"
-  transform 0 0 0 0 0 0 1 1 1 1
-  parent 40
+  transform 0 0.024 0 0 0 0 1 1 1 1
+  parent 35
   mesh "Models/Runway Marks.obj" -1 1 1 1 1 0 1
   materialAsset "Materials/Runway Paint.material"
 entity "Hangar"
   transform 46 0 330 0 0 0 1 1 1 1
-  parent 40
+  parent 35
 entity "Walls"
   transform 0 4 0 0 0 0 1 26 8 30
-  parent 43
+  parent 38
   mesh "cube" -1 1 1 1 1 1 1
   materialAsset "Materials/Concrete.material"
   collider box 13 4 15 0 0 0 0
 entity "Roof"
   transform 0 8.6 0 0 0 0 1 28 1.2 32
-  parent 43
+  parent 38
   mesh "cube" -1 1 1 1 1 1 1
   materialAsset "Materials/Hangar Roof.material"
 entity "Tower"
   transform -40 0 300 0 0 0 1 1 1 1
-  parent 40
+  parent 35
 entity "Shaft"
   transform 0 9 0 0 0 0 1 5 18 5
-  parent 46
+  parent 41
   mesh "cube" -1 1 1 1 1 1 1
   materialAsset "Materials/Concrete.material"
   collider box 2.5 9 2.5 0 0 0 0
 entity "Cab"
   transform 0 19.5 0 0 0 0 1 8 3 8
-  parent 46
+  parent 41
   mesh "cube" -1 1 1 1 1 1 1
   materialAsset "Materials/Glass.material"
 entity "Cap"
   transform 0 21.4 0 0 0 0 1 9 0.8 9
-  parent 46
+  parent 41
   mesh "cube" -1 1 1 1 1 1 1
   materialAsset "Materials/Hangar Roof.material"
 entity "Trees"
   transform 0 0 0 0 0 0 1 1 1 1
 entity "Tree 1"
   transform -150.63672 0 396.71365 0 0.09819317 0 0.9951674 1.1164644 1.1164644 1.1164644
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 51
+  parent 46
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 51
+  parent 46
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 2"
   transform -82.196915 0 572.1667 0 0.966893 0 0.25518206 0.895586 0.895586 0.895586
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 54
+  parent 49
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 54
+  parent 49
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 3"
   transform -296.30136 0 311.33313 0 0.7322283 0 0.6810593 0.9978294 0.9978294 0.9978294
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 57
+  parent 52
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 57
+  parent 52
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 4"
   transform 123.373566 0 217.24829 0 0.48361894 0 0.87527865 1.1989911 1.1989911 1.1989911
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 60
+  parent 55
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 60
+  parent 55
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 5"
   transform 53.5613 0 -149.67723 0 0.9846517 0 0.1745311 1.1847996 1.1847996 1.1847996
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 63
+  parent 58
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 63
+  parent 58
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 6"
   transform 289.6376 0 603.7028 0 0.30243814 0 0.953169 1.1506131 1.1506131 1.1506131
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 66
+  parent 61
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 66
+  parent 61
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 7"
   transform 296.73825 0 183.34186 0 0.98932374 0 -0.14573444 1.0700121 1.0700121 1.0700121
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 69
+  parent 64
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 69
+  parent 64
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 8"
   transform 145.9575 0 -445.51108 0 0.30745643 0 0.95156217 1.1973844 1.1973844 1.1973844
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 72
+  parent 67
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 72
+  parent 67
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 9"
   transform -276.46252 0 251.56027 0 0.057998907 0 -0.99831665 1.2265832 1.2265832 1.2265832
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 75
+  parent 70
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 75
+  parent 70
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 10"
   transform 134.37738 0 50.40291 0 0.6061832 0 -0.7953251 0.9904354 0.9904354 0.9904354
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 78
+  parent 73
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 78
+  parent 73
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 11"
   transform -404.81683 0 77.987465 0 0.9116114 0 0.4110531 1.493581 1.493581 1.493581
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 81
+  parent 76
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 81
+  parent 76
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 12"
   transform -303.38757 0 -129.8929 0 0.99039197 0 0.13828874 0.83698934 0.83698934 0.83698934
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 84
+  parent 79
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 84
+  parent 79
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 13"
   transform 252.58035 0 -742.3404 0 0.52015305 0 -0.85407305 1.4224021 1.4224021 1.4224021
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 87
+  parent 82
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 87
+  parent 82
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 14"
   transform -182.19012 0 -535.23724 0 0.15318203 0 0.988198 1.01384 1.01384 1.01384
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 90
+  parent 85
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 90
+  parent 85
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 15"
   transform 205.76057 0 -625.5315 0 0.37139636 0 0.9284744 1.4281037 1.4281037 1.4281037
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 93
+  parent 88
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 93
+  parent 88
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 16"
   transform 130.99887 0 571.6727 0 0.61516327 0 0.7883997 1.0383619 1.0383619 1.0383619
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 96
+  parent 91
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 96
+  parent 91
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 17"
   transform -306.70203 0 719.2623 0 0.79572886 0 -0.60565305 1.118571 1.118571 1.118571
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 99
+  parent 94
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 99
+  parent 94
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 18"
   transform 72.0488 0 -5.388692 0 0.5460118 0 -0.8377775 1.4374268 1.4374268 1.4374268
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 102
+  parent 97
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 102
+  parent 97
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 19"
   transform 216.58156 0 -514.1771 0 0.6179192 0 0.7862416 1.3624768 1.3624768 1.3624768
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 105
+  parent 100
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 105
+  parent 100
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 20"
   transform 303.09143 0 76.397804 0 0.15146898 0 -0.98846203 1.4130478 1.4130478 1.4130478
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 108
+  parent 103
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 108
+  parent 103
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 21"
   transform -338.9117 0 302.83704 0 0.98342425 0 -0.1813195 0.9895509 0.9895509 0.9895509
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 111
+  parent 106
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 111
+  parent 106
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 22"
   transform -341.30884 0 -170.55756 0 0.8455962 0 -0.5338231 1.1740255 1.1740255 1.1740255
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 114
+  parent 109
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 114
+  parent 109
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 23"
   transform -355.42578 0 183.4563 0 0.25474763 0 0.9670076 0.9613723 0.9613723 0.9613723
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 117
+  parent 112
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 117
+  parent 112
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 24"
   transform 369.25452 0 -300.21298 0 0.0366538 0 -0.999328 0.9837134 0.9837134 0.9837134
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 120
+  parent 115
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 120
+  parent 115
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 25"
   transform -144.60138 0 -293.17337 0 0.5520636 0 0.833802 1.4723438 1.4723438 1.4723438
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 123
+  parent 118
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 123
+  parent 118
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 26"
   transform -387.6973 0 -42.58123 0 0.9613583 0 -0.27530023 1.1897376 1.1897376 1.1897376
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 126
+  parent 121
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 126
+  parent 121
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 27"
   transform 203.56845 0 -707.5956 0 0.9927119 0 -0.12051192 1.3649272 1.3649272 1.3649272
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 129
+  parent 124
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 129
+  parent 124
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 28"
   transform -280.20972 0 -679.6062 0 0.7238842 0 0.6899215 0.97721463 0.97721463 0.97721463
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 132
+  parent 127
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 132
+  parent 127
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 29"
   transform -434.67374 0 -138.86578 0 0.880331 0 0.4743599 1.3877623 1.3877623 1.3877623
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 135
+  parent 130
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 135
+  parent 130
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 30"
   transform 175.64467 0 -512.7128 0 0.50070643 0 0.86561716 1.1379907 1.1379907 1.1379907
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 138
+  parent 133
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 138
+  parent 133
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 31"
   transform -248.76518 0 -254.73172 0 0.7793225 0 -0.62662303 1.3897275 1.3897275 1.3897275
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 141
+  parent 136
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 141
+  parent 136
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 32"
   transform -361.6887 0 -713.8286 0 0.32114932 0 -0.9470286 1.2571656 1.2571656 1.2571656
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 144
+  parent 139
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 144
+  parent 139
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 33"
   transform -224.67268 0 -247.64505 0 0.6969674 0 -0.7171028 0.89869267 0.89869267 0.89869267
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 147
+  parent 142
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 147
+  parent 142
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 34"
   transform -124.59668 0 -412.87347 0 0.34732783 0 -0.9377438 1.128783 1.128783 1.128783
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 150
+  parent 145
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 150
+  parent 145
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 35"
   transform -239.48302 0 -65.814835 0 0.91227907 0 0.40956917 0.9992635 0.9992635 0.9992635
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 153
+  parent 148
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 153
+  parent 148
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 36"
   transform -362.81567 0 216.23709 0 0.9134998 0 -0.40683928 1.2586997 1.2586997 1.2586997
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 156
+  parent 151
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 156
+  parent 151
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 37"
   transform 235.34792 0 -591.9306 0 0.24225135 0 0.97021353 1.0835454 1.0835454 1.0835454
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 159
+  parent 154
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 159
+  parent 154
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 38"
   transform 213.97215 0 441.6116 0 0.96482015 0 0.26291078 1.0126379 1.0126379 1.0126379
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 162
+  parent 157
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 162
+  parent 157
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 39"
   transform 243.73994 0 -158.71931 0 0.050527994 0 0.9987227 1.3349044 1.3349044 1.3349044
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 165
+  parent 160
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 165
+  parent 160
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 40"
   transform 246.11247 0 313.16336 0 0.96230656 0 -0.27196708 0.9885631 0.9885631 0.9885631
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 168
+  parent 163
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 168
+  parent 163
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 41"
   transform -288.25095 0 -217.96887 0 0.9928576 0 -0.11930571 1.2563137 1.2563137 1.2563137
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 171
+  parent 166
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 171
+  parent 166
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 42"
   transform 38.09289 0 443.0709 0 0.4552242 0 -0.89037687 1.2388744 1.2388744 1.2388744
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 174
+  parent 169
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 174
+  parent 169
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 43"
   transform -52.64471 0 650.3646 0 0.7723109 0 -0.6352447 0.86627036 0.86627036 0.86627036
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 177
+  parent 172
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 177
+  parent 172
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 44"
   transform -321.53976 0 -687.3447 0 0.735635 0 0.6773781 0.80463266 0.80463266 0.80463266
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 180
+  parent 175
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 180
+  parent 175
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 45"
   transform 421.76337 0 672.61194 0 0.7278098 0 -0.68577904 1.2051072 1.2051072 1.2051072
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 183
+  parent 178
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 183
+  parent 178
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 46"
   transform 62.083107 0 -204.4032 0 0.4679668 0 -0.883746 1.2050318 1.2050318 1.2050318
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 186
+  parent 181
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 186
+  parent 181
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 47"
   transform -60.47649 0 -232.14183 0 0.70236367 0 -0.7118183 1.3573406 1.3573406 1.3573406
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 189
+  parent 184
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 189
+  parent 184
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 48"
   transform -64.785484 0 352.75412 0 0.70064497 0 -0.71351004 1.3417001 1.3417001 1.3417001
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 192
+  parent 187
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 192
+  parent 187
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 49"
   transform 248.45715 0 -374.25507 0 0.35953465 0 -0.93313175 1.0396318 1.0396318 1.0396318
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 195
+  parent 190
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 195
+  parent 190
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 50"
   transform 80.30394 0 240.44002 0 0.09624239 0 -0.99535793 0.832659 0.832659 0.832659
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 198
+  parent 193
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 198
+  parent 193
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 51"
   transform 350.96323 0 52.772106 0 0.7674682 0 0.64108706 1.3524246 1.3524246 1.3524246
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 201
+  parent 196
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 201
+  parent 196
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 52"
   transform 65.70371 0 -586.7673 0 0.81451917 0 -0.5801366 1.0748678 1.0748678 1.0748678
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 204
+  parent 199
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 204
+  parent 199
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 53"
   transform -259.37546 0 674.36395 0 0.86726665 0 0.49784395 1.1013299 1.1013299 1.1013299
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 207
+  parent 202
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 207
+  parent 202
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 54"
   transform -300.73984 0 -40.000362 0 0.6346187 0 0.7728254 1.4176123 1.4176123 1.4176123
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 210
+  parent 205
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 210
+  parent 205
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 55"
   transform -167.50232 0 -627.4714 0 0.99676585 0 0.08036041 1.0914571 1.0914571 1.0914571
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 213
+  parent 208
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 213
+  parent 208
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 56"
   transform 359.34564 0 -356.54483 0 0.9999282 0 0.011984733 0.8577354 0.8577354 0.8577354
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 216
+  parent 211
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 216
+  parent 211
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 57"
   transform -249.79692 0 153.07018 0 0.9944078 0 0.10560853 0.9130859 0.9130859 0.9130859
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 219
+  parent 214
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 219
+  parent 214
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 58"
   transform 188.08937 0 -225.0545 0 0.89180195 0 -0.452426 1.4784889 1.4784889 1.4784889
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 222
+  parent 217
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 222
+  parent 217
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 59"
   transform 180.58047 0 -84.050865 0 0.9361415 0 0.35162356 1.0618807 1.0618807 1.0618807
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 225
+  parent 220
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 225
+  parent 220
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 60"
   transform -287.2021 0 -144.57411 0 0.78985727 0 -0.61329067 0.8597423 0.8597423 0.8597423
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 228
+  parent 223
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 228
+  parent 223
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 61"
   transform -441.197 0 55.280685 0 0.8130686 0 -0.58216786 0.8793402 0.8793402 0.8793402
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 231
+  parent 226
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 231
+  parent 226
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 62"
   transform -196.7377 0 60.575455 0 0.10932002 0 -0.99400663 0.9581573 0.9581573 0.9581573
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 234
+  parent 229
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 234
+  parent 229
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 63"
   transform -340.33606 0 160.478 0 0.9468831 0 0.3215781 1.2037358 1.2037358 1.2037358
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 237
+  parent 232
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 237
+  parent 232
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 64"
   transform 45.14485 0 -260.0736 0 0.092780985 0 0.99568653 1.3878644 1.3878644 1.3878644
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 240
+  parent 235
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 240
+  parent 235
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 65"
   transform 234.09988 0 749.32196 0 0.3119472 0 -0.9500994 1.3023207 1.3023207 1.3023207
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 243
+  parent 238
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 243
+  parent 238
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 66"
   transform -93.63892 0 328.32025 0 0.42935458 0 0.903136 1.0710375 1.0710375 1.0710375
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 246
+  parent 241
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 246
+  parent 241
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 67"
   transform 114.773766 0 -381.94638 0 0.98239064 0 0.18683857 1.4027917 1.4027917 1.4027917
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 249
+  parent 244
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 249
+  parent 244
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 68"
   transform 384.4702 0 -38.42984 0 0.8842935 0 0.46693152 1.343915 1.343915 1.343915
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 252
+  parent 247
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 252
+  parent 247
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 69"
   transform -93.94939 0 332.22565 0 0.91552 0 0.40227243 0.8553141 0.8553141 0.8553141
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 255
+  parent 250
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 255
+  parent 250
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 70"
   transform 291.11023 0 43.339222 0 0.9876633 0 -0.15659246 1.4380373 1.4380373 1.4380373
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 258
+  parent 253
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 258
+  parent 253
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 71"
   transform 65.93926 0 370.4094 0 0.0063901288 0 0.99997956 0.81259996 0.81259996 0.81259996
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 261
+  parent 256
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 261
+  parent 256
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 72"
   transform 190.23825 0 -378.26755 0 0.24300922 0 -0.970024 1.3012348 1.3012348 1.3012348
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 264
+  parent 259
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 264
+  parent 259
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 73"
   transform 164.89352 0 526.56226 0 0.88224554 0 0.47078952 0.91270405 0.91270405 0.91270405
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 267
+  parent 262
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 267
+  parent 262
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 74"
   transform -42.440514 0 -669.39264 0 0.48238295 0 -0.87596047 0.9808148 0.9808148 0.9808148
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 270
+  parent 265
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 270
+  parent 265
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 75"
   transform 206.94337 0 322.62155 0 0.37163797 0 -0.92837775 1.173682 1.173682 1.173682
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 273
+  parent 268
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 273
+  parent 268
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 76"
   transform 365.4435 0 204.2276 0 0.14311208 0 -0.9897065 1.3336713 1.3336713 1.3336713
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 276
+  parent 271
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 276
+  parent 271
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 77"
   transform 233.9559 0 443.2735 0 0.49931744 0 0.86641914 1.2748997 1.2748997 1.2748997
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 279
+  parent 274
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 279
+  parent 274
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 78"
   transform -47.8788 0 652.28357 0 0.64409214 0 0.7649479 1.2952759 1.2952759 1.2952759
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 282
+  parent 277
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 282
+  parent 277
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 79"
   transform -425.87775 0 276.43768 0 0.41387078 0 0.91033566 1.0329546 1.0329546 1.0329546
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 285
+  parent 280
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 285
+  parent 280
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Tree 80"
   transform 72.116875 0 -513.926 0 0.49883527 0 -0.86669683 1.4154544 1.4154544 1.4154544
-  parent 50
+  parent 45
 entity "Trunk"
   transform 0 0.7 0 0 0 0 1 0.34 1.4 0.34
-  parent 288
+  parent 283
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Bark.material"
 entity "Crown"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 288
+  parent 283
   mesh "Models/Pine.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Leaves.material"
 entity "Rings"
   transform 0 0 0 0 0 0 1 1 1 1
 entity "Ring 1"
   transform 0 50 -699.99994 0.034527726 -0.04449869 0.0015388831 0.9984114 1 1 1
-  parent 291
+  parent 286
   mesh "Models/Ring.obj" -1 1 1 1 1 0 1
   materialAsset "Materials/Ring.material"
   collider sphere 15 0 0 0 1
@@ -1320,7 +1295,7 @@ entity "Ring 1"
     field effect ""
 entity "Ring 2"
   transform 93.78223 75 -1050 0.030999629 -0.25868568 0.0083063245 0.9654283 1 1 1
-  parent 291
+  parent 286
   mesh "Models/Ring.obj" -1 1 1 1 1 0 1
   materialAsset "Materials/Ring.material"
   collider sphere 15 0 0 0 1
@@ -1332,7 +1307,7 @@ entity "Ring 2"
     field effect ""
 entity "Ring 3"
   transform 349.99997 95 -1306.2178 0.021630375 -0.499844 0.012488302 0.8657552 1 1 1
-  parent 291
+  parent 286
   mesh "Models/Ring.obj" -1 1 1 1 1 0 1
   materialAsset "Materials/Ring.material"
   collider sphere 15 0 0 0 1
@@ -1344,7 +1319,7 @@ entity "Ring 3"
     field effect ""
 entity "Ring 4"
   transform 699.99994 110 -1400 0.010098435 -0.7070347 0.010098435 0.70703465 1 1 1
-  parent 291
+  parent 286
   mesh "Models/Ring.obj" -1 1 1 1 1 0 1
   materialAsset "Materials/Ring.material"
   collider sphere 15 0 0 0 1
@@ -1356,7 +1331,7 @@ entity "Ring 4"
     field effect ""
 entity "Ring 5"
   transform 1050 115 -1306.2178 0 -0.8660254 0 0.5 1 1 1
-  parent 291
+  parent 286
   mesh "Models/Ring.obj" -1 1 1 1 1 0 1
   materialAsset "Materials/Ring.material"
   collider sphere 15 0 0 0 1
@@ -1368,7 +1343,7 @@ entity "Ring 5"
     field effect ""
 entity "Ring 6"
   transform 1306.2178 110 -1050 0.002772584 0.9658704 0.010347424 -0.2588042 1 1 1
-  parent 291
+  parent 286
   mesh "Models/Ring.obj" -1 1 1 1 1 0 1
   materialAsset "Materials/Ring.material"
   collider sphere 15 0 0 0 1
@@ -1380,7 +1355,7 @@ entity "Ring 6"
     field effect ""
 entity "Ring 7"
   transform 1400 100 -700 0 0.999898 0.014281344 -0 1 1 1
-  parent 291
+  parent 286
   mesh "Models/Ring.obj" -1 1 1 1 1 0 1
   materialAsset "Materials/Ring.material"
   collider sphere 15 0 0 0 1
@@ -1392,7 +1367,7 @@ entity "Ring 7"
     field effect ""
 entity "Ring 8"
   transform 1306.2178 90 -350 -0.001800609 0.99135053 0.013676982 0.13051379 1 1 1
-  parent 291
+  parent 286
   mesh "Models/Ring.obj" -1 1 1 1 1 0 1
   materialAsset "Materials/Ring.material"
   collider sphere 15 0 0 0 1
@@ -1423,7 +1398,7 @@ entity "Plane"
     field stallSound "Audio/stall.wav"
 entity "Wing L"
   transform -2.725 0.15 0.14 0.021801598 -0.0007613285 -0.034891192 0.999153 1 1 1
-  parent 300
+  parent 295
   component "Wing"
     field area "8"
     field aspect "7.4"
@@ -1431,7 +1406,7 @@ entity "Wing L"
     field drag "0"
 entity "Aileron L"
   transform -1.6 0 0.6 0 0 0 1 1 1 1
-  parent 301
+  parent 296
   component "Hinge"
     field input "roll"
     field maxAngle "16"
@@ -1441,7 +1416,7 @@ entity "Aileron L"
     field drag "0"
 entity "Flap L"
   transform 1 0 0.6 0 0 0 1 1 1 1
-  parent 301
+  parent 296
   component "Hinge"
     field input "flaps"
     field maxAngle "30"
@@ -1451,7 +1426,7 @@ entity "Flap L"
     field drag "0.03"
 entity "Wing R"
   transform 2.725 0.15 0.14 0.021801598 0.0007613285 0.034891192 0.999153 1 1 1
-  parent 300
+  parent 295
   component "Wing"
     field area "8"
     field aspect "7.4"
@@ -1459,7 +1434,7 @@ entity "Wing R"
     field drag "0"
 entity "Aileron R"
   transform 1.6 0 0.6 0 0 0 1 1 1 1
-  parent 304
+  parent 299
   component "Hinge"
     field input "roll"
     field maxAngle "16"
@@ -1469,7 +1444,7 @@ entity "Aileron R"
     field drag "0"
 entity "Flap R"
   transform -1 0 0.6 0 0 0 1 1 1 1
-  parent 304
+  parent 299
   component "Hinge"
     field input "flaps"
     field maxAngle "30"
@@ -1479,7 +1454,7 @@ entity "Flap R"
     field drag "0.03"
 entity "Tailplane"
   transform 0 0.25 4.4 -0.022687333 -0 -0 0.9997426 1 1 1
-  parent 300
+  parent 295
   component "Wing"
     field area "3.2"
     field aspect "4"
@@ -1487,7 +1462,7 @@ entity "Tailplane"
     field drag "0"
 entity "Elevator"
   transform 0 0 0.4 0 0 0 1 1 1 1
-  parent 307
+  parent 302
   component "Hinge"
     field input "pitch"
     field maxAngle "22"
@@ -1497,7 +1472,7 @@ entity "Elevator"
     field drag "0"
 entity "Fin"
   transform 0 0.9 4.6 -0 -0 -0.70710677 0.70710677 1 1 1
-  parent 300
+  parent 295
   component "Wing"
     field area "1.7"
     field aspect "1.8"
@@ -1505,7 +1480,7 @@ entity "Fin"
     field drag "0"
 entity "Rudder"
   transform 0 0 0.4 0 0 0 1 1 1 1
-  parent 309
+  parent 304
   component "Hinge"
     field input "yaw"
     field maxAngle "22"
@@ -1515,7 +1490,7 @@ entity "Rudder"
     field drag "0"
 entity "Wheel L"
   transform -1.25 -0.9 0.35 0 0 0 1 1 1 1
-  parent 300
+  parent 295
   component "Wheel"
     field radius "0.2"
     field grip "0.8"
@@ -1532,10 +1507,10 @@ entity "Wheel L"
     field antiRoll "0"
 entity "Spin"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 311
+  parent 306
 entity "Wheel R"
   transform 1.25 -0.9 0.35 0 0 0 1 1 1 1
-  parent 300
+  parent 295
   component "Wheel"
     field radius "0.2"
     field grip "0.8"
@@ -1552,10 +1527,10 @@ entity "Wheel R"
     field antiRoll "0"
 entity "Spin"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 313
+  parent 308
 entity "Wheel Nose"
   transform 0 -0.85 -1.7 0 0 0 1 1 1 1
-  parent 300
+  parent 295
   component "Wheel"
     field radius "0.2"
     field grip "0.8"
@@ -1572,133 +1547,133 @@ entity "Wheel Nose"
     field antiRoll "0"
 entity "Spin"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 315
+  parent 310
 entity "Propeller"
   transform 0 -0.05 -2.5 0 0 0 1 1 1 1
-  parent 300
+  parent 295
   component "Propeller"
     field power "135"
     field staticThrust "3300"
     field sound "Audio/propeller_2400.wav"
 entity "Blades"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 317
+  parent 312
 entity "Bumper Nose"
   transform 0 0 -2.4 0 0 0 1 1 1 1
-  parent 300
+  parent 295
   component "Bumper"
     field friction "0.6"
 entity "Bumper Tail"
   transform 0 0.3 5 0 0 0 1 1 1 1
-  parent 300
+  parent 295
   component "Bumper"
     field friction "0.6"
 entity "Bumper Tip L"
   transform -5.45 0.3 0.3 0 0 0 1 1 1 1
-  parent 300
+  parent 295
   component "Bumper"
     field friction "0.6"
 entity "Bumper Tip R"
   transform 5.45 0.3 0.3 0 0 0 1 1 1 1
-  parent 300
+  parent 295
   component "Bumper"
     field friction "0.6"
 entity "Bumper Belly"
   transform 0 -0.75 0.5 0 0 0 1 1 1 1
-  parent 300
+  parent 295
   component "Bumper"
     field friction "0.6"
 entity "Bumper Roof"
   transform 0 1.2 0.4 0 0 0 1 1 1 1
-  parent 300
+  parent 295
   component "Bumper"
     field friction "0.6"
 entity "Bumper Fin"
   transform 0 1.7 4.7 0 0 0 1 1 1 1
-  parent 300
+  parent 295
   component "Bumper"
     field friction "0.6"
 entity "Body"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 300
+  parent 295
 entity "Fuselage"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 326
+  parent 321
   mesh "Models/Fuselage.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Aeroplane.material"
 entity "Canopy"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 326
+  parent 321
   mesh "Models/Canopy.obj" -1 1 1 1 1 1 1
   materialAsset "Materials/Glass.material"
 entity "Stripe"
   transform 0 0.02 0.2 0 0 0 1 1.23 0.12 4.6
-  parent 326
+  parent 321
   mesh "cube" -1 1 1 1 1 0 1
   materialAsset "Materials/Aeroplane Trim.material"
 entity "Skin"
   transform 0 0 0.1 0 0 0 1 3.847077 0.13 1.0397505
-  parent 301
+  parent 296
   mesh "cube" -1 1 1 1 1 1 1
   materialAsset "Materials/Aeroplane.material"
 entity "Skin"
   transform 0 0 0.1 0 0 0 1 3.847077 0.13 1.0397505
-  parent 304
+  parent 299
   mesh "cube" -1 1 1 1 1 1 1
   materialAsset "Materials/Aeroplane.material"
 entity "Skin"
   transform 0 0 0.1 0 0 0 1 3.5777087 0.13 0.89442724
-  parent 307
+  parent 302
   mesh "cube" -1 1 1 1 1 1 1
   materialAsset "Materials/Aeroplane.material"
 entity "Skin"
   transform 0 0 0.1 0 0 0 1 1.7492856 0.13 0.97182536
-  parent 309
+  parent 304
   mesh "cube" -1 1 1 1 1 1 1
   materialAsset "Materials/Aeroplane Trim.material"
 entity "Blade"
   transform 0 0 -0.06 0 0 0 1 0.16 1.95 0.04
-  parent 318
+  parent 313
   mesh "cube" -1 1 1 1 1 1 1
   materialAsset "Materials/Rubber.material"
 entity "Spinner"
   transform 0 0 -0.1 0 0 0 1 0.36 0.36 0.5
-  parent 318
+  parent 313
   mesh "sphere" -1 1 1 1 1 1 1
   materialAsset "Materials/Aeroplane Trim.material"
 entity "Tire"
   transform 0 0 0 0 0 0.70710677 0.70710677 0.4 0.14 0.4
-  parent 312
+  parent 307
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Rubber.material"
 entity "Leg"
   transform 0 0.32 0 0 0 0 1 0.06 0.6 0.06
+  parent 306
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Steel.material"
+entity "Tire"
+  transform 0 0 0 0 0 0.70710677 0.70710677 0.4 0.14 0.4
+  parent 309
+  mesh "cylinder" -1 1 1 1 1 1 1
+  materialAsset "Materials/Rubber.material"
+entity "Leg"
+  transform 0 0.32 0 0 0 0 1 0.06 0.6 0.06
+  parent 308
+  mesh "cube" -1 1 1 1 1 1 1
+  materialAsset "Materials/Steel.material"
+entity "Tire"
+  transform 0 0 0 0 0 0.70710677 0.70710677 0.4 0.14 0.4
   parent 311
-  mesh "cube" -1 1 1 1 1 1 1
-  materialAsset "Materials/Steel.material"
-entity "Tire"
-  transform 0 0 0 0 0 0.70710677 0.70710677 0.4 0.14 0.4
-  parent 314
   mesh "cylinder" -1 1 1 1 1 1 1
   materialAsset "Materials/Rubber.material"
 entity "Leg"
   transform 0 0.32 0 0 0 0 1 0.06 0.6 0.06
-  parent 313
-  mesh "cube" -1 1 1 1 1 1 1
-  materialAsset "Materials/Steel.material"
-entity "Tire"
-  transform 0 0 0 0 0 0.70710677 0.70710677 0.4 0.14 0.4
-  parent 316
-  mesh "cylinder" -1 1 1 1 1 1 1
-  materialAsset "Materials/Rubber.material"
-entity "Leg"
-  transform 0 0.32 0 0 0 0 1 0.06 0.6 0.06
-  parent 315
+  parent 310
   mesh "cube" -1 1 1 1 1 1 1
   materialAsset "Materials/Steel.material"
 entity "Camera"
   transform 0 4.8 404 0 0 0 1 1 1 1
-  camera 1.0821041 0.25 9000 0 10 1
+  camera 1.0821041 0.45 9000 0 10 1
   component "Follow"
     field target "Plane"
     field offset "0 3.2 13.5"
@@ -1709,7 +1684,7 @@ entity "Interface"
   transform 0 0 0 0 0 0 1 1 1 1
 entity "Count Panel"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 343
+  parent 338
   component "UIPanel"
     field anchor "0.5 0"
     field offset "0 40"
@@ -1719,7 +1694,7 @@ entity "Count Panel"
     field borderColor "1 1 1 0.16"
 entity "Count Label"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 343
+  parent 338
   component "HudText"
     field text "RINGS"
     field anchor "0.5 0"
@@ -1729,7 +1704,7 @@ entity "Count Label"
     field color "1 1 1 0.6"
 entity "Count"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 343
+  parent 338
   component "HudText"
     field text "{rings} / 8"
     field anchor "0.5 0"
@@ -1739,7 +1714,7 @@ entity "Count"
     field color "1 0.62 0.28 1"
 entity "Dial"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 343
+  parent 338
   component "UIGauge"
     field value "airspeed"
     field most "300"
@@ -1748,45 +1723,145 @@ entity "Dial"
     field redFrom "0"
     field label "km/h"
     field showsValue "1"
-    field anchor "0.5 1"
-    field offset "0 -98"
+    field anchor "1 1"
+    field offset "-112 -108"
     field radius "78"
     field thickness "7"
     field color "1 0.5 0.18 1"
     field backColor "0.04 0.045 0.055 0.7"
+entity "Help Pane"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 338
+  component "UIPanel"
+    field anchor "0 1"
+    field offset "142 -84.5"
+    field size "248 133"
+    field color "0.04 0.045 0.055 0.46"
+    field border "1"
+    field borderColor "1 1 1 0.1"
+entity "Help 1 Keys"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 338
+  component "HudText"
+    field text "Shift Ctrl"
+    field anchor "0 1"
+    field offset "30 -139"
+    field font ""
+    field size "12.5"
+    field color "1 0.72 0.45 0.95"
 entity "Help 1"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 343
+  parent 338
   component "HudText"
-    field text "Shift  Ctrl    throttle up and down"
+    field text "throttle up and down"
     field anchor "0 1"
-    field offset "128.5 -58"
+    field offset "114 -139"
     field font ""
-    field size "12"
-    field color "1 1 1 0.62"
+    field size "12.5"
+    field color "1 1 1 0.78"
+entity "Help 2 Keys"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 338
+  component "HudText"
+    field text "S W"
+    field anchor "0 1"
+    field offset "30 -120"
+    field font ""
+    field size "12.5"
+    field color "1 0.72 0.45 0.95"
 entity "Help 2"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 343
+  parent 338
   component "HudText"
-    field text "S  W    pull up, push down      A  D    roll"
+    field text "pull up, push down"
     field anchor "0 1"
-    field offset "156.4 -41"
+    field offset "114 -120"
     field font ""
-    field size "12"
-    field color "1 1 1 0.62"
+    field size "12.5"
+    field color "1 1 1 0.78"
+entity "Help 3 Keys"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 338
+  component "HudText"
+    field text "A D"
+    field anchor "0 1"
+    field offset "30 -101"
+    field font ""
+    field size "12.5"
+    field color "1 0.72 0.45 0.95"
 entity "Help 3"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 343
+  parent 338
   component "HudText"
-    field text "Q  E    rudder      F    flaps      B    brakes"
+    field text "roll"
     field anchor "0 1"
-    field offset "165.7 -24"
+    field offset "114 -101"
     field font ""
-    field size "12"
-    field color "1 1 1 0.62"
+    field size "12.5"
+    field color "1 1 1 0.78"
+entity "Help 4 Keys"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 338
+  component "HudText"
+    field text "Q E"
+    field anchor "0 1"
+    field offset "30 -82"
+    field font ""
+    field size "12.5"
+    field color "1 0.72 0.45 0.95"
+entity "Help 4"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 338
+  component "HudText"
+    field text "rudder"
+    field anchor "0 1"
+    field offset "114 -82"
+    field font ""
+    field size "12.5"
+    field color "1 1 1 0.78"
+entity "Help 5 Keys"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 338
+  component "HudText"
+    field text "F"
+    field anchor "0 1"
+    field offset "30 -63"
+    field font ""
+    field size "12.5"
+    field color "1 0.72 0.45 0.95"
+entity "Help 5"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 338
+  component "HudText"
+    field text "flaps"
+    field anchor "0 1"
+    field offset "114 -63"
+    field font ""
+    field size "12.5"
+    field color "1 1 1 0.78"
+entity "Help 6 Keys"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 338
+  component "HudText"
+    field text "B"
+    field anchor "0 1"
+    field offset "30 -44"
+    field font ""
+    field size "12.5"
+    field color "1 0.72 0.45 0.95"
+entity "Help 6"
+  transform 0 0 0 0 0 0 1 1 1 1
+  parent 338
+  component "HudText"
+    field text "brakes"
+    field anchor "0 1"
+    field offset "114 -44"
+    field font ""
+    field size "12.5"
+    field color "1 1 1 0.78"
 entity "Restart"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 343
+  parent 338
   component "UIButton"
     field label "Restart"
     field anchor "1 0"
@@ -1824,7 +1899,7 @@ entity "Restart"
     field amount4 "1"
 entity "Goal"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 343
+  parent 338
   component "Goal"
     field counter "rings"
     field target "8"
@@ -1833,21 +1908,21 @@ entity "Goal"
     field delay "4"
 entity "Altitude"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 343
+  parent 338
   component "HudText"
     field text "{altitude} m"
-    field anchor "0.5 1"
-    field offset "132 -70"
+    field anchor "1 1"
+    field offset "-212 -132"
     field font ""
-    field size "20"
+    field size "22"
     field color "1 1 1 1"
 entity "Power"
   transform 0 0 0 0 0 0 1 1 1 1
-  parent 343
+  parent 338
   component "HudText"
     field text "POWER {throttle:percent}"
-    field anchor "0.5 1"
-    field offset "-146 -70"
+    field anchor "1 1"
+    field offset "-212 -100"
     field font ""
-    field size "14"
+    field size "13"
     field color "1 1 1 0.75"

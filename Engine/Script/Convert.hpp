@@ -52,6 +52,10 @@ std::string graphToCppKeepingGraph(const Graph& graph, const std::string& name, 
 /// the code does now.
 std::optional<Graph> graphKeptIn(const std::string& code, bool* wasChanged = nullptr, std::string* name = nullptr);
 
+/// One box as a line of C++ that does what it does, for a box wired in among C++ boxes
+/// (Script/CppBoxes.hpp): it expects `world` and `self` where it is written, as a component's functions have them.
+std::string boxAsCppStatement(const Graph& graph, const Node& node);
+
 /// A name that can be a C++ type: letters and digits, starting with a capital letter.
 std::string typeNameFor(const std::string& fileStem);
 

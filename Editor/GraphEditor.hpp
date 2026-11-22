@@ -58,6 +58,7 @@ private:
     struct PinPlace {
         ImVec2 position;
         script::PinType type = script::PinType::Float;
+        bool leavesLeft = false;        // on a node's left side though it is a way out: "then" of a box of code, which goes on below
     };
     struct PinRef {
         int node = 0;

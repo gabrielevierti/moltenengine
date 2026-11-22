@@ -16,6 +16,18 @@
 
 namespace molten::editor {
 
+/// A row of a menu that is made as it is shown (the scenes of the project, the things that can be
+/// created): data, so that the same rows go into the menu bar of the Mac and into a menu drawn in the window.
+struct MenuEntry {
+    std::string label;                  // empty: a line across the menu
+    std::function<void()> run;
+    bool isEnabled = true, isChecked = false;
+    std::vector<MenuEntry> children;    // not empty: a submenu, under `label`
+
+    static MenuEntry line() { return MenuEntry{}; }
+    bool isLine() const { return label.empty(); }
+};
+
 struct Command {
     std::string id;                     // "save": what the shortcut settings and plugins call it; never shown
     std::string path;                   // "File/Save": the menu, any submenus, then its name there
@@ -23,8 +35,8 @@ struct Command {
     std::function<bool()> enabled;      // empty: always
     std::function<bool()> checked;      // not empty: a tick beside it while this says yes
     std::function<std::string()> nameNow;   // not empty: its name changes ("Play", then "Stop")
-    std::function<void()> items;        // not empty: it is a list drawn by this (recent files, the layouts)
-    bool itemsAreInline = false;        // that list is drawn in the menu itself, not in a submenu of its own
+    std::function<std::vector<MenuEntry>()> entries;    // not empty: it is a list made as it is shown (recent projects, what can be made)
+    bool entriesAreInline = false;      // that list is in the menu itself, not in a submenu of its own
     bool usesEditKeys = false;          // its keys are left to a text field being typed in (Undo, Select All)
     bool actsOnSelection = false;       // ...and to the Project window while it has the keyboard (Delete, Copy)
     bool worksInGame = false;           // its keys work while the playing game has the keyboard (Play, Pause)
@@ -34,9 +46,9 @@ struct Command {
     Command& when(std::function<bool()> test) { enabled = std::move(test); return *this; }
     Command& ticked(std::function<bool()> test) { checked = std::move(test); return *this; }
     Command& named(std::function<std::string()> name) { nameNow = std::move(name); return *this; }
-    Command& lists(std::function<void()> draw, bool inMenuItself = false) {
-        items = std::move(draw);
-        itemsAreInline = inMenuItself;
+    Command& lists(std::function<std::vector<MenuEntry>()> make, bool inMenuItself = false) {
+        entries = std::move(make);
+        entriesAreInline = inMenuItself;
         return *this;
     }
     Command& editKeys() { usesEditKeys = true; return *this; }

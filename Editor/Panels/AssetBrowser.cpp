@@ -65,7 +65,6 @@ public:
     AssetBrowserPanel() { title = "Explorer"; }
 
     /// What "+ New" makes, for the menu bar's Assets > Create.
-    void drawCreateItems(EditorContext& editor) { drawNewItems(editor); }
 
     void draw(EditorContext& editor) override {
         if (!editor.hasProject) {
@@ -364,56 +363,51 @@ private:
 
     /// What can be made: the same list under + New and under a right click anywhere, made in
     /// `folder` (the one shown, or the one that was right-clicked), which is then shown.
-    void drawNewItems(EditorContext& editor) { drawNewItems(editor, editor.currentFolder); }
-    void drawNewItems(EditorContext& editor, const std::string& folder) {
-        if (ImGui::MenuItem("Folder")) {
+public:
+    /// What can be made in a folder, as rows of a menu: in the Explorer's own menus, and in Assets > Create.
+    std::vector<MenuEntry> newEntries(EditorContext& editor, const std::string& folder);
+
+private:
+    void drawNewItems(EditorContext& editor) { drawMenuEntries(newEntries(editor, editor.currentFolder)); }
+    void drawNewItems(EditorContext& editor, const std::string& folder) { drawMenuEntries(newEntries(editor, folder)); }
+    std::vector<MenuEntry> newEntriesIn(EditorContext& editor, const std::string& folder) {
+        std::vector<MenuEntry> entries;
+        auto add = [&](const char* label, std::function<void()> run) {
+            MenuEntry entry;
+            entry.label = label;
+            entry.run = std::move(run);
+            entries.push_back(std::move(entry));
+        };
+        // A new file, named to be renamed, from what it starts as.
+        auto file = [this, &editor, folder](const char* stem, const char* ending, std::function<std::string()> contents) {
+            return [this, &editor, folder, stem, ending, contents] {
+                std::string path = editor.assets.uniquePath(folder, stem, ending);
+                if (text::writeFile(editor.assets.absolutePath(path), contents())) {
+                    editor.assets.refresh();
+                    editor.currentFolder = folder;
+                    startRenaming(editor, path);
+                }
+            };
+        };
+        add("Folder", [this, &editor, folder] {
             editor.currentFolder = folder;
             createFolder(editor);
-        }
-        if (ImGui::MenuItem("Material")) {
+        });
+        add("Scene", file("New Scene", ".scene", [&editor] { return editor.scene.defaultSceneText(); }));     // the open one is left alone
+        add("Material", [this, &editor, folder] {
             if (std::shared_ptr<Material> material = createMaterialAsset(editor, folder, "New Material", nullptr)) {
                 editor.selectedAsset = material->assetName;
                 editor.currentFolder = folder;
                 startRenaming(editor, material->assetName);
             }
-        }
-        if (ImGui::MenuItem("Script")) editor.wantsNewScript = true;        // C++: asks for its name, makes it in Scripts and opens it
-        if (ImGui::MenuItem("Visual Script")) {
-            std::string path = editor.assets.uniquePath(folder, "New Script", ".graph");
-            if (text::writeFile(editor.assets.absolutePath(path), script::Graph::starter().toText())) {
-                editor.assets.refresh();
-                editor.currentFolder = folder;
-                startRenaming(editor, path);
-            }
-        }
-        if (ImGui::MenuItem("Shader")) {
-            // A surface shader to write by hand: it starts as one that works, to change.
-            std::string path = editor.assets.uniquePath(folder, "New Shader", ".shader");
-            if (text::writeFile(editor.assets.absolutePath(path), newSurfaceShaderText())) {
-                editor.assets.refresh();
-                editor.currentFolder = folder;
-                startRenaming(editor, path);
-            }
-        }
-        if (ImGui::MenuItem("Animator Controller")) {
-            // States and transitions to draw in the Animator window; put it in an Animator's Controller.
-            AnimatorController controller;
-            std::string path = editor.assets.uniquePath(folder, "New Controller", ".animator");
-            if (text::writeFile(editor.assets.absolutePath(path), controller.toText())) {
-                editor.assets.refresh();
-                editor.currentFolder = folder;
-                startRenaming(editor, path);
-            }
-        }
-        if (ImGui::MenuItem("Scene")) {
-            // A new file with what every new scene starts with. The scene that is open is left alone.
-            std::string path = editor.assets.uniquePath(folder, "New Scene", ".scene");
-            if (text::writeFile(editor.assets.absolutePath(path), editor.scene.defaultSceneText())) {
-                editor.assets.refresh();
-                editor.currentFolder = folder;
-                startRenaming(editor, path);
-            }
-        }
+        });
+        entries.push_back(MenuEntry::line());
+        add("C++ Script...", [&editor] { editor.wantsNewScript = true; });      // asks for its name, makes it in Scripts and opens it
+        add("Visual Script", file("New Script", ".graph", [] { return script::Graph::starter().toText(); }));
+        add("Shader", file("New Shader", ".shader", [] { return newSurfaceShaderText(); }));      // one that works, to change
+        add("Water Shader", file("Water", ".shader", [] { return newWaterShaderText(); }));       // water of the game's own: a pond, a pool, a lagoon
+        add("Animator Controller", file("New Controller", ".animator", [] { return AnimatorController{}.toText(); }));
+        return entries;
     }
 
     void drawToolbar(EditorContext& editor) {
@@ -776,6 +770,8 @@ private:
 }  // namespace
 
 namespace {
+std::vector<MenuEntry> AssetBrowserPanel::newEntries(EditorContext& editor, const std::string& folder) { return newEntriesIn(editor, folder); }
+
 AssetBrowserPanel* theBrowser = nullptr;        // the one the editor has, for the menu bar
 }
 
@@ -785,8 +781,9 @@ void registerAssetBrowserPanel(EditorContext& editor) {
     editor.registry.addPanel(nullptr, std::move(panel));
 }
 
-void drawAssetCreateMenu(EditorContext& editor) {
-    if (theBrowser && editor.hasProject) theBrowser->drawCreateItems(editor);
+std::vector<MenuEntry> assetCreateEntries(EditorContext& editor) {
+    if (!theBrowser || !editor.hasProject) return {};
+    return theBrowser->newEntries(editor, editor.currentFolder);
 }
 
 }  // namespace molten::editor

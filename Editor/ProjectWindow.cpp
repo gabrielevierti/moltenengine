@@ -1179,6 +1179,28 @@ void ProjectWindow::drawNewProject(Result& result, const std::vector<ProjectTemp
     ImGui::TextUnformatted(chosenTemplate < 0 ? "An empty project: a floor, a light and a camera. Ready for anything." : templates[size_t(chosenTemplate)].description.c_str());
     ImGui::PopTextWrapPos();
     ImGui::PopStyleColor();
+    // A template is a project like any other: it can be opened and made better. The engine's own are not
+    // changed: the first time, a copy goes into your templates folder, and that copy is the template from then on.
+    if (chosenTemplate >= 0) {
+        const ProjectTemplate& chosen = templates[size_t(chosenTemplate)];
+        ImGui::Dummy(ImVec2(0, 4));
+        if (secondaryButton("Edit Template")) result = {Action::EditTemplate, chosen.directory, {}};
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) {
+            ImGui::SetTooltip(chosen.isYours ? "Opens it to change: what you save is what new projects start from"
+                                             : "Copies it into your templates folder (~/Documents/Molten Templates) and opens the copy.\n"
+                                               "What you save there is what new projects start from; the engine's own stays as it came.");
+        }
+        ImGui::SameLine(0, 8);
+        if (secondaryButton("Show in Finder##template")) result = {Action::Reveal, chosen.directory, {}};
+        if (chosen.isYours && !chosen.original.empty()) {
+            ImGui::SameLine(0, 8);
+            if (secondaryButton("Back to the Original")) result = {Action::ResetTemplate, chosen.directory, {}};
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("Your changed copy goes to the Trash, and the engine's own is the template again");
+        }
+        ImGui::SameLine(0, 14);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextDisabled("%s", chosen.isYours ? (chosen.original.empty() ? "Yours" : "Yours, changed from the engine's") : "The engine's own");
+    }
     ImGui::Dummy(ImVec2(0, 14));
 
     // ---- its name and where it goes, side by side when there is room

@@ -1,6 +1,6 @@
 molten-material 1
 shader water
-baseColor 0.02 0.13 0.2 0.3
+baseColor 0.02 0.13 0.2 0.5
 metallic 0
 roughness 0.05
 emissive 0 0 0
@@ -9,4 +9,4 @@ occlusionStrength 1
 alpha blend 0.5
 uvScale 1 1
 doubleSided 0
-water 1 1
+waves 1 0.8 1

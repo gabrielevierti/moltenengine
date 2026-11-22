@@ -39,10 +39,10 @@ namespace molten::kit {
 enum class NetTo : uint8_t { EveryoneElse, Owner, Server, Everyone };
 
 struct NetworkSession {
-    /// What it does when the game starts: "Menu" asks on the screen (Host a game, or Join one);
-    /// "Host", "Join" and "Server" do that at once; "Off" waits to be told from code. The
-    /// program can be told from outside too: MOLTEN_NET=host, =server, or =join:192.168.1.20
-    /// in its environment says the same, whatever is set here.
+    /// What it does when the game starts: "Menu" asks on the screen (Host a game, Join one, or
+    /// Play alone); "Host", "Join", "Server" and "Alone" do that at once; "Off" waits to be told
+    /// from code. The program can be told from outside too: MOLTEN_NET=host, =server, =alone or
+    /// =join:192.168.1.20 in its environment says the same, whatever is set here.
     std::string mode = "Menu";
     std::string address = "127.0.0.1";  // where the host is, for one who joins: numbers or a name, with ":port" if not this one's
     int port = 7777;
@@ -64,6 +64,9 @@ struct NetworkSession {
     bool host(World& world);
     bool serve(World& world);
     bool join(World& world);
+    /// The game with no one else and no network: this machine is its server and its only
+    /// player. For a game that is also played alone, and for trying one without a second machine.
+    void playAlone(World& world);
     /// Out of the game: the scene starts over, alone.
     void leave(World& world);
     /// The same over a transport of one's own (a MemoryNetwork's end, in a test).

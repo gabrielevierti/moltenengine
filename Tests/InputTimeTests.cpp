@@ -64,6 +64,21 @@ TEST(mouse_delta_accumulates_until_end_of_frame) {
     CHECK_NEAR(input.mouseDelta().x, 0, 1e-6);
 }
 
+// A click that was not on the game (an editor's own button): not heard from its press to its
+// release, and the next one is.
+TEST(a_click_kept_out_is_not_heard_until_the_next_press) {
+    Input input;
+    input.handleMouseButton(MouseButton::Left, true);
+    input.keepMouseButtonsOut();
+    CHECK(!input.wasPressed(MouseButton::Left) && !input.isDown(MouseButton::Left));
+    input.endFrame();
+    input.handleMouseButton(MouseButton::Left, false);
+    CHECK(!input.wasReleased(MouseButton::Left));
+    input.endFrame();
+    input.handleMouseButton(MouseButton::Left, true);
+    CHECK(input.wasPressed(MouseButton::Left) && input.isDown(MouseButton::Left));
+}
+
 TEST(fixed_steps_follow_real_time) {
     Time time;
     time.fixedDelta = 1.0f / 60.0f;

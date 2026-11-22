@@ -2,6 +2,7 @@
 #include "Test.hpp"
 
 #include "Script/Convert.hpp"
+#include "Script/CppBoxes.hpp"
 #include "Script/CppToGraph.hpp"
 #include "Script/Runtime.hpp"
 
@@ -113,7 +114,7 @@ TEST(cpp_made_from_a_graph_and_changed_goes_back) {
     CHECK(countOf(*read.graph, "OnUpdate") == 1);
 }
 
-TEST(cpp_lines_without_a_box_are_named) {
+TEST(cpp_with_lines_no_box_says_becomes_code_boxes_and_nothing_is_left_out) {
     registerStandardNodes();
     const char* code = R"(
 struct Odd {
@@ -123,15 +124,15 @@ struct Odd {
     }
 };
 )";
+    // A loop has no box of its own: the whole of it is the code itself as boxes, every line in one, and back the same.
     CppToGraphResult result = graphFromCpp(code);
-    CHECK(result.graph.has_value());
-    CHECK(result.notConverted.size() == 1);
-    CHECK(!result.notConverted.empty() && result.notConverted.front().find("line 4") == 0);
-    CHECK(result.graph && countOf(*result.graph, "Log") == 1);
+    CHECK(result.graph.has_value() && result.isCodeAsBoxes && result.notConverted.empty());
+    CHECK(result.graph && countOf(*result.graph, "CppBlock") == 1 && countOf(*result.graph, "CppCode") == 1 && countOf(*result.graph, "CppFunction") == 1);
+    CHECK(result.graph && cppFromBoxes(*result.graph) == code);
 }
 
-TEST(cpp_without_a_component_says_so) {
+TEST(cpp_without_a_component_is_still_its_code_as_boxes) {
     CppToGraphResult result = graphFromCpp("int main() { return 0; }");
-    CHECK(!result.graph.has_value());
-    CHECK(!result.error.empty());
+    CHECK(result.graph.has_value() && result.error.empty() && result.isCodeAsBoxes);
+    CHECK(result.graph && cppFromBoxes(*result.graph) == "int main() { return 0; }");
 }

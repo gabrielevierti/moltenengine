@@ -1,6 +1,7 @@
 #include "Script/CppToGraph.hpp"
 
 #include "Script/Convert.hpp"
+#include "Script/CppBoxes.hpp"
 #include "Script/Runtime.hpp"
 
 #include <algorithm>
@@ -1831,21 +1832,24 @@ CppToGraphResult graphFromCpp(const std::string& code) {
     std::string readable = code;
     if (size_t kept = readable.rfind("/* molten-graph "); kept != std::string::npos) readable = readable.substr(0, kept);
 
+    // The boxes that mean what the code means (Rotate, Set Position...), where every line of it has one.
     Parser parser(tokenize(readable));
     std::optional<Component> component = parser.component();
-    if (!component) {
-        result.error = "There is no component in it: a struct with start, update, onCollision or onTriggerEnter.";
-        return result;
+    if (component) {
+        result.name = component->name;
+        Builder builder(*component);
+        builder.build();
+        if (builder.notConverted.empty() && !builder.graph.nodes.empty()) {
+            result.graph = std::move(builder.graph);
+            return result;
+        }
     }
-    result.name = component->name;
-    Builder builder(*component);
-    builder.build();
-    result.notConverted = builder.notConverted;
-    if (builder.graph.nodes.empty()) {
-        result.error = "Nothing in " + component->name + " has a box: there is no event with something to do.";
-        return result;
-    }
-    result.graph = std::move(builder.graph);
+    // Anything else, and that is most C++: the code itself as boxes, a statement to a box, wired
+    // in the shape the code has (Script/CppBoxes.hpp). Nothing is left out, and written back it
+    // is the same file.
+    result.graph = boxesFromCpp(code);
+    result.isCodeAsBoxes = true;
+    result.notConverted.clear();
     return result;
 }
 

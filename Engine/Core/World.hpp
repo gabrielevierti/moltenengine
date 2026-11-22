@@ -35,6 +35,8 @@ class Engine;
 class Mesh;
 struct NamedMaterial;
 struct RenderSettings;
+struct WeatherSettings;
+struct SeaSettings;
 
 /// On the entity addScene() puts a scene's entities under: the scene it was.
 struct AddedScene {
@@ -71,8 +73,48 @@ public:
     Time time;
     Profiler profiler;                  // where each frame's time went: see Profiler.hpp
 
+    /// The weather as it is now (Kit/Weather.hpp: rain and storms, from the scene's settings):
+    /// the particle systems it made, where it rains around, and its lightning.
+    struct WeatherNow {
+        Entity rain, splashes, ripples;     // made when it first rains: EditorOnly, in no file
+        Entity runs;                        // drops running down what is steep (a wall, a windscreen)
+        Entity snow, settled;               // made when it first snows: the flakes, and those that lie a moment where they landed
+        std::vector<Vec3> viewers;          // where it rains around: each view's camera (an engine says), or else the scene's camera
+        float flash = 0;                    // the lightning's light now: 0 none, 1 the brightest flash
+        Vec3 strikePlace{0, 0, 0};          // where the last stroke is: x, z, and the height of the ground under it
+        float bolt = 0;                     // the shape of its bolt (a seed); 0 a flash inside the clouds, no bolt
+        double nextStrike = -1;             // effectsTime of the next stroke (below 0: not chosen yet)
+        double strikeAt = -1000;            // and of the last one's start: its thunder follows it
+        int flickers = 0;                   // flashes left in this stroke
+        double flickerAt = 0;
+        uint64_t seed = 0x9e3779b97f4a7c15ULL;
+    };
+    WeatherNow weatherNow;
+
+    /// What floats leaves on the water (Kit/Wakes.hpp): for each thing that floats, where it is,
+    /// how large, how fast, and where its stern has been, for the water to draw foam round it and
+    /// the wake behind it.
+    struct Wake {
+        Entity body;
+        Vec3 middle{0, 0, 0};               // at the waterline
+        Vec2 heading{0, -1};                // which way it faces along the water (its -z)
+        float halfWidth = 0.5f, halfLength = 0.5f;
+        float speed = 0;                    // meters a second, along the water
+        std::vector<Vec4> trail;            // where its stern was, newest first: xyz, and the effectsTime it was there
+        std::vector<float> trailSpeed;      // how fast it went there
+        bool isSeen = false;                // still there, still in the water
+    };
+    std::vector<Wake> wakes;
+
     /// While true, physics stands still. The editor sets it while a scene is edited.
     bool isSimulationPaused = false;
+    /// While true, what moves by itself goes on moving: particles, water's waves, the sway of
+    /// grass, the clouds. A game always; the editor, while a scene is edited, only when asked
+    /// (the Simulate button) or while such a thing is selected.
+    bool simulatesEffects = true;
+    /// The time of all that: seconds of it so far. It stands still with it. The picture's
+    /// clock, and the waves' (what floats is lifted by the waves that are drawn).
+    double effectsTime = 0;
     /// While true, the components a game declared with MOLTEN_COMPONENT run: start() once
     /// per component, update() every frame, fixedUpdate() every physics step, and the
     /// events (onCollision, onTriggerEnter). An editor turns this off while editing.
@@ -231,6 +273,13 @@ public:
     /// The materials of the loaded scene, by name, and how it asks to be rendered.
     std::vector<NamedMaterial>& materials();
     RenderSettings& sceneSettings();
+    /// The scene's wind as it blows now, meters per second (Environment > Weather > Wind): what raises the
+    /// waves of water, sways grass and carries particles.
+    Vec3 wind();
+    /// The scene's weather as it is set now (Environment > Weather): rain, storm (Kit/Weather.hpp).
+    const WeatherSettings& weather();
+    /// The scene's sea (Environment > Water), as the picture has it: off unless the scene has one.
+    const SeaSettings& sea();
 
     // ---- what only a full engine can do. Here they do nothing, so that gameplay code
     // need not ask whether there is a screen or a loudspeaker.
@@ -387,10 +436,6 @@ protected:
     virtual void panSound(uint32_t, float) {}
     virtual void endSound(uint32_t) {}
     virtual void groupSound(uint32_t, const std::string&) {}
-public:
-    /// The sea's waves of a Water, for the water materials to draw them (Engine: the renderer).
-    virtual void showOcean(const class Ocean&, Vec2 /*origin*/) {}
-protected:
     virtual void mixGroup(const std::string&, float /*volume*/, bool /*isMuted*/) {}
     virtual void duckGroup(const std::string&, const std::string&, float) {}
     virtual void muffleSound(uint32_t, float) {}

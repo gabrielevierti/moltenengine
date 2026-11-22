@@ -26,6 +26,7 @@ enum class BlendMode : uint8_t {
     AlphaBlend,     // new * alpha + old * (1 - alpha)
     Additive,       // new * alpha + old
     Multiply,       // new * old: darkens what is there (decals of dirt)
+    Through,        // new + old * through: the fragment function returns both (index 0 and 1 of color 0): water
 };
 
 struct PipelineDescription {

@@ -39,7 +39,9 @@ public:
     /// disk. A test that draws one frame turns it off and reads at once.
     bool readsInBackground = true;
 
-    enum class Action { None, Create, Open, OpenOther, ChooseLocation, Forget, Reveal, Delete };
+    // EditTemplate: the chosen template opened to be changed (one of the engine's is copied into your templates
+    // folder first); ResetTemplate: yours put back to the engine's (yours to the Trash). `path` is the template's folder.
+    enum class Action { None, Create, Open, OpenOther, ChooseLocation, Forget, Reveal, Delete, EditTemplate, ResetTemplate };
     struct Result {
         Action action = Action::None;
         std::string path;               // Open, Forget, Reveal, Delete: the project's folder (Reveal: or a file in it)

@@ -26,9 +26,14 @@ public:
 
     bool shouldClose() const;
     void requestClose();
+    /// True while this window is the one in use: the program is in front and its window has the keys.
+    bool isFocused() const;
 
     /// Handles the events that arrived since the last call and reports input to `input`.
     void pollEvents(Input& input);
+    /// While the system holds the events (a menu of the menu bar is open, the window is being
+    /// resized), pollEvents does not return: `tick` is called about 60 times a second meanwhile.
+    void whileEventsAreHeld(void (*tick)(void*), void* context);
 
     /// The next texture to draw into. It reaches the screen when the frame presents it.
     /// May be nullptr while the window is hidden or being resized: skip the frame.

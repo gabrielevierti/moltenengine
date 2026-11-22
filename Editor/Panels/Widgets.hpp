@@ -339,6 +339,25 @@ inline void drawIcon(ImDrawList* d, ImVec2 c, float s, const std::string& kind, 
     }
 }
 
+/// A row of a list with an icon before its words (a page of settings, a kind of thing to show): the
+/// icon in a column of its own and the words clear of it, as the Mac's own lists have them.
+inline bool iconSelectable(const char* label, const std::string& icon, bool isSelected, float height = 26.0f, float iconSize = 14.0f) {
+    ImVec2 at = ImGui::GetCursorScreenPos();
+    ImGui::PushID(label);
+    // As wide as the list, and never narrower than its words (a menu that fits itself to what it holds).
+    float needed = 6 + iconSize + 12 + ImGui::CalcTextSize(label).x + 10;
+    bool clicked = ImGui::Selectable("##row", isSelected, 0, ImVec2(std::max(needed, ImGui::GetContentRegionAvail().x), height));
+    ImGui::PopID();
+    ImVec2 size = ImGui::GetItemRectSize();
+    float middle = at.y + size.y * 0.5f;
+    ImU32 color = ImGui::GetColorU32(isSelected ? ImGuiCol_Text : ImGuiCol_TextDisabled);
+    if (ImGui::IsItemHovered()) color = ImGui::GetColorU32(ImGuiCol_Text);
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    drawIcon(drawList, ImVec2(at.x + 6 + iconSize * 0.5f, middle), iconSize, icon, color);
+    drawList->AddText(ImVec2(at.x + 6 + iconSize + 12, middle - ImGui::GetFontSize() * 0.5f), ImGui::GetColorU32(ImGuiCol_Text), label);
+    return clicked;
+}
+
 /// A component's header: an icon of what kind it is, its name, folding; open by default.
 inline bool componentSection(const char* label, const char* id, const std::string& iconKind) {
     std::string text = std::string("      ") + label + "###" + id;

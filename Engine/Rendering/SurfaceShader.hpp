@@ -1,8 +1,9 @@
 // SurfaceShader.hpp
 // Shaders written by hand, as assets: a `.shader` file says what a surface is at each
 // pixel (its color, how rough, how much metal, what light it gives off, which way it
-// faces), and the engine lights it like any other. A material chooses one beside Lit,
-// Unlit and Water, and sets the properties the file declares.
+// faces), and the engine lights it like any other. A material chooses one beside Lit and
+// Unlit, and sets the properties the file declares. Water of a game's own (a pond, a pool, a
+// stylized lagoon) is one too: newWaterShaderText() is one that works, to start from.
 //
 //     properties {
 //         float speed = 1 range 0 10
@@ -23,6 +24,11 @@
 //     Surface:  color (float3)  alpha  metallic  roughness  occlusion  emissive (float3)  normal (float3, in the world)
 //     Input:    uv (float2)  position (float3, in the world)  normal (float3, the mesh's own)
 //               view (float3, toward the eye)  time (seconds)  tint (float4, the entity's)
+//               wind (float3, meters a second: the scene's, with its weather)
+//               behind (meters from this surface to what is behind it along the line of sight:
+//               how deep water is there; large where nothing is; for a material seen through)
+//
+// And the engine's own helpers: noise(float2) is smooth noise between 0 and 1.
 //
 // This file is the part without a graphics device: reading a `.shader`, and writing the
 // Metal code that the shader library compiles with its own.
@@ -93,5 +99,8 @@ private:
 
 /// What a new `.shader` file starts as.
 std::string newSurfaceShaderText();
+/// And a new water shader: water of a game's own (a pond, a pool, a cartoon lagoon), seen
+/// through, colored by how deep it is, rippling, with foam where it meets the shore. To change.
+std::string newWaterShaderText();
 
 }  // namespace molten

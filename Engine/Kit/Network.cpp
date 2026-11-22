@@ -35,6 +35,7 @@ enum Said : uint8_t {
 struct NetworkSession::State {
     NetHost host;
     bool isServer = false, plays = false, isReady = false;
+    bool isAlone = false;                           // its own server and only player, with no network under it
     int localId = -1;
     double clock = 0, sinceSent = 0;
     uint32_t nextId = 100000;                       // of things spawned: above anything a scene has
@@ -54,7 +55,7 @@ struct NetworkSession::State {
     int turn = 0;                                   // which spawn point is next
     // The menu.
     bool isTyping = false;
-    int asked = 0;                                  // 1 host, 2 join: clicked while drawing, done at the next update
+    int asked = 0;                                  // 1 host, 2 join, 3 alone: clicked while drawing, done at the next update
     Vec2 screen{1280, 720};
 };
 
@@ -331,6 +332,20 @@ void NetworkSession::joinOn(World& world, std::unique_ptr<NetTransport> transpor
     status = "Joining " + server.toString() + "...";
 }
 
+void NetworkSession::playAlone(World& world) {
+    if (!state) state = std::make_shared<State>();
+    if (state->host.isOpen() || state->isAlone) return;
+    numberTheScene(world, *state);
+    state->isServer = true;
+    state->plays = true;
+    state->isAlone = true;
+    state->localId = 0;
+    world.scene.each<Networked>([](Entity, Networked& networked) { networked.isMine = networked.owner == 0; });
+    state->players[0] = playerName;
+    spawnPlayer(world, *this, 0);
+    status = "Playing alone";
+}
+
 bool NetworkSession::host(World& world) {
     std::string error;
     std::unique_ptr<NetTransport> transport = openUdp(uint16_t(port), false, &error);
@@ -371,7 +386,7 @@ bool NetworkSession::join(World& world) {
 
 void NetworkSession::leave(World& world) {
     if (!state) return;
-    bool wasIn = state->host.isOpen();
+    bool wasIn = state->host.isOpen() || state->isAlone;
     state->host.close();
     state.reset();
     world.input.setPointerFree(false);
@@ -431,13 +446,15 @@ void NetworkSession::update(World& world, Entity, float dt) {
         if (wanted == "Host" || wanted == "host") host(world);
         else if (wanted == "Server" || wanted == "server") serve(world);
         else if (wanted == "Join" || wanted == "join") join(world);
+        else if (wanted == "Alone" || wanted == "alone") playAlone(world);
     }
     // What was clicked in the menu.
     if (net.asked == 1) host(world);
     else if (net.asked == 2) join(world);
+    else if (net.asked == 3) playAlone(world);
     net.asked = 0;
     // While the menu is on the screen the pointer is out, whatever view would have it.
-    bool showsMenu = mode == "Menu" && !net.host.isOpen();
+    bool showsMenu = mode == "Menu" && !net.host.isOpen() && !net.isAlone;
     world.input.setPointerFree(showsMenu);
     if (!showsMenu && net.isTyping) net.isTyping = false, world.input.isTakingText = false;
 
@@ -705,8 +722,8 @@ void NetworkSession::draw(World& world, Entity, Canvas& canvas) {
     State& net = *state;
     Vec2 screen = canvas.size();
     const Vec4 ink{1, 1, 1, 0.92f}, faint{1, 1, 1, 0.55f}, glass{0.05f, 0.055f, 0.07f, 0.86f}, accent{1.0f, 0.48f, 0.18f, 1};
-    if (net.host.isOpen() || mode != "Menu") {
-        if (!showsStatus || status.empty()) return;
+    if (net.host.isOpen() || net.isAlone || mode != "Menu") {
+        if (!showsStatus || status.empty() || net.isAlone) return;
         // A line at the top left: what this machine is in the game, and how many are in it.
         std::string line = status;
         if (isOnline()) {
@@ -728,9 +745,9 @@ void NetworkSession::draw(World& world, Entity, Canvas& canvas) {
 
     // The menu: host a game, or join one at an address.
     const Input& input = world.input;
-    Vec2 pointer = input.mousePosition();
+    Vec2 pointer = input.mousePosition() / std::max(world.interfaceScale, 1e-3f);       // drawn with the interface, at its scale
     bool clicked = input.wasPressed(MouseButton::Left);
-    Vec2 size{380, 252}, corner = (screen - size) * 0.5f;
+    Vec2 size{380, 296}, corner = (screen - size) * 0.5f;
     canvas.rect(Vec2{0, 0}, screen, Vec4{0, 0, 0, 0.35f});
     canvas.roundedRect(corner, size, 12, glass);
     canvas.roundedRectOutline(corner, size, 12, 1.5f, Vec4{1, 1, 1, 0.14f});
@@ -762,7 +779,8 @@ void NetworkSession::draw(World& world, Entity, Canvas& canvas) {
     bool showsCaret = net.isTyping && std::fmod(net.clock, 1.0) < 0.55;
     canvas.text(address + (showsCaret ? "|" : ""), fieldAt + Vec2{12, 12}, 15, ink);
     if (button(fieldAt + Vec2{fieldSize.x + 12, 0}, Vec2{80, 40}, "Join", false)) net.asked = 2;
-    if (!status.empty()) canvas.text(status, corner + Vec2{size.x * 0.5f, 212}, 12, Vec4{1.0f, 0.7f, 0.5f, 0.95f}, TextAlign::Center);
+    if (button(corner + Vec2{24, 208}, Vec2{size.x - 48, 36}, "Play alone", false)) net.asked = 3;
+    if (!status.empty()) canvas.text(status, corner + Vec2{size.x * 0.5f, 262}, 12, Vec4{1.0f, 0.7f, 0.5f, 0.95f}, TextAlign::Center);
 }
 
 // ---------------------------------------------------------------- Networked
@@ -784,7 +802,7 @@ void Networked::onMessage(World& world, Entity self, const Message& message) {
 
 namespace molten::kit {
 
-MOLTEN_COMPONENT(NetworkSession, MOLTEN_FIELD(mode).choices({"Menu", "Host", "Join", "Server", "Off"}).help("What it does when the game starts: ask on the screen, or do it at once"),
+MOLTEN_COMPONENT(NetworkSession, MOLTEN_FIELD(mode).choices({"Menu", "Host", "Join", "Server", "Alone", "Off"}).help("What it does when the game starts: ask on the screen, or do it at once"),
                  MOLTEN_FIELD(address).help("Where the host is, for one who joins: numbers or a name"), MOLTEN_FIELD(port).range(1, 65535),
                  MOLTEN_FIELD(maxPlayers).range(1, 64), MOLTEN_FIELD(playerName).help("What this player is called in the game"),
                  MOLTEN_FIELD(playerPrefab).picks("prefab").help("Everyone in the game gets one, theirs to move"),

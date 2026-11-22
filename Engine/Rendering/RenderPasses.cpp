@@ -32,16 +32,14 @@ void Renderer::bindMaterial(MTL::RenderCommandEncoder* encoder, const Material& 
     uniforms.occlusionStrength = material.occlusionStrength;
     uniforms.alphaCutoff = material.alphaCutoff;
     uniforms.uvScale = material.uvScale;
-    uniforms.water = material.isWater ? std::max(material.waveScale, 0.01f) : 0.0f;
-    uniforms.waveHeight = material.waveHeight;
+    // Water's waves are the wind's (the pass's uniforms carry it); the material says how long and how high it makes them.
+    uniforms.water = material.isWater ? 1.0f / std::clamp(material.waveSize, 0.01f, 100.0f) : 0.0f;
+    uniforms.waveHeight = std::max(material.waveHeight, 0.0f);
+    uniforms.foam = std::max(material.foam, 0.0f);
+    uniforms.isSea = material.isSea ? 1.0f : 0.0f;
     uniforms.sway = std::max(material.sway, 0.0f);
-    // Water reads the sea's waves where other materials read their normal map.
-    bool readsOcean = material.isWater && oceanTexture_ && oceanPatch_ > 0;
-    if (material.isWater) waterSeen_ = true;
-    if (readsOcean) {
-        uniforms.oceanScale = 1.0f / oceanPatch_;
-        uniforms.oceanOffset = -oceanOrigin_;
-    }
+    // Water, and what a shader of the game's own draws seen through (its own water): they read how far what is behind them is.
+    if (material.isWater || (!material.shader.empty() && material.isSeenThrough())) waterSeen_ = true;
     if (!material.shader.empty()) {
         // Its own shader: which one, and its properties in the order the shader declares them.
         int place = surfaceShaders_.use(material.shader);
@@ -63,8 +61,7 @@ void Renderer::bindMaterial(MTL::RenderCommandEncoder* encoder, const Material& 
         return (texture ? texture : fallback)->handle();
     };
     encoder->setFragmentTexture(textureOr(material.baseColorTexture, white_), gpu::MMTextureBaseColor);
-    encoder->setFragmentTexture(readsOcean ? oceanTexture_ : textureOr(material.normalTexture, flatNormal_), gpu::MMTextureNormal);
-    encoder->setVertexTexture(readsOcean ? oceanTexture_ : flatNormal_->handle(), gpu::MMTextureNormal);     // water's waves rise in the vertex stage
+    encoder->setFragmentTexture(textureOr(material.normalTexture, flatNormal_), gpu::MMTextureNormal);
     encoder->setFragmentTexture(textureOr(material.metallicRoughnessTexture, white_), gpu::MMTextureMetallicRoughness);
     encoder->setFragmentTexture(textureOr(material.occlusionTexture, white_), gpu::MMTextureOcclusion);
     encoder->setFragmentTexture(textureOr(material.emissiveTexture, white_), gpu::MMTextureEmissive);
@@ -73,12 +70,20 @@ void Renderer::bindMaterial(MTL::RenderCommandEncoder* encoder, const Material& 
     encoder->setFragmentSamplerState(isPixelated ? device_.pixelSampler() : device_.materialSampler(), gpu::MMSamplerMaterial);
 }
 
+MTL::RenderCommandEncoder* Renderer::encoderFor(MTL::CommandBuffer* commandBuffer, MTL::RenderPassDescriptor* pass, const char* name) {
+    if (gpuTimer_) gpuTimer_->time(pass, name);
+    MTL::RenderCommandEncoder* encoder = commandBuffer->renderCommandEncoder(pass);
+    encoder->setLabel(label(name));
+    return encoder;
+}
+
 void Renderer::drawBatches(MTL::RenderCommandEncoder* encoder, const std::vector<Batch>& batches, MeshPass pass,
-                           MTL::PixelFormat colorFormat, int sampleCount) {
+                           MTL::PixelFormat colorFormat, int sampleCount, bool bothSides) {
     const Material* boundMaterial = nullptr;
     for (const Batch& batch : batches) {
         const Material& material = *batch.material;
         bool isMasked = material.alphaMode == AlphaMode::Mask;
+        if (batch.mesh == waterSheet_.get() && pass != MeshPass::Forward) continue;        // water's sheet is only what is seen: it has no shape of its own to shade or to hide with
 
         PipelineDescription description;
         description.usesMeshVertices = true;
@@ -96,11 +101,13 @@ void Renderer::drawBatches(MTL::RenderCommandEncoder* encoder, const std::vector
                 description.fragmentFunction = isMasked ? "fragment_prepass_masked" : "fragment_prepass";
                 break;
             case MeshPass::Forward:
-                description.vertexFunction = "vertex_mesh";
+                // A sheet of water is the grid laid around the eye (collectItems put it in the mesh's place): its points are put on the sheet and moved by the waves.
+                description.vertexFunction = batch.mesh == waterSheet_.get() ? "vertex_water" : "vertex_mesh";
                 if (material.isWater && readsBehindWater()) {
-                    // Water one sees into (Water.metal): it reads what is drawn under it from the
-                    // picture itself, and writes what water makes of it. Nothing is blended.
+                    // Water one sees into (Water.metal): its own light, plus what is drawn under it
+                    // times the colors that get through it. The blending does it, once a pixel.
                     description.fragmentFunction = tracesRaysThisFrame_ ? "fragment_water_traced" : "fragment_water";
+                    description.blend = BlendMode::Through;
                     break;
                 }
                 if (material.isUnlit) description.fragmentFunction = "fragment_unlit";
@@ -113,7 +120,7 @@ void Renderer::drawBatches(MTL::RenderCommandEncoder* encoder, const std::vector
         if (!pipeline) continue;
 
         encoder->setRenderPipelineState(pipeline);
-        encoder->setCullMode(material.isDoubleSided ? MTL::CullModeNone : MTL::CullModeBack);
+        encoder->setCullMode(material.isDoubleSided || bothSides ? MTL::CullModeNone : MTL::CullModeBack);
         // vertex_mesh reads the material too (how the wind sways it): every pass that uses it binds it.
         if (batch.material != boundMaterial && (pass == MeshPass::Forward || pass == MeshPass::Prepass || isMasked)) {
             bindMaterial(encoder, material);
@@ -186,8 +193,7 @@ void Renderer::renderShadows(MTL::CommandBuffer* commandBuffer, std::vector<Shad
     depth->setStoreAction(MTL::StoreActionStore);
     pass->setRenderTargetArrayLength(NS::UInteger(shadowMapSlices_));
 
-    MTL::RenderCommandEncoder* encoder = commandBuffer->renderCommandEncoder(pass.get());
-    encoder->setLabel(label("Shadow cascades"));
+    MTL::RenderCommandEncoder* encoder = encoderFor(commandBuffer, pass.get(), "Shadow cascades");
     encoder->setDepthStencilState(device_.depthWrite());
     encoder->setFrontFacingWinding(MTL::WindingCounterClockwise);
     // Casters in front of a cascade's box are flattened onto its near plane instead of being clipped away.
@@ -258,8 +264,7 @@ void Renderer::renderShadowsEachCascade(MTL::CommandBuffer* commandBuffer, const
         depth->setClearDepth(1.0);
         depth->setStoreAction(MTL::StoreActionStore);
 
-        MTL::RenderCommandEncoder* encoder = commandBuffer->renderCommandEncoder(pass.get());
-        encoder->setLabel(label("Shadow cascade"));
+        MTL::RenderCommandEncoder* encoder = encoderFor(commandBuffer, pass.get(), "Shadow cascade");
         encoder->setDepthStencilState(device_.depthWrite());
         encoder->setFrontFacingWinding(MTL::WindingCounterClockwise);
         // Casters in front of the box are flattened onto its near plane instead of being clipped away.
@@ -271,6 +276,44 @@ void Renderer::renderShadowsEachCascade(MTL::CommandBuffer* commandBuffer, const
         drawBatches(encoder, batches, MeshPass::Shadow, MTL::PixelFormatInvalid, 1);
         encoder->endEncoding();
     }
+}
+
+bool Renderer::renderRainMap(MTL::CommandBuffer* commandBuffer, const std::vector<DrawItem>& items, const Mat4& viewProjection) {
+    if (!rainMap_) rainMap_ = device_.makeRenderTarget(kDepthFormat, kRainMapSize, kRainMapSize);
+    if (!rainMap_) return false;
+    // What the rain falls on first: everything solid in the square (water is what it falls into,
+    // and glass and other things seen through are left out: their wet look is their own).
+    Frustum square(viewProjection);
+    std::vector<const DrawItem*> roofs;
+    for (const DrawItem& item : items) {
+        if (item.material->isWater || item.material->isSeenThrough() || !square.intersects(item.bounds)) continue;
+        roofs.push_back(&item);
+    }
+    std::vector<Batch> batches = makeBatches(roofs, true);
+
+    gpu::PassUniforms uniforms{};
+    uniforms.viewProjection = viewProjection;
+    uniforms.view = identity();
+    uniforms.projection = viewProjection;
+    FrameAllocator::Allocation passUniforms = allocator().copy(uniforms);
+
+    auto pass = NS::TransferPtr(MTL::RenderPassDescriptor::alloc()->init());
+    MTL::RenderPassDepthAttachmentDescriptor* depth = pass->depthAttachment();
+    depth->setTexture(rainMap_.get());
+    depth->setLoadAction(MTL::LoadActionClear);
+    depth->setClearDepth(1.0);
+    depth->setStoreAction(MTL::StoreActionStore);
+    MTL::RenderCommandEncoder* encoder = encoderFor(commandBuffer, pass.get(), "Rain from above");
+    encoder->setDepthStencilState(device_.depthWrite());
+    encoder->setFrontFacingWinding(MTL::WindingCounterClockwise);
+    encoder->setDepthClipMode(MTL::DepthClipModeClamp);
+    encoder->setDepthBias(0.0f, 1.5f, 0.0f);
+    encoder->setVertexBuffer(passUniforms.buffer, passUniforms.offset, gpu::MMBufferPass);
+    encoder->setFragmentSamplerState(device_.materialSampler(), gpu::MMSamplerMaterial);
+    // Both sides of every surface: a roof seen from above may be a plane facing down.
+    drawBatches(encoder, batches, MeshPass::Shadow, MTL::PixelFormatInvalid, 1, true);
+    encoder->endEncoding();
+    return true;
 }
 
 // ---------------------------------------------------------------- 2 and 3. ambient occlusion
@@ -289,8 +332,7 @@ void Renderer::renderPrepass(MTL::CommandBuffer* commandBuffer, const std::vecto
     depth->setClearDepth(1.0);
     depth->setStoreAction(MTL::StoreActionStore);
 
-    MTL::RenderCommandEncoder* encoder = commandBuffer->renderCommandEncoder(pass.get());
-    encoder->setLabel(label("Depth and normals"));
+    MTL::RenderCommandEncoder* encoder = encoderFor(commandBuffer, pass.get(), "Depth and normals");
     encoder->setDepthStencilState(device_.depthWrite());
     encoder->setFrontFacingWinding(MTL::WindingCounterClockwise);
     encoder->setVertexBuffer(passUniforms.buffer, passUniforms.offset, gpu::MMBufferPass);
@@ -328,6 +370,10 @@ bool Renderer::canTraceAmbientFirst() {
     trace.colorFormat = kSceneFormat;
     trace.secondColorFormat = kSceneFormat;
     if (!shaders_.pipeline(trace)) return false;
+    PipelineDescription gather = trace;
+    gather.fragmentFunction = "fragment_traced_accumulate";
+    gather.secondColorFormat = MTL::PixelFormatRG16Float;
+    if (!shaders_.pipeline(gather)) return false;
     for (const char* function : {"fragment_traced_ambient_smooth", "fragment_traced_ambient_smooth_wide", "fragment_traced_ambient_smooth_widest"}) {
         PipelineDescription smooth;
         smooth.vertexFunction = "vertex_fullscreen";
@@ -338,40 +384,8 @@ bool Renderer::canTraceAmbientFirst() {
     return true;
 }
 
-MTL::Texture* Renderer::renderTracedAmbient(MTL::CommandBuffer* commandBuffer, const View& view, int width, int height, double time,
-                                            const FrameAllocator::Allocation& frameUniforms, bool withBounce) {
-    // Half the scene's size each way: a quarter of the pixels, and of the rays.
-    int halfWidth = std::max(4, (width + 1) / 2), halfHeight = std::max(4, (height + 1) / 2);
-    for (NS::SharedPtr<MTL::Texture>* target : {&tracedLight_[0], &tracedLight_[1], &tracedSurface_}) {
-        if (!*target || int((*target)->width()) != halfWidth || int((*target)->height()) != halfHeight) {
-            *target = device_.makeRenderTarget(kSceneFormat, halfWidth, halfHeight);
-        }
-    }
-    PipelineDescription description;
-    description.vertexFunction = "vertex_fullscreen";
-    description.fragmentFunction = "fragment_traced_ambient";
-    description.colorFormat = kSceneFormat;
-    description.secondColorFormat = kSceneFormat;
-    MTL::RenderPipelineState* pipeline = shaders_.pipeline(description);
-    if (!pipeline || !tracedLight_[0] || !tracedLight_[1] || !tracedSurface_ || !sceneAccelerationStructure_) return nullptr;
-
-    // The camera of the scene's own picture: the pass finds where each of its pixels is in
-    // the world from the depth drawn for that picture.
-    gpu::PassUniforms uniforms = makePassUniforms(view.view, view.projection, view.position, width, height, view.nearPlane, view.farPlane, time);
-    FrameAllocator::Allocation passUniforms = allocator().copy(uniforms);
-
-    auto pass = NS::TransferPtr(MTL::RenderPassDescriptor::alloc()->init());
-    MTL::RenderPassColorAttachmentDescriptor* light = pass->colorAttachments()->object(0);
-    light->setTexture(tracedLight_[0].get());
-    light->setLoadAction(MTL::LoadActionDontCare);              // every pixel is written
-    light->setStoreAction(MTL::StoreActionStore);
-    MTL::RenderPassColorAttachmentDescriptor* surface = pass->colorAttachments()->object(1);
-    surface->setTexture(tracedSurface_.get());
-    surface->setLoadAction(MTL::LoadActionDontCare);
-    surface->setStoreAction(MTL::StoreActionStore);
-    MTL::RenderCommandEncoder* encoder = commandBuffer->renderCommandEncoder(pass.get());
-    encoder->setLabel(label("Traced ambient light"));
-    encoder->setRenderPipelineState(pipeline);
+void Renderer::bindTracedScene(MTL::RenderCommandEncoder* encoder, const FrameAllocator::Allocation& passUniforms,
+                               const FrameAllocator::Allocation& frameUniforms) {
     encoder->setFragmentBuffer(passUniforms.buffer, passUniforms.offset, gpu::MMBufferPass);
     encoder->setFragmentBuffer(frameUniforms.buffer, frameUniforms.offset, gpu::MMBufferFrame);
     encoder->setFragmentAccelerationStructure(sceneAccelerationStructure_.get(), gpu::MMBufferAccelerationStructure);
@@ -380,19 +394,112 @@ MTL::Texture* Renderer::renderTracedAmbient(MTL::CommandBuffer* commandBuffer, c
     for (const MTL::AccelerationStructure* meshStructure : tracedMeshes_) {
         encoder->useResource(meshStructure, MTL::ResourceUsageRead, MTL::RenderStageFragment);
     }
-    encoder->setFragmentTexture(prepassDepth_.get(), 0);
-    encoder->setFragmentTexture(prepassNormal_.get(), 1);
-    encoder->setFragmentTexture(environment_.irradianceMap(), gpu::MMTextureIrradiance);
-    encoder->setFragmentSamplerState(device_.pointClampSampler(), 0);
-    encoder->setFragmentSamplerState(device_.linearClampSampler(), gpu::MMSamplerLinearClamp);
-    encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0), NS::UInteger(3));
-    encoder->endEncoding();
-    stats.passes++;
+}
 
-    // Smoothed across neighbors on the same surface: next to each other, two apart, and for
-    // the bounced light, which has the most grain, four apart. From one picture into the other, and back.
+MTL::Texture* Renderer::renderTracedAmbient(MTL::CommandBuffer* commandBuffer, const View& view, int width, int height, double time,
+                                            const FrameAllocator::Allocation& frameUniforms, bool withBounce) {
+    // Half the scene's size each way: a quarter of the pixels, and of the rays.
+    int halfWidth = std::max(4, (width + 1) / 2), halfHeight = std::max(4, (height + 1) / 2);
+    // Last frame's gathered pictures become "before"; this frame's are drawn into the others.
+    std::swap(tracedLightGathered_, tracedLightGatheredBefore_);
+    std::swap(tracedFrames_, tracedFramesBefore_);
+    std::swap(tracedSurface_, tracedSurfaceBefore_);
+    auto ensure = [&](NS::SharedPtr<MTL::Texture>& target, MTL::PixelFormat format) {
+        if (target && int(target->width()) == halfWidth && int(target->height()) == halfHeight) return;
+        target = device_.makeRenderTarget(format, halfWidth, halfHeight);
+        tracedHasHistory_ = false;                  // a new size: nothing gathered before fits it
+    };
+    ensure(tracedLight_[0], kSceneFormat);
+    ensure(tracedLight_[1], kSceneFormat);
+    ensure(tracedSurface_, kSceneFormat);
+    ensure(tracedSurfaceBefore_, kSceneFormat);
+    ensure(tracedLightGathered_, kSceneFormat);
+    ensure(tracedLightGatheredBefore_, kSceneFormat);
+    ensure(tracedFrames_, MTL::PixelFormatRG16Float);
+    ensure(tracedFramesBefore_, MTL::PixelFormatRG16Float);
+    PipelineDescription description;
+    description.vertexFunction = "vertex_fullscreen";
+    description.fragmentFunction = "fragment_traced_ambient";
+    description.colorFormat = kSceneFormat;
+    description.secondColorFormat = kSceneFormat;
+    MTL::RenderPipelineState* pipeline = shaders_.pipeline(description);
+    PipelineDescription gatherDescription = description;
+    gatherDescription.fragmentFunction = "fragment_traced_accumulate";
+    gatherDescription.secondColorFormat = MTL::PixelFormatRG16Float;
+    MTL::RenderPipelineState* gatherPipeline = shaders_.pipeline(gatherDescription);
+    if (!pipeline || !gatherPipeline || !tracedLight_[0] || !tracedLight_[1] || !tracedSurface_ ||
+        !tracedLightGathered_ || !tracedLightGatheredBefore_ || !tracedFrames_ || !tracedFramesBefore_ || !tracedSurfaceBefore_ ||
+        !sceneAccelerationStructure_) {
+        tracedHasHistory_ = false;
+        return nullptr;
+    }
+
+    // The camera of the scene's own picture: the pass finds where each of its pixels is in
+    // the world from the depth drawn for that picture.
+    gpu::PassUniforms uniforms = makePassUniforms(view.view, view.projection, view.position, width, height, view.nearPlane, view.farPlane, time);
+    FrameAllocator::Allocation passUniforms = allocator().copy(uniforms);
+
+    // 1. The surface of each pixel, and the light around it.
+    {
+        auto pass = NS::TransferPtr(MTL::RenderPassDescriptor::alloc()->init());
+        MTL::RenderPassColorAttachmentDescriptor* light = pass->colorAttachments()->object(0);
+        light->setTexture(tracedLight_[0].get());
+        light->setLoadAction(MTL::LoadActionDontCare);          // every pixel is written
+        light->setStoreAction(MTL::StoreActionStore);
+        MTL::RenderPassColorAttachmentDescriptor* surface = pass->colorAttachments()->object(1);
+        surface->setTexture(tracedSurface_.get());
+        surface->setLoadAction(MTL::LoadActionDontCare);
+        surface->setStoreAction(MTL::StoreActionStore);
+        MTL::RenderCommandEncoder* encoder = encoderFor(commandBuffer, pass.get(), "Traced ambient light");
+        encoder->setRenderPipelineState(pipeline);
+        bindTracedScene(encoder, passUniforms, frameUniforms);
+        encoder->setFragmentTexture(prepassDepth_.get(), 0);
+        encoder->setFragmentTexture(prepassNormal_.get(), 1);
+        encoder->setFragmentTexture(environment_.irradianceMap(), gpu::MMTextureIrradiance);
+        encoder->setFragmentSamplerState(device_.pointClampSampler(), 0);
+        encoder->setFragmentSamplerState(device_.linearClampSampler(), gpu::MMSamplerLinearClamp);
+        encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0), NS::UInteger(3));
+        encoder->endEncoding();
+        stats.passes++;
+    }
+    // 2. Added to what was gathered at the same places before.
+    {
+        gpu::TracedHistoryUniforms history{};
+        history.previousViewProjection = tracedViewProjectionBefore_;
+        history.previousView = tracedViewBefore_;
+        history.hasHistory = tracedHasHistory_ ? 1u : 0u;
+        history.mostFrames = 20.0f;
+        auto pass = NS::TransferPtr(MTL::RenderPassDescriptor::alloc()->init());
+        MTL::RenderPassColorAttachmentDescriptor* light = pass->colorAttachments()->object(0);
+        light->setTexture(tracedLightGathered_.get());
+        light->setLoadAction(MTL::LoadActionDontCare);
+        light->setStoreAction(MTL::StoreActionStore);
+        MTL::RenderPassColorAttachmentDescriptor* frames = pass->colorAttachments()->object(1);
+        frames->setTexture(tracedFrames_.get());               // over how many frames each pixel was gathered
+        frames->setLoadAction(MTL::LoadActionDontCare);
+        frames->setStoreAction(MTL::StoreActionStore);
+        MTL::RenderCommandEncoder* encoder = encoderFor(commandBuffer, pass.get(), "Traced light gathered over frames");
+        encoder->setRenderPipelineState(gatherPipeline);
+        encoder->setFragmentBuffer(passUniforms.buffer, passUniforms.offset, gpu::MMBufferPass);
+        encoder->setFragmentBytes(&history, sizeof(history), gpu::MMBufferFrame);
+        encoder->setFragmentTexture(tracedLight_[0].get(), 0);
+        encoder->setFragmentTexture(tracedSurface_.get(), 2);
+        encoder->setFragmentTexture(tracedSurfaceBefore_.get(), 3);
+        encoder->setFragmentTexture(tracedLightGatheredBefore_.get(), 4);
+        encoder->setFragmentTexture(tracedFramesBefore_.get(), 5);
+        encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0), NS::UInteger(3));
+        encoder->endEncoding();
+        stats.passes++;
+    }
+    tracedViewProjectionBefore_ = view.viewProjection;
+    tracedViewBefore_ = view.view;
+    tracedHasHistory_ = true;
+
+    // 3. Smoothed across neighbors on the same surface: next to each other, two apart, and for the
+    // bounced light, which has the most grain, four apart. What is smoothed is not kept for the
+    // next frame: only what was gathered is, or the smoothing would pile up.
     drawFullscreen(commandBuffer, tracedLight_[1].get(), "fragment_traced_ambient_smooth", BlendMode::Opaque, false, &uniforms, sizeof(uniforms),
-                   tracedLight_[0].get(), tracedSurface_.get(), nullptr);
+                   tracedLightGathered_.get(), tracedSurface_.get(), nullptr);
     drawFullscreen(commandBuffer, tracedLight_[0].get(), "fragment_traced_ambient_smooth_wide", BlendMode::Opaque, false, &uniforms, sizeof(uniforms),
                    tracedLight_[1].get(), tracedSurface_.get(), nullptr);
     if (!withBounce) return tracedLight_[0].get();
@@ -406,28 +513,47 @@ MTL::Texture* Renderer::renderTracedAmbient(MTL::CommandBuffer* commandBuffer, c
 bool Renderer::renderClouds(MTL::CommandBuffer* commandBuffer, const View& view, int width, int height, double time,
                             const FrameAllocator::Allocation& frameUniforms) {
     // A picture of their own, a share of the scene's size: clouds are soft, and the sky smooths it up.
+    // Even, so that it is two by two of the walked one.
     float share = std::clamp(settings.sky.cloudResolution, 0.2f, 1.0f);
     int cloudWidth = std::max(8, int(std::lround(float(width) * share))), cloudHeight = std::max(8, int(std::lround(float(height) * share)));
+    cloudWidth += cloudWidth & 1, cloudHeight += cloudHeight & 1;
+    const int freshWidth = cloudWidth / 2, freshHeight = cloudHeight / 2;
+    // This frame's picture is drawn over the older of the two: the last frame's is read.
+    std::swap(cloudColor_, cloudColorBefore_);
     if (!cloudColor_ || int(cloudColor_->width()) != cloudWidth || int(cloudColor_->height()) != cloudHeight) {
         cloudColor_ = device_.makeRenderTarget(kSceneFormat, cloudWidth, cloudHeight);
+        cloudHasHistory_ = false;
+    }
+    if (!cloudColorBefore_ || int(cloudColorBefore_->width()) != cloudWidth || int(cloudColorBefore_->height()) != cloudHeight) {
+        cloudColorBefore_ = device_.makeRenderTarget(kSceneFormat, cloudWidth, cloudHeight);
+        cloudHasHistory_ = false;
+    }
+    if (!cloudFresh_ || int(cloudFresh_->width()) != freshWidth || int(cloudFresh_->height()) != freshHeight) {
+        cloudFresh_ = device_.makeRenderTarget(kSceneFormat, freshWidth, freshHeight);
+        cloudHasHistory_ = false;
     }
     PipelineDescription description;
     description.vertexFunction = "vertex_sky";
     description.fragmentFunction = "fragment_clouds";
     description.colorFormat = kSceneFormat;
     MTL::RenderPipelineState* pipeline = shaders_.pipeline(description);
-    if (!pipeline || !cloudColor_) return false;
+    if (!pipeline || !cloudColor_ || !cloudColorBefore_ || !cloudFresh_) return false;
 
-    // The same camera, for a picture of this size: each pixel's line of sight comes from it.
+    // Which pixel of each two by two is walked this frame: all four in four frames, crosswise.
+    static const int kTurns[4][2] = {{0, 0}, {1, 1}, {1, 0}, {0, 1}};
+    const int* turn = kTurns[cloudTurn_++ % 4];
+    // The walked picture is the same camera with its pixels moved onto those of the larger one:
+    // half a pixel of the walked picture, one way or the other.
+    Mat4 nudged = identity();
+    nudged.columns[3] = Vec4{(float(turn[0]) - 0.5f) / float(freshWidth), -(float(turn[1]) - 0.5f) / float(freshHeight), 0.0f, 1.0f};
     FrameAllocator::Allocation passUniforms = allocator().copy(
-        makePassUniforms(view.view, view.projection, view.position, cloudWidth, cloudHeight, view.nearPlane, view.farPlane, time));
+        makePassUniforms(view.view, nudged * view.projection, view.position, freshWidth, freshHeight, view.nearPlane, view.farPlane, time));
     auto pass = NS::TransferPtr(MTL::RenderPassDescriptor::alloc()->init());
     MTL::RenderPassColorAttachmentDescriptor* color = pass->colorAttachments()->object(0);
-    color->setTexture(cloudColor_.get());
+    color->setTexture(cloudFresh_.get());
     color->setLoadAction(MTL::LoadActionDontCare);              // every pixel is written
     color->setStoreAction(MTL::StoreActionStore);
-    MTL::RenderCommandEncoder* encoder = commandBuffer->renderCommandEncoder(pass.get());
-    encoder->setLabel(label("Clouds"));
+    MTL::RenderCommandEncoder* encoder = encoderFor(commandBuffer, pass.get(), "Clouds");
     encoder->setRenderPipelineState(pipeline);
     encoder->setVertexBuffer(passUniforms.buffer, passUniforms.offset, gpu::MMBufferPass);
     encoder->setFragmentBuffer(passUniforms.buffer, passUniforms.offset, gpu::MMBufferPass);
@@ -441,6 +567,20 @@ bool Renderer::renderClouds(MTL::CommandBuffer* commandBuffer, const View& view,
     encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0), NS::UInteger(3));
     encoder->endEncoding();
     stats.passes++;
+
+    // The whole picture: the walked pixels, and the rest from the last frame's, where each line
+    // of sight was seen then. (Clouds are far: only which way the camera looks moves them.)
+    Mat4 viewProjection = view.projection * view.view;
+    gpu::CloudResolveUniforms resolve{};
+    resolve.inverseViewProjection = simd::inverse(viewProjection);
+    resolve.previousViewProjection = cloudViewProjectionBefore_;
+    resolve.camera = Vec4{view.position.x, view.position.y, view.position.z, 1.0f};
+    resolve.offset = Vec2{float(turn[0]), float(turn[1])};
+    resolve.hasHistory = cloudHasHistory_ ? 1.0f : 0.0f;
+    drawFullscreen(commandBuffer, cloudColor_.get(), "fragment_clouds_resolve", BlendMode::Opaque, false, &resolve, sizeof(resolve),
+                   cloudFresh_.get(), cloudColorBefore_.get(), nullptr);
+    cloudViewProjectionBefore_ = viewProjection;
+    cloudHasHistory_ = true;
     return true;
 }
 
@@ -470,8 +610,7 @@ void Renderer::renderScene(MTL::CommandBuffer* commandBuffer, Scene& scene, cons
     depth->setClearDepth(1.0);
     depth->setStoreAction(MTL::StoreActionDontCare);                   // nobody reads it after this pass
 
-    MTL::RenderCommandEncoder* encoder = commandBuffer->renderCommandEncoder(pass.get());
-    encoder->setLabel(label("Scene"));
+    MTL::RenderCommandEncoder* encoder = encoderFor(commandBuffer, pass.get(), "Scene");
     encoder->setFrontFacingWinding(MTL::WindingCounterClockwise);
 
     // What every draw of this pass shares is bound once.
@@ -480,11 +619,16 @@ void Renderer::renderScene(MTL::CommandBuffer* commandBuffer, Scene& scene, cons
     encoder->setFragmentBuffer(frameUniforms.buffer, frameUniforms.offset, gpu::MMBufferFrame);
     encoder->setFragmentBuffer(lights.buffer, lights.offset, gpu::MMBufferLights);
     encoder->setFragmentTexture(shadowMap_.get(), gpu::MMTextureShadowMap);
+    encoder->setFragmentTexture(rainMapDrawn_ ? rainMap_.get() : nullptr, gpu::MMTextureRainMap);
+    // Water reads which way the bottom faces under it (for the sun's lines on it), and what floats on it.
+    encoder->setFragmentTexture(wantsDepth() && prepassNormal_ ? prepassNormal_.get() : nullptr, gpu::MMTextureSceneNormal);
+    FrameAllocator::Allocation wakes = allocator().copy(waterWakes);
+    encoder->setFragmentBuffer(wakes.buffer, wakes.offset, gpu::MMBufferWakes);
     encoder->setFragmentTexture(environment_.irradianceMap(), gpu::MMTextureIrradiance);
     encoder->setFragmentTexture(environment_.prefilteredMap(), gpu::MMTexturePrefiltered);
     encoder->setFragmentTexture(environment_.brdfLUT(), gpu::MMTextureBRDF);
     // The screen's own ambient occlusion, unless the light around things was traced for this picture.
-    encoder->setFragmentTexture(settings.ambientOcclusionEnabled && !tracedLightDrawn_ && occlusion_ ? occlusion_.get() : white_->handle(),
+    encoder->setFragmentTexture(settings.ambientOcclusionEnabled && !tracedAmbientDrawn_ && occlusion_ ? occlusion_.get() : white_->handle(),
                                 gpu::MMTextureAmbientOcclusion);
     encoder->setFragmentTexture(tracedLightDrawn_, gpu::MMTextureTracedLight);
     encoder->setFragmentTexture(tracedLightDrawn_ ? tracedSurface_.get() : nullptr, gpu::MMTextureTracedSurface);
@@ -557,7 +701,7 @@ void Renderer::drawParticles(MTL::RenderCommandEncoder* encoder, Scene& scene, c
         const bool isStretched = emitter.renderMode == ParticleEmitter::RenderMode::Stretched;
         const bool isLocal = emitter.space == ParticleEmitter::Space::Local;
         const float mode = float(int(emitter.renderMode));
-        const Vec4 shading{saturate(emitter.lit), hasDepth ? std::max(emitter.softness, 0.0f) : 0.0f, mode, 0};
+        const Vec4 shading{saturate(emitter.lit), hasDepth ? std::max(emitter.softness, 0.0f) : 0.0f, mode, emitter.isRing ? 1.0f : 0.0f};
         instances.clear();
         for (const Particle& particle : emitter.particles) {
             float t = saturate(particle.age / particle.lifetime);
@@ -813,8 +957,7 @@ void Renderer::renderFinal(MTL::CommandBuffer* commandBuffer, const Canvas& canv
                                                double(backgroundColor.w)));
     color->setStoreAction(MTL::StoreActionStore);
 
-    MTL::RenderCommandEncoder* encoder = commandBuffer->renderCommandEncoder(pass.get());
-    encoder->setLabel(label("Tone mapping and canvas"));
+    MTL::RenderCommandEncoder* encoder = encoderFor(commandBuffer, pass.get(), "Tone mapping and canvas");
     MTL::Viewport fullViewport{0.0, 0.0, double(target.texture->width()), double(target.texture->height()), 0.0, 1.0};
     if (!coversTarget) {
         encoder->setViewport(MTL::Viewport{double(area.x), double(area.y), double(area.width), double(area.height), 0.0, 1.0});
@@ -901,8 +1044,7 @@ MTL::Texture* Renderer::upscaleWithMetalFX(MTL::CommandBuffer* commandBuffer, co
     description.colorFormat = format;
     MTL::RenderPipelineState* pipeline = shaders_.pipeline(description);
     if (!pipeline) return nullptr;
-    MTL::RenderCommandEncoder* encoder = commandBuffer->renderCommandEncoder(pass.get());
-    encoder->setLabel(label("Tone mapping, before MetalFX"));
+    MTL::RenderCommandEncoder* encoder = encoderFor(commandBuffer, pass.get(), "Tone mapping, before MetalFX");
     encoder->setRenderPipelineState(pipeline);
     encoder->setFragmentBytes(postUniforms, uniformsSize, gpu::MMBufferPass);
     encoder->setFragmentTexture(sceneColor_.get(), 0);
@@ -931,8 +1073,7 @@ void Renderer::renderInterface(MTL::CommandBuffer* commandBuffer, const Canvas& 
     color->setClearColor(MTL::ClearColor::Make(double(backgroundColor.x), double(backgroundColor.y), double(backgroundColor.z),
                                                double(backgroundColor.w)));
     color->setStoreAction(MTL::StoreActionStore);
-    MTL::RenderCommandEncoder* encoder = commandBuffer->renderCommandEncoder(pass.get());
-    encoder->setLabel(label("Interface"));
+    MTL::RenderCommandEncoder* encoder = encoderFor(commandBuffer, pass.get(), "Interface");
     drawCanvas(encoder, canvas, target.texture);
     if (overlay) overlay(commandBuffer, encoder);
     encoder->endEncoding();
@@ -1003,8 +1144,7 @@ void Renderer::drawFullscreen(MTL::CommandBuffer* commandBuffer, MTL::Texture* t
     color->setLoadAction(keepContents ? MTL::LoadActionLoad : MTL::LoadActionDontCare);
     color->setStoreAction(MTL::StoreActionStore);
 
-    MTL::RenderCommandEncoder* encoder = commandBuffer->renderCommandEncoder(pass.get());
-    encoder->setLabel(label(fragmentFunction));
+    MTL::RenderCommandEncoder* encoder = encoderFor(commandBuffer, pass.get(), fragmentFunction);
     encoder->setRenderPipelineState(pipeline);
     if (uniforms) encoder->setFragmentBytes(uniforms, NS::UInteger(uniformsSize), gpu::MMBufferPass);
     if (source0) encoder->setFragmentTexture(source0, 0);

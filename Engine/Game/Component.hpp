@@ -150,6 +150,11 @@ struct ComponentType {
     std::vector<Field> fields;
     /// Where the editor's Add Component menu puts it: "Scripts" for a game's own, unless it says otherwise.
     std::string category = "Scripts";
+    /// A piece of the game's interface that is not filed under "UI": one no longer offered in the
+    /// menus, kept for the scenes that have it. It is still laid out and scaled with the interface.
+    bool isInterfacePiece = false;
+    /// Drawn with the game's interface: laid out for one screen, scaled to every other.
+    bool isInterface() const { return category == "UI" || isInterfacePiece; }
     /// Which game module declared it; nullptr for types built into the program.
     const void* module = nullptr;
 
@@ -191,6 +196,8 @@ public:
     const ComponentType* find(const std::string& name) const;
     /// Files a type under a category of the Add Component menu. Does nothing if there is no such type.
     void setCategory(const std::string& name, const std::string& category);
+    /// Says that a type is a piece of the interface whatever category it is filed under (see ComponentType::isInterfacePiece).
+    void setInterfacePiece(const std::string& name);
     /// "PlayerMover" -> "Player Mover": a type's name as people read it.
     static std::string displayName(const std::string& typeName);
     /// A name of its own for a type, where its type's name reads badly: "HudText" is "Text".

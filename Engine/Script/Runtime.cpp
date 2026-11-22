@@ -1,5 +1,7 @@
 #include "Script/Runtime.hpp"
 
+#include "Script/CppBoxes.hpp"
+
 #include "Animation/Animator.hpp"
 #include "Kit/Kit.hpp"
 #include "Kit/Saveable.hpp"
@@ -345,6 +347,7 @@ void registerStandardNodes() {
     static bool isDone = false;
     if (isDone) return;
     isDone = true;
+    registerCppBoxes();                 // the boxes that hold C++ as it is written (Script/CppBoxes.hpp)
 
     // ---- events
     event("OnStart", "On Start", "Once, when the game starts or the entity appears.", {}, {});

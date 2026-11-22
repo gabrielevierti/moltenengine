@@ -214,12 +214,21 @@ void SceneDocument::populateDefaultScene(Scene& scene, Assets& assets, std::vect
     scene.add(camera, Camera{});
 }
 
+// What a new scene starts with: the defaults, and the sea, a little under the floor. (A scene of
+// before, or one a game makes in code, has none: RenderSettings{}.)
+static RenderSettings newSceneSettings() {
+    RenderSettings settings;
+    settings.sea.enabled = true;
+    settings.sea.level = -0.5f;
+    return settings;
+}
+
 std::string SceneDocument::defaultSceneText() {
     Scene scene;
     std::vector<NamedMaterial> sceneMaterials;
     populateDefaultScene(scene, engine_.assets(), sceneMaterials);
     scene.updateTransforms();
-    return writeScene(scene, sceneMaterials, RenderSettings{});
+    return writeScene(scene, sceneMaterials, newSceneSettings());
 }
 
 void SceneDocument::newScene() {
@@ -228,7 +237,7 @@ void SceneDocument::newScene() {
     Scene& scene = engine_.scene;
     scene.clear();
     engine_.physics.reset();
-    engine_.renderer().settings = RenderSettings{};
+    engine_.renderer().settings = newSceneSettings();
     selection_.clear();
     createCamera();
 

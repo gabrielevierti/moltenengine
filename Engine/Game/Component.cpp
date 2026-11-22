@@ -170,6 +170,12 @@ void ComponentRegistry::setCategory(const std::string& name, const std::string& 
     }
 }
 
+void ComponentRegistry::setInterfacePiece(const std::string& name) {
+    for (ComponentType& type : types_) {
+        if (type.name == name) type.isInterfacePiece = true;
+    }
+}
+
 namespace {
 std::map<std::string, std::string>& displayNames() {
     static std::map<std::string, std::string> names;

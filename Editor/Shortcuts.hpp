@@ -1,5 +1,5 @@
 // Shortcuts.hpp
-// The editor's keyboard shortcuts, each one changeable (Edit > Preferences > Shortcuts) and
+// The editor's keyboard shortcuts, each one changeable (Molten Engine > Preferences > Shortcuts) and
 // kept between runs. Written as people read them: "Shift+Cmd+S".
 #pragma once
 

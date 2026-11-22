@@ -1,6 +1,7 @@
 #include "Scene/SceneFile.hpp"
 
 #include "Game/Component.hpp"
+#include "Water/Water.hpp"
 
 #include <algorithm>
 
@@ -79,7 +80,6 @@ void writeMaterialProperties(std::string& out, const Material& m, int indent) {
     Line("uvScale", indent).vec(m.uvScale).to(out);
     Line("doubleSided", indent).flag(m.isDoubleSided).to(out);
     Line("unlit", indent).flag(m.isUnlit).to(out);
-    if (m.isWater) Line("water", indent).number(m.waveScale).number(m.waveHeight).to(out);
     if (m.sway > 0) Line("sway", indent).number(m.sway).to(out);
     if (!m.shader.empty()) {
         Line("surfaceShader", indent).string(m.shader).to(out);
@@ -167,12 +167,20 @@ void readMaterialProperty(Words& words, Material& material, const TextureLoader&
     } else if (key == "uvScale") material.uvScale = words.vec2(Vec2{1, 1});
     else if (key == "doubleSided") material.isDoubleSided = words.flag();
     else if (key == "unlit") material.isUnlit = words.flag();
-    else if (key == "water") {
-        material.isWater = true;
-        material.waveScale = words.number(1);
+    // Water as a material, before the scene's sea: what it was on becomes the sea (retireOldWater).
+    else if (key == "waves") {
+        material.wasWater = true;
+        material.waveSize = words.number(1);
+        material.waveHeight = words.number(1);
+        material.foam = words.number(1);
+    } else if (key == "water") {
+        material.wasWater = true;
+        float fineness = words.number(1);
+        material.waveSize = 1.0f / std::clamp(fineness, 0.05f, 20.0f);
         material.waveHeight = words.number(1);
     }
     else if (key == "sway") material.sway = words.number(0);
+    else if (key == "drawsOver") {}             // of 1.2's first days: what lies together is now apart in the scene itself
     else if (key == "surfaceShader") material.shader = words.string();
     else if (key == "shaderValue") {
         std::string name = words.string();
@@ -182,7 +190,7 @@ void readMaterialProperty(Words& words, Material& material, const TextureLoader&
     else if (key == "shader") {
         std::string shader = words.string();
         material.isUnlit = shader == "unlit";
-        if (shader == "water") material.isWater = true;
+        if (shader == "water") material.wasWater = true;
     }
     // Colors are stored sRGB-encoded; everything else is data and must not be converted.
     else if (key == "baseColorTexture") material.baseColorTexture = texture(TextureFormat::RGBA8_sRGB);
@@ -197,7 +205,7 @@ void readMaterialProperty(Words& words, Material& material, const TextureLoader&
 std::string writeMaterial(const Material& material) {
     std::string out = "molten-material 1\n";
     // The shader comes first: it decides what the other lines mean to the renderer.
-    Line("shader", 0).word(material.isWater ? "water" : material.isUnlit ? "unlit" : "lit").to(out);
+    Line("shader", 0).word(material.isUnlit ? "unlit" : "lit").to(out);
     std::string properties;
     writeMaterialProperties(properties, material, 0);
     // "unlit" is said by the shader line here.
@@ -239,8 +247,20 @@ std::string writeScene(Scene& scene, const std::vector<NamedMaterial>& materials
         Line("rayTracedLighting").flag(settings.rayTracedOcclusion).integer(settings.occlusionRayCount).flag(settings.rayTracedReflections)
             .flag(settings.rayTracedBounce).number(settings.bounceIntensity).to(out);
         Line("rayTracedReflections").number(settings.reflectionMaxRoughness).number(settings.reflectionStrength).to(out);
-        Line("fogShape").number(settings.fogHeightFalloff).number(settings.fogSunScatter).to(out);
+        Line("fogShape").number(settings.fogHeightFalloff).number(settings.fogSunScatter).flag(settings.fogLitBySun).to(out);
+        if (settings.weather.rain > 0 || settings.weather.storm > 0 || settings.weather.snow > 0) {
+            Line weather("weather");
+            weather.number(settings.weather.rain).number(settings.weather.storm);
+            if (settings.weather.snow > 0) weather.number(settings.weather.snow);      // (a file of before snow has two)
+            weather.to(out);
+        }
         Line("wind").vec(settings.wind).number(settings.windGustiness).to(out);
+        // The sea: a scene without this line has none (scenes of before it).
+        if (settings.sea.enabled) {
+            const SeaSettings& sea = settings.sea;
+            Line("sea").flag(true).number(sea.level).vec(sea.color).vec(sea.shallowColor).number(sea.clarity).number(sea.scattering)
+                .number(sea.reflections).number(sea.ripples).number(sea.caustics).number(sea.foam).number(sea.whitecaps).to(out);
+        }
         Line("ambientOcclusion").flag(settings.ambientOcclusionEnabled).number(settings.ambientOcclusionRadius)
             .number(settings.ambientOcclusionIntensity).to(out);
         Line("bloom").flag(settings.bloomEnabled).number(settings.bloomIntensity).number(settings.bloomThreshold).to(out);
@@ -253,7 +273,7 @@ std::string writeScene(Scene& scene, const std::vector<NamedMaterial>& materials
         Line("volumetrics").flag(settings.sky.cloudsHaveDepth).integer(settings.fogShaftSteps).to(out);
         Line("lens").number(settings.lensDistortion).number(settings.chromaticAberration).number(settings.filmGrain).to(out);
         if (!settings.sky.sunsetColors) Line("sunsetColors").flag(false).to(out);
-        if (settings.sky.stars > 0 || settings.sky.moon != SkySettings{}.moon) Line("night").number(settings.sky.stars).number(settings.sky.moon).to(out);
+        if (settings.sky.stars != SkySettings{}.stars || settings.sky.moon != SkySettings{}.moon) Line("night").number(settings.sky.stars).number(settings.sky.moon).to(out);
         if (!settings.colorGrading.empty()) Line("colorGrading").string(settings.colorGrading).number(settings.colorGradingAmount).to(out);
         if (settings.autoExposure)
             Line("autoExposure").flag(true).number(settings.exposureCompensation).number(settings.exposureAdaptSpeed)
@@ -515,8 +535,22 @@ bool isPrefabVariant(const std::string& text) {
     return std::getline(stream, line) && Words(line).keyword() == "molten-variant";
 }
 
+namespace {
+bool readSceneAsWritten(const std::string& text, Scene& scene, std::vector<NamedMaterial>& materials, RenderSettings& settings,
+                        const SceneAssets& assets, std::vector<Entity>* created);
+}
+
 bool readScene(const std::string& text, Scene& scene, std::vector<NamedMaterial>& materials, RenderSettings& settings,
                const SceneAssets& assets, std::vector<Entity>* created) {
+    bool isRead = readSceneAsWritten(text, scene, materials, settings, assets, created);
+    // Scenes from before the sea: what their water materials and Water components said is said where it is said now.
+    retireOldWater(scene, settings);
+    return isRead;
+}
+
+namespace {
+bool readSceneAsWritten(const std::string& text, Scene& scene, std::vector<NamedMaterial>& materials, RenderSettings& settings,
+                        const SceneAssets& assets, std::vector<Entity>* created) {
     if (isPrefabVariant(text)) return readVariant(text, scene, materials, settings, assets, created);
     std::istringstream stream(text);
     std::string line;
@@ -547,6 +581,7 @@ bool readScene(const std::string& text, Scene& scene, std::vector<NamedMaterial>
         // ---- the lines that start a block
         if (key == "settings") {
             block = Block::Settings;
+            settings.sea.enabled = false;             // unless its "sea" line says so: a scene of before has no sea
         } else if (key == "material") {
             block = Block::Material;
             materials.push_back(NamedMaterial{words.string(), std::make_shared<Material>()});
@@ -572,6 +607,26 @@ bool readScene(const std::string& text, Scene& scene, std::vector<NamedMaterial>
             } else if (key == "shadows") {
                 settings.shadowsEnabled = words.flag(true);
                 settings.cascades.shadowDistance = words.number(60);
+            } else if (key == "sea") {
+                SeaSettings& sea = settings.sea;
+                sea = SeaSettings{};
+                sea.enabled = words.flag(true);
+                sea.level = words.number(0);
+                sea.color = words.vec3(sea.color);
+                if (words.items.size() <= 8) {
+                    // As it was written for its first hours: a murkiness, and the foam.
+                    sea.clarity = SeaSettings::clarityOfMurk(words.number(0.5f));
+                    sea.foam = std::max(words.number(sea.foam), 0.0f);
+                } else {
+                    sea.shallowColor = words.vec3(sea.shallowColor);
+                    sea.clarity = std::max(words.number(sea.clarity), 0.2f);
+                    sea.scattering = std::max(words.number(sea.scattering), 0.0f);
+                    sea.reflections = std::max(words.number(sea.reflections), 0.0f);
+                    sea.ripples = std::max(words.number(sea.ripples), 0.0f);
+                    sea.caustics = std::max(words.number(sea.caustics), 0.0f);
+                    sea.foam = std::max(words.number(sea.foam), 0.0f);
+                    sea.whitecaps = std::max(words.number(sea.whitecaps), 0.0f);
+                }
             } else if (key == "wind") {
                 settings.wind = words.vec3(settings.wind);
                 settings.windGustiness = words.number(settings.windGustiness);
@@ -584,9 +639,14 @@ bool readScene(const std::string& text, Scene& scene, std::vector<NamedMaterial>
             } else if (key == "rayTracedReflections") {
                 settings.reflectionMaxRoughness = words.number(0.3f);
                 settings.reflectionStrength = words.number(1);
+            } else if (key == "weather") {
+                settings.weather.rain = std::clamp(words.number(0), 0.0f, 1.0f);
+                settings.weather.storm = std::clamp(words.number(0), 0.0f, 1.0f);
+                settings.weather.snow = std::clamp(words.number(0), 0.0f, 1.0f);
             } else if (key == "fogShape") {
                 settings.fogHeightFalloff = words.number(0);
                 settings.fogSunScatter = words.number(0);
+                settings.fogLitBySun = words.flag(true);           // scenes of before: lit by the sun, as every scene now starts
             } else if (key == "rayTracedShadows") {
                 settings.rayTracedShadows = words.flag(false);
                 settings.shadowRayCount = int(words.integer(4));
@@ -885,6 +945,7 @@ bool readScene(const std::string& text, Scene& scene, std::vector<NamedMaterial>
     bringLightingQualityUpToDate(settings);
     return true;
 }
+}  // namespace
 
 namespace {
 

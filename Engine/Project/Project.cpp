@@ -133,7 +133,7 @@ std::optional<Project> Project::create(const std::string& parentDirectory, const
         // The template's own files: what it is made of, not what the editor keeps about it.
         std::optional<Project> source = load(templateDirectory, error);
         if (!source) return std::nullopt;
-        for (const char* folder : {"Assets", "Source", "Plugins"}) {
+        for (const char* folder : {"Assets", "Settings", "Source", "Plugins"}) {
             fs::path from = fs::path(source->directory) / folder;
             if (!fs::is_directory(from, code)) continue;
             fs::copy(from, directory / folder, fs::copy_options::recursive | fs::copy_options::overwrite_existing, code);
@@ -144,6 +144,10 @@ std::optional<Project> Project::create(const std::string& parentDirectory, const
         }
         project.startScene = source->startScene;
         project.showsSplash = source->showsSplash;
+        // And its picture, so that the new project is shown with one from the start (the editor
+        // takes its own the first time the project is saved).
+        fs::copy_file(fs::path(source->directory) / "preview.png", directory / "preview.png", fs::copy_options::overwrite_existing, code);
+        code.clear();
     }
     project.file = project.filePath();
     if (!project.save(error)) return std::nullopt;
@@ -176,6 +180,61 @@ std::vector<ProjectTemplate> projectTemplates(const std::string& templatesDirect
     }
     std::sort(found.begin(), found.end(), [](const ProjectTemplate& a, const ProjectTemplate& b) { return a.name < b.name; });
     return found;
+}
+
+std::vector<ProjectTemplate> projectTemplates(const std::string& enginesDirectory, const std::string& yoursDirectory) {
+    std::vector<ProjectTemplate> found = projectTemplates(enginesDirectory);
+    for (ProjectTemplate& yours : projectTemplates(yoursDirectory)) {
+        yours.isYours = true;
+        auto same = std::find_if(found.begin(), found.end(), [&](const ProjectTemplate& item) { return !item.isYours && item.name == yours.name; });
+        if (same != found.end()) {
+            yours.original = same->directory;
+            *same = std::move(yours);
+        } else {
+            found.push_back(std::move(yours));
+        }
+    }
+    std::stable_sort(found.begin(), found.end(), [](const ProjectTemplate& a, const ProjectTemplate& b) { return a.name < b.name; });
+    return found;
+}
+
+std::string yourTemplatesDirectory() {
+    const char* home = std::getenv("HOME");
+    return (fs::path(home ? home : ".") / "Documents" / "Molten Templates").string();
+}
+
+std::string copyAsTemplate(const std::string& projectDirectory, const std::string& templatesDirectory, const std::string& name, std::string* error) {
+    std::optional<Project> source = Project::load(projectDirectory, error);
+    if (!source) return {};
+    std::error_code code;
+    fs::path destination = fs::path(templatesDirectory) / Project::fileNameFor(name.empty() ? source->name : name);
+    if (fs::exists(destination, code) && !fs::is_empty(destination, code)) {
+        fail(error, destination.string() + " already exists");
+        return {};
+    }
+    fs::create_directories(destination, code);
+    for (const char* folder : {"Assets", "Settings", "Source", "Plugins"}) {
+        fs::path from = fs::path(source->directory) / folder;
+        if (!fs::is_directory(from, code)) continue;
+        fs::copy(from, destination / folder, fs::copy_options::recursive | fs::copy_options::overwrite_existing, code);
+        if (code) {
+            fail(error, "Cannot copy " + from.string() + ": " + code.message());
+            return {};
+        }
+    }
+    for (const char* file : {"template.txt", "preview.png", ".gitignore"}) {
+        fs::path from = fs::path(source->directory) / file;
+        if (fs::exists(from, code)) fs::copy_file(from, destination / file, fs::copy_options::overwrite_existing, code);
+        code.clear();
+    }
+    Project copy = *source;
+    if (!name.empty()) copy.name = name;
+    copy.directory = destination.lexically_normal().string();
+    copy.file.clear();                          // (else it is the original's file, and that one would be written over)
+    copy.file = copy.filePath();
+    if (!copy.save(error)) return {};
+    fs::create_directories(destination / "Library", code);
+    return copy.directory;
 }
 
 // ---------------------------------------------------------------- recent projects

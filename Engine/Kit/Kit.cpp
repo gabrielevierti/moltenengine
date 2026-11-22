@@ -6,8 +6,6 @@
 #include "Kit/Spline.hpp"
 #include "Kit/Layout.hpp"
 #include "Kit/Terrain.hpp"
-#include "Kit/CameraShots.hpp"
-#include "Kit/DayNight.hpp"
 #include "Kit/Foliage.hpp"
 #include "Kit/WhenThen.hpp"
 #include "Kit/Saveable.hpp"
@@ -671,8 +669,6 @@ void registerKit() {
     linkNavigation();
     linkSplines();
     linkTerrain();
-    linkCameraShots();
-    linkDayNight();
     linkFoliage();
     linkWhenThen();
     linkSaveable();
@@ -682,22 +678,24 @@ void registerKit() {
     linkTimeline();
     (void)script::typeNameFor("kit");
     (void)&sharedGltfModel;                 // and the Animator       // and what scripts made from visual scripts are written with         // names something in Vehicles.cpp, so that a program that links the kit gets the vehicles too
-    // Where each is found under Add Component.
+    // Where each is found under Add Component. What is offered is what a game is built of, as in
+    // Unity: what is drawn, what collides, what sounds, the interface, animation, navigation,
+    // paths, vehicles' parts, the network. What a game does with them (a player that moves, a
+    // pickup, a gun, a goal) is its own code: the templates have theirs as scripts to copy and
+    // change. The components that did it are kept, for the scenes that have them, but not offered.
     ComponentRegistry& registry = ComponentRegistry::instance();
     for (const char* name : {"PlayerMover", "Follow", "Spin", "Mover", "Lifetime", "Collectible", "Health", "Damage", "Shooter", "Spawner", "Goal",
-                             "RestartWhenBelow", "ConstantSpeed", "Breakable"}) {
-        registry.setCategory(name, "Gameplay");
+                             "RestartWhenBelow", "ConstantSpeed", "Breakable", "Shuttle", "Explosion", "Flicker", "Guard", "Weapon", "ShootingTarget",
+                             "Hunter", "Supply", "DamageFlash", "Boat", "DriveControls", "FlightControls", "CharacterMover", "OrbitCamera",
+                             "FirstPersonLook", "WhenThen"}) {
+        registry.setCategory(name, "Hidden");
     }
     registry.setCategory("Buoyancy", "Physics");
-    registry.setCategory("Boat", "Vehicles");
-    for (const char* name : {"CharacterController", "CharacterMover", "OrbitCamera"}) registry.setCategory(name, "Characters");
-    for (const char* name : {"CameraShot", "CameraDirector"}) registry.setCategory(name, "Cameras");
-    ComponentRegistry::setDisplayName("CameraShot", "Camera Shot");
-    ComponentRegistry::setDisplayName("CameraDirector", "Camera Director");
+    registry.setCategory("CharacterController", "Physics");
     ComponentRegistry::setDisplayName("CharacterController", "Character Controller");
     ComponentRegistry::setDisplayName("CharacterMover", "Character Mover");
     ComponentRegistry::setDisplayName("OrbitCamera", "Orbit Camera");
-    for (const char* name : {"NavigationArea", "NavAgent", "Guard"}) registry.setCategory(name, "Navigation");
+    for (const char* name : {"NavigationArea", "NavAgent"}) registry.setCategory(name, "Navigation");
     ComponentRegistry::setDisplayName("NavigationArea", "Navigation Area");
     ComponentRegistry::setDisplayName("NavAgent", "Nav Agent");
     for (const char* name : {"Spline", "SplineFollower", "SplineRoad"}) registry.setCategory(name, "Paths");
@@ -709,29 +707,29 @@ void registerKit() {
     registry.setCategory("TimelinePlayer", "Hidden");
     ComponentRegistry::setDisplayName("TimelinePlayer", "Timeline Player");
     ComponentRegistry::setDisplayName("TwoBoneIK", "Two Bone IK");
-    registry.setCategory("Water", "Environment");
-    registry.setCategory("Terrain", "Environment");
-    registry.setCategory("DayNight", "Environment");
-    registry.setCategory("WhenThen", "Logic");
-    registry.setCategory("Saveable", "Logic");
+    registry.setCategory("Water", "Hidden");        // what scenes from before water was all in its material had: read, and dropped (Water/Water.hpp)
+    registry.setCategory("Terrain", "Rendering");
+    registry.setCategory("Foliage", "Rendering");
+    registry.setCategory("Saveable", "Miscellaneous");
     registry.setCategory("LoadingScreen", "UI");
     ComponentRegistry::setDisplayName("LoadingScreen", "Loading Screen");
     ComponentRegistry::setDisplayName("WhenThen", "When / Then");
-    registry.setCategory("Foliage", "Environment");
-    ComponentRegistry::setDisplayName("DayNight", "Day and Night");
     registry.setCategory("Liquid", "Effects");
-    registry.setCategory("Decal", "Effects");
+    registry.setCategory("Decal", "Rendering");
     (void)sizeof(Liquid);
-    registry.setCategory("Explosion", "Effects");
-    registry.setCategory("Flicker", "Effects");
     registry.setCategory("HudText", "UI");
     registry.setCategory("TouchStick", "UI");
+    for (const char* name : {"NetworkSession", "Networked"}) registry.setCategory(name, "Network");
+    ComponentRegistry::setDisplayName("NetworkSession", "Network Session");
     // The interface's basic pieces, from which anything is made: a panel, a picture, words, a button,
     // a toggle, a slider, a box to type in, a bar, an arc, a layout that places the others.
     for (const char* name : {"UILayout", "UIPanel", "UIImage", "UIButton", "UIToggle", "UIBar", "UISlider", "UITextField", "UIArc"}) registry.setCategory(name, "UI");
     ComponentRegistry::setDisplayName("UIArc", "Arc");
     ComponentRegistry::setDisplayName("UIToggle", "Toggle");
     // Pieces made of pieces: kept for the scenes that have them, not offered any more. A gauge is made of arcs and texts.
+    // (Still pieces of the interface: laid out for the reference screen and scaled with the rest of it.
+    // So is what other components draw over the game in points: a weapon's sights, the session's menu.)
+    for (const char* name : {"UIGauge", "UIMarks", "UINeedle", "TouchButton", "Weapon", "NetworkSession"}) registry.setInterfacePiece(name);
     for (const char* name : {"UIGauge", "UIMarks", "UINeedle"}) registry.setCategory(name, "Hidden");
     ComponentRegistry::setDisplayName("UIMarks", "Dial Marks");
     ComponentRegistry::setDisplayName("UINeedle", "Needle");
@@ -742,7 +740,8 @@ void registerKit() {
         ComponentRegistry::setDisplayName(type, shown);
     }
     registry.setCategory("AudioSource", "Audio");
-    for (const char* name : {"VehicleBody", "Bumper", "Wheel", "Suspension", "DeformableTire", "Motor", "Wing", "Hinge", "Propeller", "DriveControls", "FlightControls"}) {
+    // The parts of a vehicle (what drives them is the game's code: the templates' scripts).
+    for (const char* name : {"VehicleBody", "Bumper", "Wheel", "Suspension", "DeformableTire", "Motor", "Wing", "Hinge", "Propeller"}) {
         registry.setCategory(name, "Vehicles");
     }
     registry.setCategory("VisualScript", "Scripts");

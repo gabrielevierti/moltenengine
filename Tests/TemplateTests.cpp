@@ -4,6 +4,9 @@
 #include "Test.hpp"
 
 #include "Core/Paths.hpp"
+#include "Core/TextFile.hpp"
+#include "Scene/SceneFile.hpp"
+#include <algorithm>
 #include "Core/World.hpp"
 #include "Kit/Kit.hpp"
 #include "Script/Runtime.hpp"
@@ -622,11 +625,16 @@ link 6 "then" 7 "in"
 }
 
 TEST(water_and_fog_settings_are_kept) {
+    // A material of before whose shader was the engine's water still reads: what it was on becomes
+    // the scene's sea when the scene is read (or stays a plane seen through, if it was a pool), and
+    // it is written back as an ordinary lit material.
     Material water;
-    CHECK(readMaterial("molten-material 1\nshader water\nbaseColor 0.03 0.2 0.27 1\nroughness 0.05\nwater 0.35 1\n", water) && water.isWater);
-    CHECK_NEAR(water.waveScale, 0.35, 1e-5);
+    CHECK(readMaterial("molten-material 1\nshader water\nbaseColor 0.03 0.2 0.27 1\nroughness 0.05\nwater 0.35 1\n", water) && water.wasWater && !water.isWater);
+    CHECK_NEAR(water.baseColor.y, 0.2, 1e-5);
     std::string written = writeMaterial(water);
-    CHECK(written.find("shader water") != std::string::npos && written.find("water 0.35 1") != std::string::npos);
+    CHECK(written.find("shader lit") != std::string::npos && written.find("water") == std::string::npos && written.find("waves") == std::string::npos);
+    Material again;
+    CHECK(readMaterial(written, again) && !again.wasWater && !again.isWater);
     // The fog's shape goes through a scene file and back.
     RenderSettings fog;
     fog.fogHeightFalloff = 0.006f;
@@ -970,7 +978,7 @@ TEST(the_driving_car_holds_a_turn_on_the_throttle_and_can_be_drifted) {
 
 TEST(lighting_quality_levels_are_recognized_and_kept) {
     RenderSettings settings;
-    CHECK(lightingQualityOf(settings) == LightingQuality::Low);
+    CHECK(lightingQualityOf(settings) == LightingQuality::Custom);         // nothing traced: no level, every level traces all of it
     for (LightingQuality level : {LightingQuality::Medium, LightingQuality::High, LightingQuality::Ultra, LightingQuality::Low}) {
         applyLightingQuality(settings, level);
         CHECK(lightingQualityOf(settings) == level);
@@ -1499,4 +1507,64 @@ TEST(profile_the_driving_game_when_asked) {
     size_t drops = 0;
     play.world.scene.each<ParticleEmitter>([&](Entity, ParticleEmitter& emitter) { drops += emitter.particles.size(); });
     std::fprintf(stderr, "profile: %.3f ms a frame, %zu particles, %zu entities\n", ms, drops, play.world.scene.entityCount());
+}
+
+TEST(your_templates_take_the_place_of_the_engines_and_a_project_becomes_one) {
+    namespace fs = std::filesystem;
+    fs::path root = fs::temp_directory_path() / "molten-your-templates";
+    std::error_code code;
+    fs::remove_all(root, code);
+    std::string error;
+    std::optional<Project> car = Project::create((root / "Engine").string(), "Car Game", &error);
+    std::optional<Project> boat = Project::create((root / "Engine").string(), "Boat Game", &error);
+    CHECK(car && boat);
+    text::writeFile(car->directory + "/template.txt", "A car.");
+    text::writeFile(car->directory + "/Assets/Scenes/Main.scene", "molten-scene 1\n");
+    text::writeFile(car->directory + "/Library/cache.bin", "not part of it");
+    // Copied into your folder: everything but what the editor keeps, under the name asked for.
+    std::string yours = copyAsTemplate(car->directory, (root / "Yours").string(), "", &error);
+    CHECK(!yours.empty() && fs::exists(fs::path(yours) / "Assets/Scenes/Main.scene") && fs::exists(fs::path(yours) / "template.txt"));
+    CHECK(!fs::exists(fs::path(yours) / "Library/cache.bin"));
+    CHECK(copyAsTemplate(car->directory, (root / "Yours").string(), "", &error).empty() && !error.empty());      // there already
+    std::string other = copyAsTemplate(boat->directory, (root / "Yours").string(), "My Boat", &error);
+    std::optional<Project> renamed = Project::load(other);
+    CHECK(renamed && renamed->name == "My Boat");
+    // Together: yours in the place of the engine's of the same name, the others beside them.
+    std::vector<ProjectTemplate> all = projectTemplates((root / "Engine").string(), (root / "Yours").string());
+    CHECK(all.size() == 3);
+    auto named = [&](const std::string& name) { return std::find_if(all.begin(), all.end(), [&](const ProjectTemplate& item) { return item.name == name; }); };
+    CHECK(named("Car Game") != all.end() && named("Car Game")->isYours && named("Car Game")->original == car->directory && named("Car Game")->directory == yours);
+    CHECK(named("Boat Game") != all.end() && !named("Boat Game")->isYours);
+    CHECK(named("My Boat") != all.end() && named("My Boat")->isYours && named("My Boat")->original.empty());
+    // A new project from yours has what you changed in it.
+    text::writeFile(yours + "/Assets/Scenes/Main.scene", "molten-scene 1\n# changed\n");
+    std::optional<Project> made = Project::create((root / "Projects").string(), "Racer", &error, yours);
+    CHECK(made && text::readFile(made->directory + "/Assets/Scenes/Main.scene") == std::string("molten-scene 1\n# changed\n"));
+    fs::remove_all(root, code);
+}
+
+TEST(a_material_of_before_that_drew_over_is_still_read) {
+    // "drawsOver" is gone: such a material is read, the line is left out, and the rest is kept.
+    Material read;
+    CHECK(readMaterial("molten-material 1\nshader lit\nbaseColor 0.1 0.1 0.1 1\ndrawsOver 2\nroughness 0.4\n", read));
+    CHECK(read.roughness == 0.4f && writeMaterial(read).find("drawsOver") == std::string::npos);
+}
+
+TEST(the_shooter_templates_game_is_its_own_scripts) {
+    // The gun, the plates, the machines that hunt, what is picked up and the red flash of being
+    // hurt are the game's own code, in its Scripts folder, each in a file of its name: what a
+    // project made from it shows, and can change. (Health stays the engine's: explosions and
+    // visual scripts hurt it too.)
+    namespace fs = std::filesystem;
+    const fs::path game = fs::path(findRootDirectory()) / "Templates/Shooter Game/Assets";
+    fs::path scripts = game / "Scripts";
+    for (const char* name : {"Weapon", "ShootingTarget", "Hunter", "Supply", "DamageFlash"}) {
+        std::optional<std::string> code = text::readFile((scripts / (std::string(name) + ".cpp")).string());
+        CHECK(code && code->find(std::string("MOLTEN_COMPONENT(") + name + ",") != std::string::npos);
+    }
+    std::optional<std::string> shared = text::readFile((scripts / "Shooting.hpp").string());
+    CHECK(shared && shared->find("struct Weapon {") != std::string::npos && shared->find("namespace molten::kit") == std::string::npos);
+    // The scene names them as it named the engine's: a project's code takes their place.
+    std::optional<std::string> scene = text::readFile((game / "Scenes/Main.scene").string());
+    CHECK(scene && scene->find("component \"Weapon\"") != std::string::npos && scene->find("component \"Hunter\"") != std::string::npos);
 }

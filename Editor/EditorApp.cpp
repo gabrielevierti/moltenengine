@@ -91,8 +91,9 @@ void EditorApp::start(Engine& engine) {
     recent_.load(recentFile_);
     const char* home = std::getenv("HOME");
     projectWindow_.location = std::string(home ? home : ".") + "/Documents";
-    templates_ = projectTemplates(findRootDirectory() + "/Templates");
+    templates_ = projectTemplates(findRootDirectory() + "/Templates", yourTemplatesDirectory());
     makeMissingTemplatePreviews();
+    context_->pictureAt = [this](const std::string& path) { return pictureAt(path); };
 
     std::string layoutFile = userData + "/layout-7.ini";     // a new name when the default changes: it is then laid out afresh
     std::error_code ignored;
@@ -643,8 +644,19 @@ void EditorApp::makeMissingTemplatePreviews() {
     std::string commands;
     for (const ProjectTemplate& item : templates_) {
         fs::path picture = fs::path(item.directory) / "preview.png";
-        if (fs::exists(picture, code)) continue;
-        commands += "\"" + player.string() + "\" \"" + item.directory + "\" --capture \"" + picture.string() + "\" --frames 150 --width 640 --height 360 --scale 2 >/dev/null 2>&1; ";
+        // One that is there stays, unless the template has changed since (its scenes are newer): a
+        // template is a project like any other, and can be opened and worked on.
+        if (fs::exists(picture, code)) {
+            fs::file_time_type made = fs::last_write_time(picture, code), changed = made;
+            for (fs::recursive_directory_iterator file(fs::path(item.directory) / "Assets" / "Scenes", code), end; !code && file != end; file.increment(code)) {
+                std::error_code ignored;
+                if (file->is_regular_file(ignored)) changed = std::max(changed, file->last_write_time(ignored));
+            }
+            code.clear();
+            if (changed <= made) continue;
+        }
+        // (A template for several players is shown as it is played alone: no menu over it, and no network asked for.)
+        commands += "MOLTEN_NET=alone \"" + player.string() + "\" \"" + item.directory + "\" --capture \"" + picture.string() + "\" --frames 150 --width 1280 --height 720 --scale 1 >/dev/null 2>&1; ";
     }
     if (commands.empty()) return;
     // In the background, one after the other: the editor does not wait, and shows each as it appears.
@@ -872,6 +884,16 @@ void EditorApp::draw(Engine& engine, Canvas& canvas) {
 
     // Files change behind the editor's back (the Finder, git, other programs): look once a second.
     runWork();
+    // A project with no picture where projects are listed (never saved here, or made before the
+    // editor kept them) gets one once its scene has been on the screen for a moment.
+    if (editor.hasProject && !isWorking()) {
+        if (++framesWithProject_ == 90 && !editor.scene.isPlaying()) {
+            std::error_code code;
+            if (!fs::exists(fs::path(editor.project.directory) / "preview.png", code)) saveProjectPreview();
+        }
+    } else {
+        framesWithProject_ = 0;
+    }
     if (editor.hasProject && !isWorking() && engine.time.elapsed >= nextAssetScan_) {
         nextAssetScan_ = engine.time.elapsed + 1.0;
         editor.assets.refresh();
@@ -970,13 +992,18 @@ void EditorApp::updateTitle() {
     Window* window = engine_->window();
     if (!window) return;
     EditorContext& editor = *context_;
-    std::string title = "Molten Metal Engine";
-    if (editor.hasProject) {
-        title = editor.scene.displayName() + (editor.scene.isDirty() ? " \xE2\x80\xA2" : "") + " \xE2\x80\x94 " + editor.project.name + " \xE2\x80\x94 Molten Metal Engine";
-    }
+    // "Molten Engine v1.2 - Racer": the engine and the project. That the scene has changes not saved is said the
+    // way a Mac says it, by the dot in the window's close button.
+    std::string title = std::string("Molten Engine v") + kVersion;
+    if (editor.hasProject) title += " - " + editor.project.name;
     if (title != shownTitle_) {
         window->setTitle(title);
         shownTitle_ = title;
+    }
+    bool isEdited = editor.hasProject && editor.scene.isDirty();
+    if (isEdited != shownEdited_) {
+        platform::setWindowEdited(window->nativeHandle(), isEdited);
+        shownEdited_ = isEdited;
     }
 }
 
@@ -1002,9 +1029,30 @@ bool EditorApp::isPressed(const std::string& action) {
     return ImGui::Shortcut(mods | ImGuiMod_Ctrl | key, ImGuiInputFlags_RouteGlobal) || ImGui::Shortcut(mods | ImGuiMod_Super | key, ImGuiInputFlags_RouteGlobal);
 }
 
+namespace {
+/// Whether what is selected moves by itself, and so should move while it is looked at: a
+/// particle system, water, a material that sways in the wind or has a shader of its own (an
+/// entity's, or the material open in the inspector).
+bool selectionMoves(EditorContext& editor) {
+    auto moves = [](const Material* material) { return material && (material->isWater || material->sway > 0.0f || !material->shader.empty()); };
+    Scene& scene = editor.engine.scene;
+    for (Entity entity : editor.scene.selection()) {
+        if (scene.has<ParticleEmitter>(entity)) return true;
+        if (const MeshRenderer* renderer = scene.get<MeshRenderer>(entity); renderer && moves(renderer->material.get())) return true;
+    }
+    const std::string& asset = editor.selectedAsset;
+    if (asset.size() > 9 && asset.compare(asset.size() - 9, 9, ".material") == 0) {
+        if (std::shared_ptr<Material> material = editor.engine.assets().material(asset)) return moves(material.get());
+    }
+    return false;
+}
+}  // namespace
+
 void EditorApp::handleShortcuts() {
     EditorContext& editor = *context_;
     SceneDocument& scene = editor.scene;
+    // What moves by itself moves while the game runs, while asked to (Simulate), or while it is selected.
+    editor.engine.simulatesEffects = scene.isPlaying() || editor.simulatesInViews || selectionMoves(editor);
     ImGuiIO& io = ImGui::GetIO();
     // While the game has the keys, the arrows and Space are the game's: the editor's own keyboard
     // navigation (moving between buttons and lists, showing their tips) is off until it lets go.
@@ -1041,10 +1089,17 @@ void EditorApp::handleShortcuts() {
     }
 
     if (gameHasKeys) {
-        // The keyboard is the game's, but for the way out. A game that holds the pointer hears the
-        // first Esc itself, and gives the pointer back (for its own buttons, and for the editor's);
-        // the next one stops it.
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !editor.engine.input.isPointerCaptured()) scene.setPlaying(false);
+        // The keyboard is the game's, but for the way out: Esc is the editor's. The game keeps
+        // running and hears nothing more (the pointer goes back with it) until its picture is
+        // clicked; Esc again, with the Game window still the one in use, stops it.
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+            editor.gameViewHasFocus = false;
+            editor.engine.input.isListening = false;
+        }
+        return;
+    }
+    if (scene.isPlaying() && editor.gameWindowIsFocused && !isTyping && ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+        scene.setPlaying(false);
         return;
     }
     if (!editor.hasProject || isTyping || panelHasThem || !recording_.empty()) return;
@@ -1054,7 +1109,7 @@ void EditorApp::handleShortcuts() {
     if (deletes && !io.KeySuper && !io.KeyCtrl && !ImGui::IsAnyItemActive() && !explorerHasThem) editor.commands.run("delete");
 }
 
-// ---------------------------------------------------------------- Edit > Preferences
+// ---------------------------------------------------------------- Molten Engine > Preferences
 
 void EditorApp::saveEditorSettings() {
     std::string out = "theme " + currentTheme() + "\n";
@@ -1098,12 +1153,10 @@ void EditorApp::drawSettingsWindow() {
     ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0, 0.5f));
     ImGui::BeginChild("##pages", ImVec2(176, 0), ImGuiChildFlags_AlwaysUseWindowPadding);
     for (int i = 0; i < pageCount; i++) {
-        ImVec2 at = ImGui::GetCursorScreenPos();
-        if (ImGui::Selectable((std::string("       ") + pages[i]).c_str(), page == i, 0, ImVec2(0, 26))) {
+        if (ui::iconSelectable(pages[i], icons[i], page == i)) {
             page = i;
             recording_.clear();
         }
-        ui::drawIcon(ImGui::GetWindowDrawList(), ImVec2(at.x + 13, at.y + 13), 14, icons[i], ImGui::GetColorU32(page == i ? ImGuiCol_Text : ImGuiCol_TextDisabled));
     }
     ImGui::EndChild();
     ImGui::PopStyleVar();
@@ -1258,6 +1311,26 @@ void EditorApp::chooseAndOpenScene() {
 
 /// Draws the items plugins (and the editor) registered under one top-level menu.
 /// "Tools/Level/Align" with menu "Tools" appears as Level > Align.
+void drawMenuEntries(const std::vector<MenuEntry>& entries) {
+    for (size_t i = 0; i < entries.size(); i++) {
+        const MenuEntry& entry = entries[i];
+        if (entry.isLine()) {
+            if (i > 0 && i + 1 < entries.size()) ImGui::Separator();
+            continue;
+        }
+        ImGui::PushID(int(i));
+        if (!entry.children.empty()) {
+            if (ImGui::BeginMenu(entry.label.c_str(), entry.isEnabled)) {
+                drawMenuEntries(entry.children);
+                ImGui::EndMenu();
+            }
+        } else if (ImGui::MenuItem(entry.label.c_str(), nullptr, entry.isChecked, entry.isEnabled) && entry.run) {
+            entry.run();
+        }
+        ImGui::PopID();
+    }
+}
+
 void EditorApp::drawMenuRows(const Commands& commands, const std::string& menuPath) {
     EditorContext& editor = *context_;
     for (const Commands::Row& row : commands.rowsOf(menuPath)) {
@@ -1274,14 +1347,14 @@ void EditorApp::drawMenuRows(const Commands& commands, const std::string& menuPa
             continue;
         }
         std::string name = command.name();
-        if (command.items) {
+        if (command.entries) {
             // A list that is made as it is shown: in the menu itself, or in a submenu of its own.
-            if (command.itemsAreInline) {
+            if (command.entriesAreInline) {
                 ImGui::BeginDisabled(!command.isEnabled());
-                command.items();
+                drawMenuEntries(command.entries());
                 ImGui::EndDisabled();
             } else if (ImGui::BeginMenu(name.c_str(), command.isEnabled())) {
-                command.items();
+                drawMenuEntries(command.entries());
                 ImGui::EndMenu();
             }
             continue;
@@ -1310,11 +1383,10 @@ void EditorApp::drawRegisteredMenuItems(const std::string& menu) {
     drawMenuRows(added, menu);
 }
 
-void EditorApp::drawMenuBar() {
+/// The menus of the bar, in order: the program's own, the editor's, those plugins added (before Window), Window and Help.
+std::vector<std::string> EditorApp::menuBarMenus() const {
     EditorContext& editor = *context_;
-    if (!ImGui::BeginMainMenuBar()) return;
-    // Menus that exist only because a plugin registered something under them ("Tools") go before Window.
-    static const char* const first[] = {"File", "Edit", "Assets", "Entity", "Component"};
+    static const char* const first[] = {"Molten Engine", "File", "Edit", "Assets", "Entity", "Component"};
     static const char* const last[] = {"Window", "Help"};
     std::vector<std::string> menus(std::begin(first), std::end(first));
     for (const auto& item : editor.registry.menuItems) {
@@ -1323,7 +1395,107 @@ void EditorApp::drawMenuBar() {
         if (!isLast && std::find(menus.begin(), menus.end(), menu) == menus.end()) menus.push_back(menu);
     }
     menus.insert(menus.end(), std::begin(last), std::end(last));
-    for (const std::string& menu : menus) {
+    return menus;
+}
+
+namespace {
+platform::NativeMenuRow nativeRowOf(const MenuEntry& entry) {
+    platform::NativeMenuRow row;
+    row.title = entry.label;
+    row.run = entry.run;
+    row.isEnabled = entry.isEnabled;
+    row.isChecked = entry.isChecked;
+    for (const MenuEntry& child : entry.children) row.children.push_back(nativeRowOf(child));
+    return row;
+}
+}  // namespace
+
+/// A menu of the bar as the Mac's menu bar shows it: the same rows as the menu drawn in the window.
+std::vector<platform::NativeMenuRow> EditorApp::nativeMenuRows(const Commands& commands, const std::string& menuPath) const {
+    EditorContext& editor = *context_;
+    std::vector<platform::NativeMenuRow> rows;
+    for (const Commands::Row& item : commands.rowsOf(menuPath)) {
+        if (!item.command) {
+            platform::NativeMenuRow submenu;
+            submenu.title = item.submenu;
+            submenu.children = nativeMenuRows(commands, menuPath + "/" + item.submenu);
+            rows.push_back(std::move(submenu));
+            continue;
+        }
+        const Command& command = *item.command;
+        if (command.isLine()) {
+            rows.push_back({});
+            continue;
+        }
+        if (command.entries) {
+            std::vector<MenuEntry> entries = command.isEnabled() ? command.entries() : std::vector<MenuEntry>{};
+            if (command.entriesAreInline) {
+                for (const MenuEntry& entry : entries) rows.push_back(nativeRowOf(entry));
+            } else {
+                platform::NativeMenuRow submenu;
+                submenu.title = command.name();
+                for (const MenuEntry& entry : entries) submenu.children.push_back(nativeRowOf(entry));
+                submenu.isEnabled = command.isEnabled() && !submenu.children.empty();
+                if (submenu.children.empty()) submenu.children.push_back(platform::NativeMenuRow{"(none)", {}, false, false, {}, {}});
+                rows.push_back(std::move(submenu));
+            }
+            continue;
+        }
+        platform::NativeMenuRow row;
+        row.title = command.name();
+        row.keys = command.keys.empty() ? editor.shortcuts.text(command.id) : command.keys;
+        row.isEnabled = command.isEnabled();
+        row.isChecked = command.isChecked();
+        row.run = command.run;
+        rows.push_back(std::move(row));
+    }
+    return rows;
+}
+
+/// The Mac's menu bar, made (again) when the menus change: once at the start, and when a plugin adds a menu.
+void EditorApp::updateNativeMenuBar() {
+    if (!engine_->window() || !platform::usesNativeMenuBar()) return;
+    // Full screen keeps the menu bar: the menus are in it (the window's green button, Window > Full Screen).
+    platform::takeOverFullScreen(engine_->window()->nativeHandle());
+    std::vector<std::string> menus = menuBarMenus();
+    if (menus == nativeMenus_) return;
+    nativeMenus_ = menus;
+    platform::setNativeMenuBar(menus, [this](const std::string& menu) {
+        EditorContext& editor = *context_;
+        std::vector<platform::NativeMenuRow> rows = nativeMenuRows(editor.commands, menu);
+        // What plugins put in this menu, after a line.
+        Commands added;
+        for (size_t i = 0; i < editor.registry.menuItems.size(); i++) {
+            const MenuItem& item = editor.registry.menuItems[i].value;
+            if (item.path.compare(0, menu.size() + 1, menu + "/") != 0 || !item.action) continue;
+            std::function<void(EditorContext&)> action = item.action;
+            std::function<bool(EditorContext&)> isEnabled = item.isEnabled;
+            EditorContext* context = &editor;
+            Command& command = added.add({}, item.path, [action, context] { action(*context); });
+            if (isEnabled) command.when([isEnabled, context] { return isEnabled(*context); });
+            command.shows(item.shortcut);
+        }
+        if (!added.all().empty()) {
+            rows.push_back({});
+            std::vector<platform::NativeMenuRow> more = nativeMenuRows(added, menu);
+            rows.insert(rows.end(), more.begin(), more.end());
+        }
+        return rows;
+    });
+}
+
+void EditorApp::drawMenuBar() {
+    EditorContext& editor = *context_;
+    // On a Mac the menus are the Mac's own, at the top of the screen: what was chosen there is done now.
+    if (engine_->window() && platform::usesNativeMenuBar()) {
+        updateNativeMenuBar();
+        for (const std::function<void()>& action : platform::takeChosenMenuActions()) {
+            if (action) action();
+        }
+        return;
+    }
+    if (!ImGui::BeginMainMenuBar()) return;
+    for (const std::string& menu : menuBarMenus()) {
         if (!ImGui::BeginMenu(menu.c_str())) continue;
         drawMenuRows(editor.commands, menu);
         drawRegisteredMenuItems(menu);
@@ -1434,10 +1606,10 @@ void EditorApp::drawCommandPalette() {
 }
 
 void EditorApp::drawAboutDialog() {
-    if (showsAbout_ && !ImGui::IsPopupOpen("About Molten Metal Engine")) ImGui::OpenPopup("About Molten Metal Engine");
+    if (showsAbout_ && !ImGui::IsPopupOpen("About Molten Engine")) ImGui::OpenPopup("About Molten Engine");
     ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (!ImGui::BeginPopupModal("About Molten Metal Engine", &showsAbout_, ImGuiWindowFlags_AlwaysAutoResize)) return;
-    ImGui::Text("Molten Metal Engine %s", kVersion);
+    if (!ImGui::BeginPopupModal("About Molten Engine", &showsAbout_, ImGuiWindowFlags_AlwaysAutoResize)) return;
+    ImGui::Text("Molten Engine v%s", kVersion);
     ImGui::TextDisabled("A game engine for Apple silicon, built on Metal.");
     ImGui::Spacing();
     ImGui::TextUnformatted("Open source, by Gabriele Vierti.");
@@ -1467,94 +1639,30 @@ void EditorApp::drawBuildWindow() {
     }
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(620, std::min(720.0f, viewport->WorkSize.y - 60)), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(620, std::min(460.0f, viewport->WorkSize.y - 60)), ImGuiCond_Appearing);
     if (!ImGui::Begin("Build Settings", &showsBuild_, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoDocking)) {
         ImGui::End();
         return;
     }
     Project& project = editor.project;
     bool changed = false;
-    // A step's heading: its number in a disc, green with a tick's worth of meaning when it is in order.
-    auto step = [](int number, const char* name, bool isInOrder) {
-        ImGui::Dummy(ImVec2(0, 6));
-        ImVec2 at = ImGui::GetCursorScreenPos();
-        ImU32 color = isInOrder ? IM_COL32(96, 190, 120, 255) : IM_COL32(255, 122, 47, 255);
-        ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(at.x + 11, at.y + 11), 11, color, 24);
-        char digit[4];
-        std::snprintf(digit, sizeof(digit), "%d", number);
-        ImVec2 size = ImGui::CalcTextSize(digit);
-        ImGui::GetWindowDrawList()->AddText(ImVec2(at.x + 11 - size.x * 0.5f, at.y + 11 - size.y * 0.5f), IM_COL32(20, 20, 22, 255), digit);
-        ImGui::SetCursorScreenPos(ImVec2(at.x + 32, at.y + 2));
-        ImGui::PushFont(nullptr, 17.0f);
-        ImGui::TextUnformatted(name);
-        ImGui::PopFont();
-        ImGui::Dummy(ImVec2(0, 2));
-    };
-
-    // ---- 1
-    step(1, "The game", !project.name.empty() && !project.identifier.empty());
-    changed |= ui::text("Name", project.name);
-    changed |= ui::text("Version", project.version);
-    changed |= ui::text("Identifier", project.identifier);
-    ui::tooltip("What the system knows the game by, like com.yourname.game. The App Store needs one of your own.");
-    changed |= ui::checkbox("Splash Screen", project.showsSplash);
-    ui::tooltip("The game opens with the engine's logo for a moment");
+    // What is built: said once, here, and changed where it belongs (Edit > Project Settings > Game: the name,
+    // the version, the identifier, the icon and the first scene; Input for the controls).
     {
-        // Its icon: the engine's until the game has one of its own.
         std::string iconFile = project.iconFile(findRootDirectory());
-        ImTextureID icon = pictureAt(iconFile);
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted("Icon");
-        ImGui::SameLine(ImGui::GetContentRegionAvail().x * 0.34f + ImGui::GetCursorPosX() - ImGui::GetStyle().ItemSpacing.x - ImGui::CalcTextSize("Icon").x);
-        ImVec2 at = ImGui::GetCursorScreenPos();
-        if (icon) ImGui::Image(icon, ImVec2(56, 56));
-        else ImGui::Dummy(ImVec2(56, 56));
-        ImGui::SameLine();
+        if (ImTextureID icon = pictureAt(iconFile)) {
+            ImGui::Image(icon, ImVec2(48, 48));
+            ImGui::SameLine(0, 12);
+        }
         ImGui::BeginGroup();
-        if (ImGui::Button("Choose a Picture...")) {
-            std::vector<std::string> chosen = platform::chooseFiles("Choose a square picture for the game's icon (1024 x 1024 is best)", {"png", "jpg", "jpeg"}, false, {});
-            if (!chosen.empty()) {
-                // Kept in the project, so that it travels with it.
-                std::string name = "Icon" + fs::path(chosen.front()).extension().string();
-                std::error_code code;
-                fs::copy_file(chosen.front(), fs::path(project.assetsDirectory()) / name, fs::copy_options::overwrite_existing, code);
-                if (code) editor.notify("Cannot copy the picture: " + code.message(), ConsoleMessage::Level::Error);
-                else {
-                    project.icon = name;
-                    changed = true;
-                    editor.assets.refresh();
-                }
-            }
-        }
-        ImGui::BeginDisabled(project.icon.empty());
-        if (ImGui::Button("Use the Engine's")) {
-            project.icon.clear();
-            changed = true;
-        }
-        ImGui::EndDisabled();
+        ImGui::PushFont(nullptr, 18.0f);
+        ImGui::Text("%s %s", project.name.c_str(), project.version.c_str());
+        ImGui::PopFont();
+        if (project.startScene.empty()) ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.35f, 1.0f), "No first scene yet: save a scene, and it is the one the game starts with.");
+        else ImGui::TextDisabled("Starts with %s%s", project.startScene.c_str(), project.identifier.empty() ? "" : ("  -  " + project.identifier).c_str());
+        ImGui::TextDisabled("Its name, version, icon and first scene: Edit > Project Settings > Game.");
         ImGui::EndGroup();
-        (void)at;
     }
-
-    // ---- 2
-    std::vector<std::string> scenes;
-    for (const AssetInfo& asset : editor.assets.assets()) {
-        if (asset.type == AssetType::Scene) scenes.push_back(asset.path);
-    }
-    int first = -1;
-    for (size_t i = 0; i < scenes.size(); i++) {
-        if (scenes[i] == project.startScene) first = int(i);
-    }
-    step(2, "Where it starts", first >= 0);
-    if (scenes.empty()) {
-        ImGui::TextWrapped("The project has no scene saved yet. Save the one that is open (File > Save Scene) and it becomes the first.");
-    } else if (ui::combo("First Scene", first, scenes)) {
-        project.startScene = scenes[size_t(first)];
-        changed = true;
-    }
-    ImGui::TextDisabled("%d %s in the project. The others are reached from the game (loadScene).", int(scenes.size()), scenes.size() == 1 ? "scene" : "scenes");
-
-    // ---- 3
     int sticks = 0, buttons = 0;
     const ComponentType* stickType = ComponentRegistry::instance().find("TouchStick");
     const ComponentType* buttonType = ComponentRegistry::instance().find("TouchButton");
@@ -1563,47 +1671,13 @@ void EditorApp::drawBuildWindow() {
         if (buttonType && buttonType->has(editor.engine.scene, entity)) buttons++;
         if (const kit::UIButton* button = editor.engine.scene.get<kit::UIButton>(entity); button && (button->isRound || !button->action.empty())) buttons++;
     }
-    step(3, "How it is played", buildPlatform_ == 0 || sticks + buttons > 0);
-    ImGui::TextWrapped("Keys, mouse and controllers are set in Project Settings > Input. On a phone or a tablet there are none: a Stick "
-                       "and Round Buttons (Entity > UI) push the same actions from the screen. Drag them into place in the Game view, and try them there with the mouse.");
-    ImGui::TextDisabled("In the open scene: %d %s, %d %s with an action.", sticks, sticks == 1 ? "stick" : "sticks", buttons, buttons == 1 ? "button" : "buttons");
-    ImGui::BeginDisabled(editor.scene.isPlaying() || !stickType);
-    if (ImGui::Button("Add a Stick and a Button to the Scene")) {
-        Scene& scene = editor.engine.scene;
-        Entity stick = scene.create("Stick");
-        scene.add(stick, Transform{});
-        stickType->add(scene, stick);
-        Entity button = scene.create("Round Button");
-        scene.add(button, Transform{});
-        kit::UIButton round;
-        round.isRound = true;
-        round.label = "A";
-        round.action = "jump";
-        round.anchor = Vec2{1, 1};
-        round.offset = Vec2{-100, -110};
-        round.color = Vec4{1, 1, 1, 0.6f};
-        round.onlyOnTouchScreens = true;
-        scene.add(button, round);
-        editor.scene.markChanged();
-        editor.notify("Added a Stick (moveX, moveZ) and a round Button (jump): change what they push in the Inspector");
-    }
-    ImGui::EndDisabled();
-    if (ImGui::SameLine(); ImGui::Button("Open Input")) {
-        editor.showProjectSettings("Input");
-    }
-
-    // ---- 4
-    std::vector<std::string> sources = gameSourceFiles(project);
-    step(4, "Its scripts", !lastBuildFailed_);
-    if (sources.empty()) ImGui::TextDisabled("None: the game is made of the engine's own components.");
-    else ImGui::TextDisabled("%d %s. Built when one is saved, and again when the game is exported: nothing to do here.", int(sources.size()), sources.size() == 1 ? "file" : "files");
     if (lastBuildFailed_) {
-        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "The last build failed: the compiler's words are in the Console.");
+        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "The last build of the scripts failed: the compiler's words are in the Console.");
         if (ImGui::SameLine(); ImGui::SmallButton("Try Again")) buildGameWithFeedback();
     }
-
-    // ---- 5
-    step(5, "Export", true);
+    ImGui::Dummy(ImVec2(0, 6));
+    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0, 4));
     ImGui::RadioButton("Mac", &buildPlatform_, 0);
     ImGui::SameLine();
     ImGui::RadioButton("iPhone and iPad", &buildPlatform_, 1);
@@ -1651,7 +1725,7 @@ void EditorApp::drawBuildWindow() {
             if (editor.scene.isPlaying()) editor.scene.setPlaying(false);
             if (editor.scene.isDirty() || editor.scene.filePath.empty()) saveScene(false);
             if (project.startScene.empty()) {
-                editor.notify("Save a scene first: the game starts with the project's first scene (step 2)", ConsoleMessage::Level::Warning);
+                editor.notify("Save a scene first: the game starts with the project's first scene", ConsoleMessage::Level::Warning);
                 return;
             }
             deviceLines_.clear();
@@ -1698,7 +1772,7 @@ void EditorApp::drawBuildWindow() {
             if (isBusy) ImGui::SetScrollHereY(1.0f);
             ImGui::EndChild();
         }
-        if (sticks + buttons == 0) ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.35f, 1.0f), "The open scene has no touch controls (step 3): it cannot be played without keys.");
+        if (sticks + buttons == 0) ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.35f, 1.0f), "The open scene has no touch controls: on a phone it cannot be played. Entity > UI has a Stick and a Round Button.");
     }
 
     if (changed) {
@@ -1931,7 +2005,9 @@ void EditorApp::buildDefaultLayout(ImGuiID dockSpace) {
     ImGui::DockBuilderDockWindow("Hierarchy", hierarchy);
     ImGui::DockBuilderDockWindow("Inspector", inspector);
     ImGui::DockBuilderDockWindow("Lighting", inspector);
+    ImGui::DockBuilderDockWindow("Environment", inspector);
     ImGui::DockBuilderDockWindow("Rendering", inspector);
+    ImGui::DockBuilderDockWindow("Post Processing", inspector);
     ImGui::DockBuilderDockWindow("Explorer", bottom);
     ImGui::DockBuilderDockWindow("Console", console ? console : bottom);
     ImGui::DockBuilderDockWindow("Visual Script", bottom);
@@ -1981,6 +2057,11 @@ void EditorApp::drawPanels() {
         if (!panel->isOpen) continue;
         ImGui::SetNextWindowSize(panel->firstSize(), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
+        // A panel new to a layout saved before it existed: a tab beside its neighbour, not a window in the middle.
+        if (!panel->firstBeside.empty() && !ImGui::FindWindowByName(panel->title.c_str()) && !ImGui::FindWindowSettingsByID(ImHashStr(panel->title.c_str()))) {
+            ImGuiWindow* beside = ImGui::FindWindowByName(panel->firstBeside.c_str());
+            if (beside && beside->DockId != 0) ImGui::SetNextWindowDockID(beside->DockId, ImGuiCond_Always);
+        }
         if (ImGui::Begin(panel->title.c_str(), &panel->isOpen, panel->windowFlags())) panel->draw(editor);
         ImGui::End();
     }
@@ -2060,6 +2141,35 @@ void EditorApp::drawProjectList() {
             recent_.save(recentFile_);
             break;
         case ProjectWindow::Action::Reveal: platform::revealInFinder(asked.path); break;
+        case ProjectWindow::Action::EditTemplate: {
+            auto chosen = std::find_if(templates_.begin(), templates_.end(), [&](const ProjectTemplate& item) { return item.directory == asked.path; });
+            if (chosen == templates_.end()) break;
+            std::string folder = chosen->directory;
+            if (!chosen->isYours) {
+                // The engine's own is not changed: you change a copy of it, which takes its place in the list.
+                std::string error;
+                std::error_code code;
+                fs::create_directories(yourTemplatesDirectory(), code);
+                folder = copyAsTemplate(chosen->directory, yourTemplatesDirectory(), "", &error);
+                if (folder.empty()) {
+                    projectWindow_.error = "Could not copy the template: " + error;
+                    break;
+                }
+            }
+            templates_ = projectTemplates(findRootDirectory() + "/Templates", yourTemplatesDirectory());
+            openProjectWithFeedback(folder);
+            break;
+        }
+        case ProjectWindow::Action::ResetTemplate:
+            if (platform::moveToTrash(asked.path)) {
+                recent_.remove(asked.path);
+                recent_.save(recentFile_);
+                templates_ = projectTemplates(findRootDirectory() + "/Templates", yourTemplatesDirectory());
+                projectWindow_.error.clear();
+            } else {
+                projectWindow_.error = "Could not move " + asked.path + " to the Trash.";
+            }
+            break;
         case ProjectWindow::Action::Delete:
             // To the Trash, where it can be taken back from; and off the list.
             if (platform::moveToTrash(asked.path)) {

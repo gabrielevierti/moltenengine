@@ -100,6 +100,11 @@ fragment float4 fragment_particle(ParticleOut in [[stage_in]],
     } else {
         float falloff = in.isStreak > 0.5 ? saturate(1.0 - in.corner.x * in.corner.x) * saturate(1.0 - abs(in.corner.y))
                                           : saturate(1.0 - dot(in.corner, in.corner));
+        if (in.shading.w > 0.5 && in.isStreak < 0.5) {
+            // A ring: a thin line round the edge, soft on both sides.
+            float r = length(in.corner);
+            falloff = saturate(1.0 - abs(r - 0.82) / 0.13);
+        }
         result = float4(in.color.rgb, in.color.a * falloff * falloff);
     }
 

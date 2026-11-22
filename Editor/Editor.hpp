@@ -49,12 +49,15 @@ void registerManualPanel(EditorContext& editor);
 void showManual(EditorContext& editor, const std::string& page);
 void registerCreateEntries(EditorContext& editor);
 
-/// The entries of the Create menu as menu items. New entities become children of `parent`.
+/// Rows of a menu (Commands.hpp) drawn in a menu of the window: a context menu, or the menu bar where the Mac's is not used.
+void drawMenuEntries(const std::vector<MenuEntry>& entries);
+/// The entries of the Create menu, by group. New entities become children of `parent`.
+std::vector<MenuEntry> createMenuEntries(EditorContext& editor, Entity parent, bool withEmpty = true);
 void drawCreateMenu(EditorContext& editor, Entity parent, bool withEmpty = true);
-/// What the Explorer's "+ New" makes, as menu items: made in the folder it shows.
-void drawAssetCreateMenu(EditorContext& editor);
-/// Every component by category, as menu items: chosen, it is added to all the selected entities that lack it.
-void drawAddComponentMenu(EditorContext& editor);
+/// What the Explorer's "+ New" makes: made in the folder it shows.
+std::vector<MenuEntry> assetCreateEntries(EditorContext& editor);
+/// Every component by category: chosen, it is added to all the selected entities that lack it.
+std::vector<MenuEntry> addComponentEntries(EditorContext& editor);
 /// A point added to the chosen spline (or after the chosen point of one).
 void addSplinePoint(EditorContext& editor);
 /// True for a piece of the game's interface (a component of the UI category): on the screen, not in the world.

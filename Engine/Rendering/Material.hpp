@@ -33,13 +33,20 @@ struct Material {
     AlphaMode alphaMode = AlphaMode::Opaque;
     bool isDoubleSided = false;         // do not cull back faces
     bool isUnlit = false;               // base color and emissive only, no lighting
-    /// A surface of water: moving waves, the sky mirrored at a glancing angle, the bottom seen
-    /// through it from above. Its base color is the color water this deep ends up; its opacity
-    /// how murky it is (0.3 a clear sea that shows its bottom ten meters down, 1 a pond).
+    /// A surface of water: the waves the scene's wind raises (Environment > Weather > Wind), the sky mirrored
+    /// at a glancing angle, the bottom seen through it from above. Its base color is the color
+    /// water this deep ends up; its opacity how murky it is (0.3 a clear sea that shows its
+    /// bottom ten meters down, 1 a pond). On a flat mesh (a plane) the waves rise and fall, and
+    /// things float on them (Water/Waves.hpp).
     bool isWater = false;
-    float waveScale = 1.0f;             // water: larger numbers make smaller waves
-    float waveHeight = 1.0f;            // water: how steep they are
-    /// Moved by the scene's wind (Rendering > Wind), the more the higher above the model's base:
+    float waveSize = 1.0f;              // water: its waves' lengths, times what the wind makes them
+    float waveHeight = 1.0f;            // water: their height, times what the wind raises; 0 a mirror
+    float foam = 1.0f;                  // water: how much white shows where waves break and at the shore; 0 none
+    bool isSea = false;                 // the scene's sea, which the renderer makes itself (Environment > Water); never in a file
+    /// Read from a file of before, when water was a material: the scene's sea takes the place of
+    /// what it was on (Water/Water.hpp, retireOldWater). It is lit as any other now.
+    bool wasWater = false;
+    /// Moved by the scene's wind (Environment > Weather > Wind), the more the higher above the model's base:
     /// grass, reeds, leaves, a flag. 0 still; 1 grass; 0.1 a tree.
     float sway = 0.0f;
 

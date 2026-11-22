@@ -10,6 +10,7 @@
 // Defined in MetalLayerBridge.mm.
 extern "C" void* mmAttachMetalLayer(GLFWwindow* window, void* device, unsigned long pixelFormat);
 extern "C" void mmSetDockIcon(const char* picturePath);
+extern "C" void mmKeepFramesWhileEventsAreHeld(void (*tick)(void*), void* context);
 
 namespace molten {
 
@@ -102,13 +103,21 @@ void Window::requestClose() {
     glfwSetWindowShouldClose(window_, GLFW_TRUE);
 }
 
+void Window::whileEventsAreHeld(void (*tick)(void*), void* context) {
+    mmKeepFramesWhileEventsAreHeld(tick, context);
+}
+
+bool Window::isFocused() const {
+    return glfwGetWindowAttrib(window_, GLFW_FOCUSED) != 0;
+}
+
 void Window::pollEvents(Input& input) {
     input_ = &input;
     glfwPollEvents();                   // runs the callbacks above
     input_ = nullptr;
     pollGamepad(input);
     // A game that looks about with the mouse has the pointer while this window is the one in use.
-    bool wanted = input.wantsPointerCaptured() && glfwGetWindowAttrib(window_, GLFW_FOCUSED) != 0;
+    bool wanted = input.wantsPointerCaptured() && isFocused();
     if (wanted != isCursorCaptured_) setCursorCaptured(wanted);
     input.setPointerIsCaptured(isCursorCaptured_);
 }

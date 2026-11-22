@@ -38,6 +38,7 @@ enum {
     MMBufferAccelerationStructure = 6,   // the scene for ray tracing, when the GPU can trace rays
     MMBufferTracedSurfaces = 7,          // TracedSurface[], one for each instance of that scene: what a ray that hits it sees
     MMBufferShadowCopies = 8,            // ShadowCopy[], indexed by instance_id in the pass that draws the sun's shadow maps
+    MMBufferWakes = 9,                   // WaterWakes: what floats, and the wakes behind it, for the water to draw
 };
 
 enum {
@@ -55,6 +56,9 @@ enum {
     MMTextureClouds            = 11,  // clouds with depth, walked through into a smaller picture: their light, and how much shows through them
     MMTextureTracedLight       = 12,  // the light around each pixel, traced before the scene at half the size: rgb what is bounced to it, a how much of the sky's light arrives
     MMTextureTracedSurface     = 13,  // and the surface each of those pixels was traced for: xyz which way it faces in the world, a how far it is
+    MMTextureTracedSun         = 14,  // how much of the sun reaches each of those pixels, gathered over frames (MMTextureTracedLight's size)
+    MMTextureRainMap           = 15,  // depth2d: the scene round the camera seen from above, nearest first: under a roof it does not rain
+    MMTextureSceneNormal       = 16,  // the normals of what is opaque (the prepass), in the view's axes: which way the bottom under water faces
 };
 
 enum {
@@ -66,6 +70,8 @@ enum {
 enum {
     MMMaxLights   = 64,
     MMMaxCascades = 4,
+    MMMaxWakes    = 8,
+    MMWakeTrail   = 16,
 };
 
 enum {
@@ -157,7 +163,60 @@ typedef struct {
     // is lit by: the sun, or at night the moon.
     simd_float3 skySunDirection;
     simd_float3 cameraPosition;      // where the camera is: the clouds with depth are walked through from there
+    uint32_t frameIndex;             // counts the pictures drawn: rays are sent in a pattern that turns with it, and gathered over frames
+    uint32_t tracedSunReady;         // 1: the sun's shadow was traced before the scene (MMTextureTracedSun): read there, no rays for it in the scene's pass
+    simd_float2 cloudWind;           // the wind where the clouds are, meters per second along x and z: it draws them out along it, and carries them
+    float lightning;                 // a storm's flash now: the clouds lit from inside, 0 none, 1 the brightest
+    // Where the last stroke of lightning is: x and z in meters, and the height of the ground it
+    // strikes. The clouds glow round it. `lightningSeed` is the shape of its bolt, which goes
+    // down from the clouds to that ground: 0 for none (it flashes inside the clouds only).
+    float lightningX, lightningZ, lightningGround, lightningSeed;
+    float wetness;                   // the rain on what is out in it: 0 dry, 1 a downpour (sheltered places, by MMTextureRainMap, stay dry)
+    simd_float4x4 rainViewProjection;   // the world from above, onto MMTextureRainMap: what the rain reaches first
+    // The sea (Lighting > Water): its level, below which all is under water, seen through it,
+    // lit through it, and with the camera under it, seen from inside it.
+    simd_float4 seaAbsorb;           // xyz: what a meter of it takes of each color of light; w: 1 if there is a sea
+    simd_float4 seaColor;            // rgb: the color it scatters back (its deep color); w: its level, in meters
+    float cameraUnderwater;          // how far under its surface the camera is, in meters; 0 or less: above it
+    simd_float4 seaShallow;          // rgb: the color it takes over a light bottom, a meter or two down; w: how far one sees through it, meters
+    simd_float4 seaLook;             // x how much light its body scatters back, y how much it mirrors, z its ripples, w its caustics
+    simd_float4 seaFoam;             // x foam where it meets what stands in it, y white crests where waves break
 } FrameUniforms;
+
+// The clouds are walked for one pixel in four each frame (in turn), and the rest kept from the
+// frames before, moved to where they are now seen (Clouds.metal, fragment_clouds_resolve).
+typedef struct {
+    simd_float4x4 inverseViewProjection;     // this frame's camera, for the line of sight of each pixel
+    simd_float4x4 previousViewProjection;    // the last frame's, to find where a line of sight was seen then
+    simd_float4 camera;                      // xyz where the camera is
+    simd_float2 offset;                      // which pixel of each two by two was walked this frame
+    float hasHistory;                        // 0: nothing kept yet (the first frame, a new size)
+    float pad;
+} CloudResolveUniforms;
+
+// What floats on water (a boat, a buoy, a crate): foam where the water meets it, and, behind it
+// as it moves, the churned white trail and the two arms of its wake. Kit/Wakes.hpp keeps them.
+typedef struct {
+    simd_float4 trail[MMWakeTrail];  // where its stern has been, newest first (the first is where it is now): xyz, and w how many seconds ago; w below 0: no more
+    simd_float4 trailSpeed[MMWakeTrail / 4];    // and how fast it went there, meters a second, four to each
+    simd_float4 body;                // its middle at the waterline (xyz), and w its speed now
+    simd_float4 shape;               // xy which way it heads along the water (x, z), z half its width, w half its length
+} WaterWake;
+
+typedef struct {
+    WaterWake wakes[MMMaxWakes];
+    uint32_t count;
+    float pad0, pad1, pad2;
+} WaterWakes;
+
+// What the light traced before the scene was last frame: where its camera was, to find each
+// pixel in last frame's picture, and keep what was found there.
+typedef struct {
+    simd_float4x4 previousViewProjection;
+    simd_float4x4 previousView;
+    uint32_t hasHistory;             // 0: nothing to keep (the first frame, a new size)
+    float mostFrames;                // gathered over at most this many frames: more is smoother, and slower to follow a change
+} TracedHistoryUniforms;
 
 // What a ray sees of the thing it hits: its color and its glow. One for each instance of
 // the ray tracing scene, in the same order.
@@ -201,14 +260,39 @@ typedef struct {
     float occlusionStrength;
     float alphaCutoff;               // used by the alpha-tested variants
     simd_float2 uvScale;
-    float water;                     // above zero: the surface is water, and this is how fine its waves are
-    float waveHeight;                // how steep they are
+    float water;                     // above zero: the surface is water, and this is how fine its waves are (1 / the material's Wave Size)
+    float waveHeight;                // times what the wind raises
     float customShader;              // above zero: which hand-written surface shader runs, counted from 1
     simd_float4 custom[8];           // its properties, in the order the shader declares them
     float sway;                      // above zero: the wind moves it, the more the higher above its base (grass, leaves)
-    float oceanScale;                // water: above zero, the sea's waves are in the normal map's place, 1 / their patch's size
-    simd_float2 oceanOffset;         // where the patch starts, in the world
+    float foam;                      // water: how much white shows where its waves break and where it meets what stands in it
+    float isSea;                     // 1: the scene's sea (Lighting > Water), whose bottom is lit through it in the scene's own pass
 } MaterialUniforms;
+
+// ---------------------------------------------------------------- water's waves
+//
+// What the wind raises on open water is drawn (Mesh.metal, Water.metal) and floated on
+// (Engine/Water/Waves.cpp) from the same numbers: eight trains of waves, the longest first.
+// Each one's length as a part of the longest, its share of the height (four times the root of
+// half the sum of their squares is 1: the "significant height" of a sea), and how far it runs
+// from the way the wind blows (the cosine and the sine of the angle).
+#define MM_WAVE_TRAINS 8
+#define MM_WAVE_LENGTHS 1.0f, 0.71f, 0.52f, 0.37f, 0.27f, 0.19f, 0.14f, 0.10f
+#define MM_WAVE_SHARES 0.2550f, 0.1750f, 0.1242f, 0.0854f, 0.0604f, 0.0410f, 0.0293f, 0.0203f
+#define MM_WAVE_TURN_COS 1.00000f, 0.91355f, 0.94552f, 0.75471f, 0.81915f, 0.98163f, 0.61566f, 0.45399f
+#define MM_WAVE_TURN_SIN 0.00000f, 0.40674f, -0.32557f, 0.65606f, -0.57358f, 0.19081f, -0.78801f, 0.89101f
+// Water under a crest is drawn toward it: by this much of the wave's height. It is what makes crests sharp and troughs wide.
+#define MM_WAVE_PINCH 1.0f
+// The longest wave is this many times the square of the wind's speed (meters, meters per second), and the
+// sea's height this many: a sheltered sea, lower and shorter than the open ocean's under the same wind.
+#define MM_WAVE_LENGTH_PER_WIND 0.55f
+#define MM_WAVE_HEIGHT_PER_WIND 0.0126f
+// No sea stands steeper than this (height over longest length): beyond it crests would fold over themselves.
+#define MM_WAVE_STEEPEST 0.074f
+// The air is never quite still: water moves as under at least this much wind, meters per second.
+#define MM_WAVE_LEAST_WIND 2.0f
+// A sheet of water is still at its rim, and moves freely this many meters in from it.
+#define MM_WATER_RIM 3.0f
 
 // ---------------------------------------------------------------- post-processing and capture
 
@@ -315,7 +399,7 @@ typedef struct {
     simd_float4 color;
     simd_float4 velocityAndStretch;  // xyz: its velocity, w: seconds of it drawn as a streak (0: a round dot)
     simd_float4 look;                // x: its turn (radians), y: the frame of its sheet, z, w: the sheet's columns and rows (0: no picture)
-    simd_float4 shading;             // x: how lit by the sun and sky (0 glows), y: soft edge in meters (0 hard), z: render mode, w: unused
+    simd_float4 shading;             // x: how lit by the sun and sky (0 glows), y: soft edge in meters (0 hard), z: render mode, w: 1 a ring (a ripple) instead of a dot
 } ParticleInstance;
 
 #endif

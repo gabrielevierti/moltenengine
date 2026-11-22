@@ -200,8 +200,9 @@ static bool drawShaderProperties(EditorContext& editor, Material& material) {
 
 bool drawMaterialProperties(EditorContext& editor, Material& material) {
     bool changed = false;
-    // The engine's three, then every `.shader` file of the project: surface shaders written by hand.
-    std::vector<std::string> choices = {"Lit", "Unlit", "Water"};
+    // The engine's two, then every `.shader` file of the project: surface shaders written by hand.
+    // (Water is the scene's sea, Environment > Water; water of a game's own is a shader of its own.)
+    std::vector<std::string> choices = {"Lit", "Unlit"};
     std::vector<std::string> files;
     for (const AssetInfo& asset : editor.assets.assets()) {
         if (asset.type == AssetType::Shader && std::filesystem::path(asset.path).extension() == ".shader") files.push_back(asset.path);
@@ -209,61 +210,41 @@ bool drawMaterialProperties(EditorContext& editor, Material& material) {
     if (!material.shader.empty() && std::find(files.begin(), files.end(), material.shader) == files.end()) files.push_back(material.shader);
     for (const std::string& file : files) choices.push_back(std::filesystem::path(file).stem().string());
     choices.push_back("New Shader...");
-    int shader = material.isWater ? 2 : material.isUnlit ? 1 : 0;
+    choices.push_back("New Water Shader...");
+    const int ownFrom = 2, newShader = int(choices.size()) - 2, newWater = int(choices.size()) - 1;
+    int shader = material.isUnlit ? 1 : 0;
     for (size_t i = 0; i < files.size(); i++) {
-        if (files[i] == material.shader) shader = int(3 + i);
+        if (files[i] == material.shader) shader = int(ownFrom + i);
     }
     if (ui::combo("Shader", shader, choices)) {
-        if (shader == int(choices.size()) - 1) {
+        if (shader == newShader || shader == newWater) {
             // A new one, beside the others, that works as it is: to open and change.
-            std::string path = editor.assets.uniquePath("Shaders", "New Shader", ".shader");
+            const bool isWater = shader == newWater;
+            std::string path = editor.assets.uniquePath("Shaders", isWater ? "Water" : "New Shader", ".shader");
             std::error_code ignored;
             std::filesystem::create_directories(std::filesystem::path(editor.assets.absolutePath(path)).parent_path(), ignored);
-            if (text::writeFile(editor.assets.absolutePath(path), newSurfaceShaderText())) {
+            if (text::writeFile(editor.assets.absolutePath(path), isWater ? newWaterShaderText() : newSurfaceShaderText())) {
                 editor.assets.refresh();
                 material.shader = path;
                 material.shaderValues.clear();
+                // Water is seen through: what is under it shows, and its shader says how much.
+                if (isWater) material.alphaMode = AlphaMode::Blend, material.roughness = 0.05f, material.metallic = 0.0f;
                 editor.notify("Made " + path + ": open it from the Explorer to write it");
             }
             shader = 0;
         } else {
-            material.shader = shader >= 3 ? files[size_t(shader - 3)] : std::string();
-            if (shader >= 3) shader = 0;        // its own shader starts from a lit surface
+            material.shader = shader >= ownFrom ? files[size_t(shader - ownFrom)] : std::string();
+            if (shader >= ownFrom) shader = 0;  // its own shader starts from a lit surface
         }
         material.isUnlit = shader == 1;
-        material.isWater = shader == 2;
-        if (material.isWater && material.baseColor.w > 0.95f) {
-            // What water starts as: blue-green, and a lake's clarity.
-            material.baseColor = Vec4{0.03f, 0.2f, 0.26f, 0.8f};
-            material.alphaMode = AlphaMode::Blend;
-        }
         changed = true;
     }
     ui::tooltip("Lit: a surface that light falls on, described by color, metal and roughness.\nUnlit: its own color and nothing else, for signs, glows and flat-shaded art.\n"
-                "Water: seen into, with waves, the sky mirrored in it and foam where it meets the shore.\n"
-                "Below them, the project's own shaders (.shader files): each is given the surface as the settings here make it, and changes it.");
-    if (material.isWater) {
-        ui::subheading("Water");
-        Vec3 deep{material.baseColor.x, material.baseColor.y, material.baseColor.z};
-        if (ui::color("Color", deep)) {
-            material.baseColor = Vec4{deep.x, deep.y, deep.z, material.baseColor.w};
-            changed = true;
-        }
-        ui::tooltip("The color of deep water: what is left of white light after a long way through it.\nShallow water is clear, and takes this color the deeper it gets.");
-        float murk = material.baseColor.w;
-        if (ui::sliderFloat("Murkiness", murk, 0.05f, 1.0f)) {
-            material.baseColor.w = murk;
-            changed = true;
-        }
-        ui::tooltip("How soon the bottom is lost from sight: 0.3 a clear sea that shows it ten meters down, 0.8 a lake, 1 a pond.");
-        ui::subheading("Waves");
-        changed |= ui::dragFloat("Size", material.waveScale, 0.01f, 0.02f, 20.0f);
-        ui::tooltip("Larger numbers make smaller waves");
-        changed |= ui::sliderFloat("Height", material.waveHeight, 0.0f, 4.0f);
-    }
+                "Below them, the project's own shaders (.shader files): each is given the surface as the settings here make it, and changes it.\n"
+                "New Water Shader makes one for water of the game's own (a pond, a pool, a cartoon lagoon), to change as it should look.\n"
+                "The scene's sea is not a material: Environment > Water.");
     if (!material.shader.empty()) changed |= drawShaderProperties(editor, material);
 
-    if (material.isWater) return changed;          // water is its color, its murkiness and its waves: nothing else to set
     {
         ui::subheading("Surface");
         changed |= ui::color("Base Color", material.baseColor);
@@ -274,7 +255,7 @@ bool drawMaterialProperties(EditorContext& editor, Material& material) {
         changed |= ui::color("Emissive", material.emissive, true);
         changed |= ui::dragVec2("Texture Repeat", material.uvScale, 0.01f);
         changed |= ui::dragFloat("Sway", material.sway, 0.005f, 0.0f, 3.0f);
-        ui::tooltip("Moved by the scene's wind (Rendering > Wind), the more the higher above the model's base: 1 for grass, 0.1 for a tree. 0: still");
+        ui::tooltip("Moved by the scene's wind (Environment > Weather > Wind), the more the higher above the model's base: 1 for grass, 0.1 for a tree. 0: still");
     }
     {
         ui::subheading("Textures");

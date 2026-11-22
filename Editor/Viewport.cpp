@@ -309,10 +309,11 @@ void drawShapes(EditorContext& editor) {
 
     // While the scene is being built, only the particle systems that are selected (or are
     // under something selected) run: a scene full of smoke should not cost anything to edit.
-    // While the game runs, all of them do.
+    // While the game runs, all of them do; and while Simulate is on; and the weather's own
+    // (rain, which belongs to the world, not to the scene) whenever things move at all.
     bool isPlaying = editor.scene.isPlaying();
     scene.each<ParticleEmitter, Transform>([&](Entity entity, ParticleEmitter& emitter, Transform&) {
-        bool isShown = isPlaying;
+        bool isShown = isPlaying || editor.simulatesInViews || scene.has<EditorOnly>(entity);
         for (Entity up = entity; !isShown && up.isValid();) {
             isShown = editor.scene.isSelected(up);
             const Transform* above = scene.get<Transform>(up);
@@ -488,6 +489,18 @@ bool toolButton(const char* id, const char* picture, bool isOn, const char* tool
 
 void arrangeSelection(EditorContext& editor, int axis, int how);
 
+/// Simulate: what moves by itself (particles, water, the sway of grass, the clouds) moves in the
+/// views while the scene is edited. Off by default: it moves only while such a thing is selected.
+/// Lit while it moves, whichever the reason. The same button in the Scene and the Game view.
+void simulateButton(EditorContext& editor) {
+    if (editor.scene.isPlaying()) return;
+    const bool moves = editor.engine.simulatesEffects;
+    const char* tip = editor.simulatesInViews ? "Simulating: particles, water, swaying plants and clouds move. Click to stop them"
+                    : moves                    ? "Moving because what is selected moves by itself. Click to keep everything moving"
+                                               : "Let particles, water, swaying plants and clouds move while you edit";
+    if (toolButton("##simulate", "spark", moves, tip, "Simulate")) editor.simulatesInViews = !editor.simulatesInViews;
+}
+
 void drawToolbar(EditorContext& editor) {
     GizmoSettings& gizmo = editor.gizmo;
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2, 4));
@@ -578,6 +591,8 @@ void drawToolbar(EditorContext& editor) {
     if (toolButton("##grid", "grid", gizmo.showGrid, "The grid on the ground")) gizmo.showGrid = !gizmo.showGrid;
     ImGui::SameLine();
     if (toolButton("##gizmos", "eye", false, "What the view shows besides the scene: icons, outlines, colliders", "Gizmos")) ImGui::OpenPopup("##gizmos");
+    ImGui::SameLine(0, 12);
+    simulateButton(editor);
     ImGui::SetNextWindowPos(ImVec2(ImGui::GetItemRectMin().x, ImGui::GetItemRectMax().y + 4), ImGuiCond_Appearing);
     if (ImGui::BeginPopup("##gizmos")) {
         ImGui::TextDisabled("Shown in the view");
@@ -1000,7 +1015,7 @@ std::vector<InterfacePiece> interfacePieces(EditorContext& editor, Vec2 screen) 
     std::vector<InterfacePiece> pieces;
     Scene& scene = editor.engine.scene;
     for (const ComponentType& type : ComponentRegistry::instance().types()) {
-        if (type.category != "UI" || !type.has || !type.get) continue;
+        if (!type.isInterface() || !type.has || !type.get) continue;
         const Field* anchor = type.findField("anchor");
         const Field* offset = type.findField("offset");
         if (!anchor || !offset || anchor->type != FieldType::Vec2 || offset->type != FieldType::Vec2) continue;
@@ -1352,14 +1367,18 @@ void drawGameView(EditorContext& editor, bool takesCanvas) {
     bool isVisible = ImGui::Begin("Game", nullptr, flags);
     ImGui::PopStyleVar();
     keepViewAtLeast();
-    bool hadFocus = editor.gameViewHasFocus;
-    editor.gameViewHasFocus = isVisible && ImGui::IsWindowFocused();
-    // The click that gives the game the keys is the game's too: a button, a text field to type
-    // in, are used on the first click, not the second. (It came while the game was not listening.)
-    if (editor.scene.isPlaying() && editor.gameViewHasFocus && !hadFocus && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-        engine.input.isListening = true;
-        engine.input.handleMouseButton(MouseButton::Left, true);
-    }
+    // While playing, the game hears the keys, the mouse and the controllers only while it has them:
+    // from Run, or from a click on its picture, until Esc, a click anywhere else, or another
+    // program in front. It keeps running all the while; only what it hears stops.
+    const bool isPlaying = editor.scene.isPlaying();
+    // While the game holds the pointer there is none over any window, and Dear ImGui takes a click
+    // on nothing as "no window is in use": the game would lose the keys, and with them the pointer,
+    // at every shot. The view keeps both while the game holds it.
+    bool holdsPointer = isPlaying && editor.gameViewHasFocus && engine.input.isPointerCaptured();
+    if (isVisible && holdsPointer && !ImGui::IsWindowFocused()) ImGui::SetWindowFocus();
+    const bool isInFront = !engine.window() || engine.window()->isFocused();
+    editor.gameViewHasFocus = isPlaying && isVisible && isInFront && editor.gameViewHasFocus && (ImGui::IsWindowFocused() || holdsPointer);
+    editor.gameWindowIsFocused = isVisible && ImGui::IsWindowFocused();
     ImVec2 position = ImGui::GetCursorScreenPos(), size = ImGui::GetContentRegionAvail();
     Entity camera = editor.scene.gameCamera();
     if (!isVisible || !camera.isValid()) {
@@ -1426,6 +1445,12 @@ void drawGameView(EditorContext& editor, bool takesCanvas) {
     {
         const float soundWidth = ImGui::CalcTextSize("Muted").x + ImGui::GetStyle().FramePadding.x * 2 + 34;
         const float width = ImGui::CalcTextSize("Stats").x + ImGui::GetStyle().FramePadding.x * 2;
+        // Simulate, while the scene is edited: the same as the Scene view's.
+        if (!editor.scene.isPlaying()) {
+            const float simulateWidth = ImGui::CalcTextSize("Simulate").x + 16 + 20;
+            ImGui::SetCursorScreenPos(ImVec2(position.x + size.x - soundWidth - width - simulateWidth - 20, position.y + 1));
+            simulateButton(editor);
+        }
         ImGui::SetCursorScreenPos(ImVec2(position.x + size.x - soundWidth - width - 14, position.y + 3));
         const bool wasOn = showsStats;
         if (wasOn) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(1.0f, 0.48f, 0.18f, 0.85f));
@@ -1504,11 +1529,32 @@ void drawGameView(EditorContext& editor, bool takesCanvas) {
     // While the game runs, it hears the keyboard, the mouse and the controllers only when this
     // window is the one being used: click in it to play, click anywhere else to work, and
     // what is typed there is not also steering. Not playing, the editor's own tools listen.
-    static bool wasPlaying = false;
-    bool isPlaying = editor.scene.isPlaying();
-    if (isPlaying && !wasPlaying) ImGui::SetWindowFocus();          // Run: the game has the keys from the start
+    // Run: the game has the keys from the start (from the first frame its window is shown, if it was behind another).
+    static bool wasPlaying = false, runWaits = false;
+    if (isPlaying && !wasPlaying) runWaits = true;
+    if (!isPlaying) runWaits = false;
     wasPlaying = isPlaying;
+    if (runWaits && isVisible) {
+        runWaits = false;
+        ImGui::SetWindowFocus();
+        editor.gameViewHasFocus = true;
+    }
+    // Which click is the game's: one on its picture, with nothing over it (a list opened from the bar
+    // above, a window in front). While it holds the pointer, every click is: none is shown anywhere else.
+    const ImVec2 mouse = ImGui::GetMousePos();
+    const bool isOverPicture = isVisible && ImGui::IsWindowHovered() && mouse.x >= at.x && mouse.y >= at.y && mouse.x < at.x + shown.x && mouse.y < at.y + shown.y;
+    const bool isClicked = ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::IsMouseClicked(ImGuiMouseButton_Right) || ImGui::IsMouseClicked(ImGuiMouseButton_Middle);
+    if (isPlaying && !editor.gameViewHasFocus && isOverPicture && isClicked) {
+        editor.gameViewHasFocus = true;
+        ImGui::SetWindowFocus();
+        engine.input.isListening = true;
+        // A game that looks about with the mouse takes the pointer back with this click, and that
+        // is all the click is: it does not also shoot. In any other game it is the game's: a button
+        // on its screen is used on the first click, not the second.
+        if (engine.input.wantsPointerCaptured()) engine.input.keepMouseButtonsOut();
+    }
     engine.input.isListening = !isPlaying || editor.gameViewHasFocus;
+    if (isPlaying && isClicked && !isOverPicture && !engine.input.isPointerCaptured()) engine.input.keepMouseButtonsOut();
     if (isPlaying && !editor.gameViewHasFocus && isVisible) {
         const char* note = "Click here to play";
         ImVec2 size = ImGui::CalcTextSize(note);
@@ -1518,7 +1564,7 @@ void drawGameView(EditorContext& editor, bool takesCanvas) {
     }
     // The game has taken the pointer to look about with: how to get it back is said, since nothing else on the screen can be reached.
     if (isPlaying && editor.gameViewHasFocus && isVisible && engine.input.isPointerCaptured()) {
-        const char* note = "Esc gives the pointer back; Esc again stops the game";
+        const char* note = "Esc lets go of the game; a click on it plays again";
         ImVec2 size = ImGui::CalcTextSize(note);
         ImVec2 corner(at.x + (shown.x - size.x) * 0.5f, at.y + 10);
         ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(corner.x - 10, corner.y - 5), ImVec2(corner.x + size.x + 10, corner.y + size.y + 5), IM_COL32(20, 22, 27, 150), 6.0f);

@@ -2,7 +2,7 @@
 
 A project's `Source` folder holds the game's C++. The editor compiles every `.cpp` file in it into one library, loads it, and from then on the game's components behave like the engine's own: they are in Add Component, their fields are in the inspector, scenes save them, Undo covers them, and their code runs when the game plays.
 
-A new project has an empty `Assets/Scripts` folder: **Assets > New C++ Script...** (or **+ New > Script** in the Explorer) makes the first one, with one component in it. This page explains every part.
+A new project has an empty `Assets/Scripts` folder: **Assets > Create > C++ Script...** (or **+ New > Script** in the Explorer) makes the first one, with one component in it. This page explains every part.
 
 ## A component
 
@@ -55,7 +55,7 @@ References to other entities and to assets are not field types yet; until they a
 
 ## A new script
 
-**Assets > New C++ Script...** asks for a name, makes `Assets/Scripts/<Name>.cpp` with a component of that name in it, opens the file in the program your Mac uses for C++ (Xcode, unless you chose another) and compiles. The scripts are in the Explorer like any other asset; Assets > Show Scripts Folder opens their folder in the Finder.
+**Assets > Create > C++ Script...** asks for a name, makes `Assets/Scripts/<Name>.cpp` with a component of that name in it, opens the file in the program your Mac uses for C++ (Xcode, unless you chose another) and compiles. The scripts are in the Explorer like any other asset; Assets > Show Scripts Folder opens their folder in the Finder.
 
 Scripts that are drawn instead of written are in [VisualScripting.md](VisualScripting.md).
 

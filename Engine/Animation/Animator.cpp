@@ -635,7 +635,7 @@ void Animator::putLayers(World& world, float dt) {
 MOLTEN_COMPONENT(TwoBoneIK, MOLTEN_FIELD(bone).picks("bone").help("The end of the limb: the foot's or hand's node in the model"),
                  MOLTEN_FIELD(target).picks("entity").help("The entity it reaches for"), MOLTEN_FIELD(pole).picks("entity").help("An entity the knee or elbow bends toward; empty: as animated"),
                  MOLTEN_FIELD(weight).range(0, 1))
-MOLTEN_COMPONENT(Animator, MOLTEN_FIELD(animations).picks("ownClips").help("Its animations: made for this entity in the Timeline window (Window > Animation > Timeline, Create Animation)"),
+MOLTEN_COMPONENT(Animator, MOLTEN_FIELD(animations).picks("ownClips").help("Its animations: made for this entity in the Timeline window (Window > Timeline, Create Animation)"),
                  MOLTEN_FIELD(clip).picks("ownAnimation").help("What it plays from the start. From code: animator->play(\"Open\"), stop(), pause(), resume()"),
                  MOLTEN_FIELD(model).picks("model").help("A .gltf or .glb whose animations are its too. Empty: the file the entity's mesh came from, if any"), MOLTEN_FIELD(speed).range(-4, 4), MOLTEN_FIELD(loops),
                  MOLTEN_FIELD(isPlaying), MOLTEN_FIELD(blendTime).range(0, 2).help("Seconds to ease from one clip into the next"),

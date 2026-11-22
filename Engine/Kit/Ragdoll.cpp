@@ -14,7 +14,7 @@
 namespace molten::kit {
 
 void linkRagdoll() {
-    ComponentRegistry::instance().setCategory("Ragdoll", "Characters");
+    ComponentRegistry::instance().setCategory("Ragdoll", "Physics");
 }
 
 namespace {

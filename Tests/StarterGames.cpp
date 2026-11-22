@@ -20,7 +20,7 @@
 #include "Kit/WhenThen.hpp"
 #include "Project/Project.hpp"
 #include "Script/Runtime.hpp"
-#include "Water/Water.hpp"
+#include "Water/Waves.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -277,7 +277,7 @@ Entity addChaseCamera(Game& game, const std::string& target, Vec3 from, Vec3 off
     Entity camera = game.add("Camera", Entity{}, from);
     Camera lens;
     lens.fovY = radians(fieldOfView);
-    lens.nearPlane = 0.25f;
+    lens.nearPlane = std::max(0.25f, farPlane / 20000.0f);      // no nearer than it must be: the depth buffer's steps are finer the farther the near plane
     lens.farPlane = farPlane;
     game.world.scene.add(camera, lens);
     kit::Follow follow;
@@ -323,31 +323,61 @@ Entity addInterface(Game& game, const std::string& counter, const std::string& c
     count.color = Vec4{1.0f, 0.62f, 0.28f, 1};
     scene.add(piece("Count"), count);
 
-    // Bottom middle: the dial, in a game that has something to show on one.
+    // Bottom right: the dial, in a game that has something to show on one. (In the corner: the
+    // middle of the screen's bottom is where the car, the plane or the boat is.)
     if (!dialValue.empty()) {
         kit::UIGauge dial;
         dial.value = dialValue;
         dial.most = dialMost;
         dial.numbersEvery = dialEvery;
         dial.label = dialLabel;
-        dial.anchor = Vec2{0.5f, 1};
-        dial.offset = Vec2{0, -98};
+        dial.anchor = Vec2{1, 1};
+        dial.offset = Vec2{-112, -108};
         dial.radius = 78;
         dial.thickness = 7;
         scene.add(piece("Dial"), dial);
     }
 
-    // Bottom left: what the keys do.
-    for (size_t i = 0; i < help.size(); i++) {
-        kit::HudText line;
-        line.text = help[i];
-        line.anchor = Vec2{0, 1};
-        line.offset = Vec2{20, -24 - 17 * float(help.size() - 1 - i)};
-        line.size = 12;
-        line.color = Vec4{1, 1, 1, 0.62f};
-        // Written from its left edge: the anchor is the text's middle, so it is found from its length.
-        line.offset.x += float(help[i].size()) * 3.1f;
-        scene.add(piece("Help " + std::to_string(i + 1)), line);
+    // Bottom left: what the keys do, on a pane of glass: the keys in one column, what each does in the next.
+    if (!help.empty()) {
+        const float rowHeight = 19, lettersHigh = 12.5f, letterWide = lettersHigh * 0.56f, pad = 12;
+        size_t longestKeys = 0, longestWords = 0;
+        std::vector<std::pair<std::string, std::string>> rows;
+        for (const std::string& line : help) {
+            size_t gap = line.find("  ");
+            std::string keys = gap == std::string::npos ? std::string() : line.substr(0, gap);
+            std::string words = gap == std::string::npos ? line : line.substr(line.find_first_not_of(' ', gap));
+            longestKeys = std::max(longestKeys, keys.size());
+            longestWords = std::max(longestWords, words.size());
+            rows.push_back({keys, words});
+        }
+        const float keysWide = float(longestKeys) * letterWide + 14, wordsWide = float(longestWords) * letterWide;
+        const Vec2 paneSize{pad * 2 + keysWide + wordsWide, pad * 2 + rowHeight * float(rows.size()) - 5};
+        kit::UIPanel pane;
+        pane.anchor = Vec2{0, 1};
+        pane.offset = Vec2{18 + paneSize.x * 0.5f, -18 - paneSize.y * 0.5f};
+        pane.size = paneSize;
+        pane.color = Vec4{glass.x, glass.y, glass.z, 0.46f};
+        pane.border = 1;
+        pane.borderColor = Vec4{1, 1, 1, 0.1f};
+        scene.add(piece("Help Pane"), pane);
+        for (size_t i = 0; i < rows.size(); i++) {
+            float y = -18 - paneSize.y + pad + rowHeight * float(i);
+            kit::HudText keys;
+            keys.text = rows[i].first;
+            keys.anchor = Vec2{0, 1};
+            keys.offset = Vec2{18 + pad, y};
+            keys.size = lettersHigh;
+            keys.color = Vec4{1.0f, 0.72f, 0.45f, 0.95f};
+            if (!rows[i].first.empty()) scene.add(piece("Help " + std::to_string(i + 1) + " Keys"), keys);
+            kit::HudText words;
+            words.text = rows[i].second;
+            words.anchor = Vec2{0, 1};
+            words.offset = Vec2{18 + pad + keysWide, y};
+            words.size = lettersHigh;
+            words.color = Vec4{1, 1, 1, 0.78f};
+            scene.add(piece("Help " + std::to_string(i + 1)), words);
+        }
     }
 
     // Top right: over again.
@@ -434,6 +464,12 @@ void buildCarGame(Game& game) {
     auto concrete = game.material("Concrete", Vec3{0.56f, 0.56f, 0.54f}, 0.85f);
     auto cone = game.material("Cone", Vec3{0.95f, 0.36f, 0.05f}, 0.6f);
     auto hill = game.material("Hills", Vec3{0.17f, 0.34f, 0.15f}, 0.95f);
+    // What lies on something else in the same place is drawn over it, however far off, instead of flickering with it.
+    game.laidOver(asphalt, 1);                  // on the grass
+    game.laidOver(paintWhite, 2);               // on the road
+    game.laidOver(curbRed, 2);
+    game.laidOver(glass, 1);                    // on the body
+    game.laidOver(tailLamps, 1);
 
     // ---- the ground: one wide floor to drive on, and hills at its edge to stop the eye
     Entity ground = game.shape("Ground", Entity{}, "plane", grass, Vec3{0, 0, 0}, Vec3{900, 1, 900}, Quat{}, false);
@@ -655,7 +691,7 @@ void buildCarGame(Game& game) {
 
     addChaseCamera(game, "Car", start - forward * 7.0f + Vec3{0, 2.6f, 0}, Vec3{0, 1.9f, 5.8f}, 6.0f, 62.0f, 1500.0f);
     addInterface(game, "stars", "STARS", 8, "Every star! Now try the ramp.",
-                 {"W  S    gas and brake, reverse", "A  D    steer", "Space    handbrake: drift"}, "speed", 200, 40, "km/h");
+                 {"W  S  gas, brake and reverse", "A  D  steer", "Space  handbrake: drift"}, "speed", 200, 40, "km/h");
 }
 
 // ---------------------------------------------------------------- the plane game
@@ -673,8 +709,13 @@ void buildPlaneGame(Game& game) {
 
     auto grass = game.material("Grass", Vec3{0.22f, 0.4f, 0.15f}, 0.95f);
     auto fields = game.material("Fields", Vec3{0.42f, 0.44f, 0.16f}, 0.95f);
+    auto meadow = game.material("Meadow", Vec3{0.12f, 0.33f, 0.11f}, 0.95f);
+    game.laidOver(fields, 1);                   // laid on the grass
+    game.laidOver(meadow, 1);
     auto asphalt = game.material("Asphalt", Vec3{0.08f, 0.083f, 0.09f}, 0.85f);
     auto paintWhite = game.material("Runway Paint", Vec3{0.88f, 0.88f, 0.84f}, 0.7f);
+    game.laidOver(asphalt, 1);
+    game.laidOver(paintWhite, 2);
     auto skin = game.material("Aeroplane", Vec3{0.92f, 0.92f, 0.9f}, 0.35f, 0.1f);
     auto trim = game.material("Aeroplane Trim", Vec3{0.82f, 0.1f, 0.06f}, 0.35f, 0.1f);
     auto glass = game.material("Glass", Vec3{0.03f, 0.05f, 0.07f}, 0.08f, 0.6f);
@@ -702,11 +743,17 @@ void buildPlaneGame(Game& game) {
                    heading(50.0f * float(i)), false);
     }
     // Fields, to see the ground go by from above: squares of another green laid on it.
+    // (None on another: two fields in the same place would flicker between them.)
+    std::vector<Vec3> laid;                     // x, z and how far each reaches
     for (int i = 0; i < 26; i++) {
         float x = (chance(300 + i) - 0.5f) * 3200.0f + 400.0f, z = (chance(330 + i) - 0.5f) * 3200.0f - 500.0f;
-        if (std::abs(x) < 60 && z < 520 && z > -520) continue;
-        game.shape("Field " + std::to_string(i + 1), scenery, "plane", i % 2 == 0 ? fields : leaves, Vec3{x, 0.03f + 0.01f * float(i % 3), z},
-                   Vec3{120.0f + 160.0f * chance(360 + i), 1, 90.0f + 140.0f * chance(390 + i)}, heading(90.0f * chance(420 + i)), false);
+        float wide = 120.0f + 160.0f * chance(360 + i), deep = 90.0f + 140.0f * chance(390 + i), reach = 0.5f * std::sqrt(wide * wide + deep * deep);
+        if (std::abs(x) < 60 + reach && z < 520 + reach && z > -520 - reach) continue;
+        bool overlaps = false;
+        for (const Vec3& other : laid) overlaps = overlaps || simd::length(Vec2{x - other.x, z - other.y}) < reach + other.z + 4.0f;
+        if (overlaps) continue;
+        laid.push_back(Vec3{x, z, reach});
+        game.shape("Field " + std::to_string(i + 1), scenery, "plane", i % 2 == 0 ? fields : meadow, Vec3{x, 0.03f, z}, Vec3{wide, 1, deep}, heading(90.0f * chance(420 + i)), false);
     }
 
     // ---- the airfield: a runway that runs north (toward -z), a hangar, a tower
@@ -828,21 +875,21 @@ void buildPlaneGame(Game& game) {
 
     addChaseCamera(game, "Plane", start + Vec3{0, 3.5f, 14.0f}, Vec3{0, 3.2f, 13.5f}, 4.0f, 62.0f, 9000.0f);
     addInterface(game, "rings", "RINGS", 8, "All eight rings! Now land it.",
-                 {"Shift  Ctrl    throttle up and down", "S  W    pull up, push down      A  D    roll", "Q  E    rudder      F    flaps      B    brakes"},
+                 {"Shift Ctrl  throttle up and down", "S W  pull up, push down", "A D  roll", "Q E  rudder", "F  flaps", "B  brakes"},
                  "airspeed", 300, 50, "km/h");
-    // The height, beside the dial.
+    // The height and the power, beside the dial: written toward it from its left.
     Entity interface = scene.find("Interface");
     kit::HudText height;
     height.text = "{altitude} m";
-    height.anchor = Vec2{0.5f, 1};
-    height.offset = Vec2{132, -70};
-    height.size = 20;
+    height.anchor = Vec2{1, 1};
+    height.offset = Vec2{-212, -132};
+    height.size = 22;
     scene.add(game.add("Altitude", interface), height);
     kit::HudText power;
     power.text = "POWER {throttle:percent}";
-    power.anchor = Vec2{0.5f, 1};
-    power.offset = Vec2{-146, -70};
-    power.size = 14;
+    power.anchor = Vec2{1, 1};
+    power.offset = Vec2{-212, -100};
+    power.size = 13;
     power.color = Vec4{1, 1, 1, 0.75f};
     scene.add(game.add("Power", interface), power);
 }
@@ -851,7 +898,7 @@ void buildPlaneGame(Game& game) {
 
 void buildBoatGame(Game& game) {
     game.folder = "Boat Game";
-    game.description = "A speedboat on open water, islands, and ten buoys to round. Drive with W A S D. The sea, the boat and the buoys that bob on it are all parts in the Inspector: no code.";
+    game.description = "A speedboat on open water, islands, and ten buoys to round. Drive with W A S D. The sea is the scene's own (Environment > Water), its waves the wind's; the boat and the buoys that bob on it are parts in the Inspector: no code.";
     Scene& scene = game.world.scene;
     addDaylight(game, -42, 60, 0.3f);
     RenderSettings& settings = game.world.sceneSettings();
@@ -871,21 +918,20 @@ void buildBoatGame(Game& game) {
     auto bark = game.material("Bark", Vec3{0.3f, 0.2f, 0.12f}, 0.9f);
     auto white = game.material("Lighthouse", Vec3{0.9f, 0.9f, 0.88f}, 0.7f);
     auto red = game.material("Lighthouse Red", Vec3{0.75f, 0.1f, 0.08f}, 0.6f);
+    game.laidOver(red, 1);                      // a band round the tower
+    game.laidOver(hullBlue, 1);                 // a stripe along the hull
     auto lamp = game.material("Lighthouse Lamp", Vec3{1, 0.95f, 0.7f}, 0.3f, 0.0f, Vec3{4.0f, 3.6f, 2.2f});
     auto rock = game.material("Rocks", Vec3{0.3f, 0.3f, 0.3f}, 0.9f);
-    // The water: its color where it is deep, and how murky it is. Clear enough to see the bottom near the islands.
-    auto sea = game.material("Sea", Vec3{0.02f, 0.13f, 0.2f}, 0.05f);
-    sea->baseColor.w = 0.3f;
-    sea->isWater = true;
-    sea->alphaMode = AlphaMode::Blend;          // for a GPU that cannot show what is behind the water the better way: seen through all the same
-
     // ---- the sea, and its bed under it
-    Entity water = game.shape("Sea", Entity{}, "plane", sea, Vec3{0, 0, 0}, Vec3{1, 1, 1}, Quat{}, false);
-    Water waves;
-    waves.size = 1600;
-    waves.windSpeed = 6.5f;
-    waves.waveHeight = 0.7f;
-    scene.add(water, waves);
+    // (The scene's own, Environment > Water: everywhere below its level, its color where it is deep
+    // and over sand, and how clear it is: enough to see the bottom near the islands. The wind raises
+    // its waves.)
+    settings.sea.enabled = true;
+    settings.sea.level = 0;
+    settings.sea.color = Vec3{0.02f, 0.13f, 0.2f};
+    settings.sea.shallowColor = Vec3{0.18f, 0.6f, 0.56f};
+    settings.sea.clarity = 9.0f;
+    settings.wind = Vec3{6.2f, 0, 1.9f};        // a fresh breeze, from the west and a little south
     game.shape("Sea Bed", Entity{}, "plane", seaBed, Vec3{0, -14, 0}, Vec3{2600, 1, 2600}, Quat{}, false);
 
     // ---- islands: mounds of sand whose tops stand out of the water, with trees on them. Each is
@@ -1047,7 +1093,7 @@ void buildBoatGame(Game& game) {
     game.shape("Outboard Leg", look, "cube", engine, Vec3{0, -0.1f, 3.2f}, Vec3{0.16f, 0.9f, 0.3f});
 
     addChaseCamera(game, "Boat", Vec3{0, 4.0f, 10.0f}, Vec3{0, 3.4f, 9.5f}, 3.5f, 62.0f, 3000.0f);
-    addInterface(game, "buoys", "BUOYS", 10, "All ten buoys rounded!", {"W  S    ahead and astern", "A  D    the rudder: it bites once the boat is moving"}, "knots", 40, 10, "knots");
+    addInterface(game, "buoys", "BUOYS", 10, "All ten buoys rounded!", {"W  S  ahead and astern", "A  D  the rudder: it bites once the boat moves"}, "knots", 40, 10, "knots");
 }
 
 // ---------------------------------------------------------------- the third person game
@@ -1193,6 +1239,7 @@ void buildGarden(Game& game, bool together) {
     auto stone = game.material("Stone", Vec3{0.63f, 0.61f, 0.57f}, 0.85f);
     auto darkStone = game.material("Stone Dark", Vec3{0.40f, 0.40f, 0.41f}, 0.9f);
     auto paving = game.material("Paving", Vec3{0.72f, 0.67f, 0.55f}, 0.9f);
+    game.laidOver(paving, 1);                   // the ways, laid on the grass
     auto wood = game.material("Wood", Vec3{0.52f, 0.34f, 0.17f}, 0.85f);
     auto plank = game.material("Planks", Vec3{0.43f, 0.28f, 0.15f}, 0.8f);
     auto jewel = game.material("Gem", Vec3{0.10f, 0.78f, 0.72f}, 0.2f, 0.0f, Vec3{0.1f, 1.5f, 1.3f});
@@ -1310,11 +1357,11 @@ void buildGarden(Game& game, bool together) {
     const Vec3 rockAt[8] = {{-2.2f, 0, -3.4f}, {1.6f, 0, 0.9f}, {3.1f, 0, -2.6f}, {-7.5f, 0, -12.6f}, {-5.2f, 0, -13.1f}, {5.5f, 0, 9.5f}, {-15.5f, 0, 8.0f}, {19.0f, 0, -4.5f}};
     for (int i = 0; i < 8; i++) {
         float size = 0.7f + 1.1f * chance(950 + i);
-        game.shape("Rock", rocks, boulder, rock, rockAt[i], Vec3{size, size * (0.7f + 0.5f * chance(960 + i)), size}, heading(360 * chance(970 + i)));
+        game.shape("Rock", rocks, boulder, rock, rockAt[i] - Vec3{0, 0.06f, 0}, Vec3{size, size * (0.7f + 0.5f * chance(960 + i)), size}, heading(360 * chance(970 + i)));
     }
 
     addWalker(game, Vec3{0, 0.14f, 16}, together);
-    Entity interface = addInterface(game, "gems", "GEMS", 10, "All ten gems!", {"W A S D   move", "Shift   walk", "Space   jump", "Mouse   look about", "Esc   free the pointer"}, "", 0, 0, "");
+    Entity interface = addInterface(game, "gems", "GEMS", 10, "All ten gems!", {"W A S D  move", "Shift  walk", "Space  jump", "Mouse  look about", "Esc  free the pointer"}, "", 0, 0, "");
     if (!together) return;
 
     // ---- together: who is in the game, and where each appears
@@ -1480,6 +1527,8 @@ void buildShooterGame(Game& game) {
     auto wall = game.material("Wall", Vec3{0.34f, 0.36f, 0.40f}, 0.9f);
     auto cover = game.material("Cover", Vec3{0.50f, 0.53f, 0.57f}, 0.85f);
     auto stripe = game.material("Stripe", Vec3{0.94f, 0.66f, 0.10f}, 0.7f);
+    game.laidOver(ground, 1);                   // the yard's floor, on the land
+    game.laidOver(stripe, 2);                   // the line, on the firing step
     auto wood = game.material("Crate", Vec3{0.52f, 0.35f, 0.18f}, 0.85f);
     auto steel = game.material("Steel", Vec3{0.22f, 0.23f, 0.26f}, 0.45f, 0.8f);
     auto white = game.material("Target White", Vec3{0.92f, 0.92f, 0.88f}, 0.6f);
@@ -1671,7 +1720,7 @@ void buildShooterGame(Game& game) {
 
     // ---- on the screen: what is down, what is in the rifle, how the player is
     Entity interface = addInterface(game, "score", "DOWN", 16, "Yard cleared!",
-                                    {"W A S D   move", "Shift   run", "Space   jump", "Mouse   look, fire", "R   load", "Esc   free the pointer"}, "", 0, 0, "");
+                                    {"W A S D  move", "Shift  run", "Space  jump", "Mouse  look and fire", "R  reload", "Esc  free the pointer"}, "", 0, 0, "");
     const Vec4 glass{0.04f, 0.045f, 0.055f, 0.62f}, rim{1, 1, 1, 0.16f};
     kit::UIPanel plate;
     plate.anchor = Vec2{1, 1};
@@ -1727,6 +1776,25 @@ const std::vector<std::string>& names() {
     return all;
 }
 
+namespace {
+// What lies on another surface in the same place, set a little apart from it (Game::laidOver).
+// A model is a piece of ground (a road, a runway, a field); so is a plane, and a box much wider
+// than it is high: those are lifted. Anything else is grown, so that each face of it stands
+// a few millimeters off the face it lies on.
+void layOverlays(Game& game) {
+    game.world.scene.each<MeshRenderer, Transform>([&](Entity, MeshRenderer& renderer, Transform& transform) {
+        auto found = game.laid.find(renderer.material.get());
+        if (found == game.laid.end()) return;
+        const float level = float(found->second);
+        const Vec3 scale = transform.scale;
+        const bool isGround = renderer.meshName == "plane" || renderer.meshName.rfind("Models/", 0) == 0 ||
+                              (scale.y < 0.3f && std::min(scale.x, scale.z) > 1.5f);
+        if (isGround) transform.position.y += 0.012f * level;
+        else transform.scale = scale + Vec3{0.01f, 0.01f, 0.01f} * level;
+    });
+}
+}  // namespace
+
 bool build(const std::string& name, Game& game) {
     kit::registerKit();
     if (name == "Car Game") buildCarGame(game);
@@ -1736,6 +1804,7 @@ bool build(const std::string& name, Game& game) {
     else if (name == "Shooter Game") buildShooterGame(game);
     else if (name == "Online Game") buildOnlineGame(game);
     else return false;
+    layOverlays(game);
     game.world.scene.updateTransforms();
     return true;
 }
@@ -2126,12 +2195,14 @@ TEST(starter_games_are_templates_a_project_can_start_from) {
     if (made) {
         CHECK(made->startScene == "Scenes/Main.scene");
         CHECK(fs::exists(fs::path(made->assetsDirectory()) / "Scenes/Main.scene"));
-        CHECK(fs::exists(fs::path(made->assetsDirectory()) / "Materials/Sea.material"));
         CHECK(fs::exists(fs::path(made->assetsDirectory()) / "Models/Hull.obj"));
-        // The sea is water, and says so in its file.
-        std::optional<std::string> sea = text::readFile(made->assetsDirectory() + "/Materials/Sea.material");
-        Material read;
-        CHECK(sea && readMaterial(*sea, read) && read.isWater && read.baseColor.w < 0.5f);
+        // The sea is the scene's own, and its file says so.
+        std::optional<std::string> main = text::readFile(made->assetsDirectory() + "/Scenes/Main.scene");
+        Scene read;
+        std::vector<NamedMaterial> materials;
+        RenderSettings settings;
+        CHECK(main && readScene(*main, read, materials, settings, SceneAssets{}));
+        CHECK(settings.sea.enabled && settings.sea.level == 0.0f && settings.sea.clarity > 4.0f);
     }
     fs::remove_all(scratch);
 }

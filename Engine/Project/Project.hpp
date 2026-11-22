@@ -73,10 +73,24 @@ struct ProjectTemplate {
     std::string name;                   // "Roll a Ball"
     std::string description;            // a sentence or two, from the template's template.txt
     std::string directory;
+    bool isYours = false;               // in your own templates folder: one you made, or changed
+    std::string original;               // yours, made from one of the engine's: that one's folder (to go back to it)
 };
 
 /// The templates in a folder (the engine's Templates), by name. Each is a project folder.
 std::vector<ProjectTemplate> projectTemplates(const std::string& templatesDirectory);
+
+/// The engine's templates and yours together: one of yours with the name of one of the
+/// engine's is shown in its place. The engine's stay as they came, whatever is done to yours.
+std::vector<ProjectTemplate> projectTemplates(const std::string& enginesDirectory, const std::string& yoursDirectory);
+
+/// Your templates folder: ~/Documents/Molten Templates. Each folder in it is a project, and a template.
+std::string yourTemplatesDirectory();
+
+/// A project's files copied into your templates folder as a template of its own (its Assets,
+/// Settings, Source and Plugins, its project file, its description and picture; not what the
+/// editor keeps in Library). The new template's folder, or empty with `error` set.
+std::string copyAsTemplate(const std::string& projectDirectory, const std::string& templatesDirectory, const std::string& name, std::string* error = nullptr);
 
 /// The projects opened lately, most recent first, kept in a text file of the user's.
 struct RecentProjects {

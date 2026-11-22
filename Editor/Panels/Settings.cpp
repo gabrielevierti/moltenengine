@@ -1,4 +1,4 @@
-// Two panels of settings: how the open scene is rendered, and the facts of the project.
+// The panels of the scene's settings (Lighting, Environment, Rendering, Post Processing) and of the project's.
 #include "Editor.hpp"
 #include "Core/TextFile.hpp"
 #include "Rendering/Quality.hpp"
@@ -12,7 +12,9 @@ namespace molten::editor {
 
 namespace {
 
-/// Lighting: what lights the scene besides its lights. The sky, the air, shadows.
+/// Lighting: what lights the scene. The sun, the sky's light, shadows, the lights. The world they
+/// light (the sky, its clouds, the fog, the weather and its wind, the sea) is in Environment; how
+/// the picture is drawn is in Rendering, and what is done to the finished picture in Post Processing.
 class LightingPanel final : public Panel {
 public:
     LightingPanel() { title = "Lighting"; }
@@ -26,18 +28,18 @@ public:
         editor.engine.scene.each<Light>([&](Entity entity, Light& light) {
             if (!sun.isValid() && light.type == LightType::Directional) sun = entity;
         });
-        // One page: what the scene is lit by, how its light is worked out (shadows, rays, ambient
-        // occlusion), and its lights in a list that opens when wanted. How well the game draws all
-        // this, as it ships, is the project's: Project Settings > Quality.
-        drawEnvironment(editor, settings, sun, changed);
-        drawQuality(editor, settings, changed);
+        // One page: what the scene is lit by, how its shadows and shade look, and its lights in a
+        // list that opens when wanted. How it is all drawn (shadow maps or rays, how sharp) is the
+        // project's, the same for every scene: Project Settings > Quality.
+        drawLight(editor, settings, sun, changed);
+        drawShading(editor, settings, changed);
         if (ImGui::CollapsingHeader("Lights in the Scene")) drawLights(editor, changed);
         // These settings are saved with the scene, so changing them is an edit like any other.
         if (changed) editor.scene.markChanged();
     }
 
 private:
-    void drawEnvironment(EditorContext& editor, RenderSettings& settings, Entity sun, bool& changed) {
+    void drawLight(EditorContext& editor, RenderSettings& settings, Entity sun, bool& changed) {
         if (ui::section("Sun")) {
             if (sun.isValid()) {
                 Light* light = editor.engine.scene.get<Light>(sun);
@@ -57,156 +59,33 @@ private:
                 ImGui::TextDisabled("Entity > Light > Directional Light makes one.");
             }
         }
-        if (ui::section("Sky")) {
-            changed |= ui::checkbox("Sunset Colors", settings.sky.sunsetColors);
-            ui::tooltip("As the sun nears the horizon: its light goes gold, orange and red, the sky glows round it, the clouds are lit from below; "
-                        "when it has set, the sky darkens into night");
-            changed |= ui::color("Zenith", settings.sky.zenithColor, true);
-            changed |= ui::color("Horizon", settings.sky.horizonColor, true);
-            if (settings.sky.sunsetColors) {
-                changed |= ui::sliderFloat("Moon", settings.sky.moon, 0.0f, 2.0f);
-                ui::tooltip("At night: the moon across the sky from the sun, which lights the scene with a cold, dim light and casts shadows. 0 a night with no moon, 1 a full moon");
-                changed |= ui::sliderFloat("Stars", settings.sky.stars, 0.0f, 3.0f);
-                ui::tooltip("At night, when the sun is down: 0 none, 1 a clear night far from any town");
-            }
-            changed |= ui::color("Ground", settings.sky.groundColor, true);
-            changed |= ui::dragFloat("Brightness", settings.sky.intensity, 0.01f, 0.0f, 100.0f);
+        // The sky's light: how much it lights the scene. (The sky itself is the world's: Environment.)
+        if (ui::section("Sky Light")) {
             changed |= ui::dragFloat("Light from the Sky", settings.environmentIntensity, 0.01f, 0.0f, 10.0f);
             ui::tooltip("How much the sky lights the scene: the soft light in the shade, and what shiny things mirror");
         }
-        if (ui::section("Clouds")) {
-            changed |= ui::sliderFloat("Coverage", settings.sky.cloudCoverage, 0.0f, 1.0f);
-            changed |= ui::dragFloat("Scale", settings.sky.cloudScale, 0.01f, 0.05f, 20.0f);
-            changed |= ui::dragVec2("Drift", settings.sky.cloudSpeed, 0.001f);
-            changed |= ui::checkbox("With Depth", settings.sky.cloudsHaveDepth);
-            ui::tooltip("Clouds as volumes, thick and thin, lit by the sun through them: a camera can fly in, through and above them. Costs more than the flat layer");
-            if (settings.sky.cloudsHaveDepth) {
-                changed |= ui::dragFloat("Height", settings.sky.cloudHeight, 5.0f, 50.0f, 12000.0f, "%.0f m");
-                ui::tooltip("Meters above the ground where their base is");
-                changed |= ui::dragFloat("Thickness", settings.sky.cloudThickness, 5.0f, 50.0f, 8000.0f, "%.0f m");
-            }
-        }
-        if (ui::section("Fog")) {
-            changed |= ui::color("Color##fog", settings.fogColor, true);
-            changed |= ui::dragFloat("Density", settings.fogDensity, 0.0005f, 0.0f, 1.0f, "%.4f");
-            changed |= ui::dragFloat("Thins With Height", settings.fogHeightFalloff, 0.001f, 0.0f, 2.0f, "%.3f");
-            ui::tooltip("Above zero the fog lies low, as mist in a valley, and thins at this rate per meter of height");
-            changed |= ui::dragFloat("Glow Toward Sun", settings.fogSunScatter, 0.02f, 0.0f, 20.0f);
-            changed |= ui::dragInt("Light Shafts", settings.fogShaftSteps, 0.2f, 0, 48);
-            ui::tooltip("Above zero the fog glows only where the sun reaches it: what stands in the sun's way casts beams of shadow through the mist. The number is how finely the fog is walked through; 12 to 24 is usual, and each step costs. Needs Glow Toward Sun above zero");
-        }
-        if (ui::section("Wind")) {
-            changed |= ui::dragVec3("Velocity", settings.wind, 0.05f, "%.2f m/s");
-            changed |= ui::sliderFloat("Gusts", settings.windGustiness, 0.0f, 1.0f);
-            ImGui::TextDisabled("Carries particles with Wind Influence above zero.");
-        }
     }
 
-    void drawQuality(EditorContext& editor, RenderSettings& settings, bool& changed) {
-        bool canTrace = editor.engine.renderer().canTraceRays();
-        bool hasExtras = editor.engine.renderer().hasExtras();
-        // One choice for the whole: four levels, from what any Mac runs at full speed to the best there is.
-        if (ui::section("Ray Tracing")) {
-            static const char* names[] = {"Low", "Medium", "High", "Ultra"};
-            static const char* what[] = {"Shadow maps only. Fast on every Mac, iPhone and iPad.",
-                                         "The sun's shadows ray traced: exact at any distance, soft far from what casts them. Less than a ray a pixel.",
-                                         "And the sky's light hidden where it really is (under a car, in a corner), and reflections on smooth things. About a ray a pixel.",
-                                         "And light bounced off what is lit, reflections on rougher things, smoother shadow edges. About a ray and a half a pixel."};
-            LightingQuality current = lightingQualityOf(settings);
-            // What the project's quality lets through of it.
-            const GameQuality* quality = editor.engine.quality ? &*editor.engine.quality : nullptr;
-            LightingQuality most = quality ? quality->rayTracing : LightingQuality::Ultra;
-            float width = (ImGui::GetContentRegionAvail().x - 3 * 4) / 4;
-            for (int level = 0; level < 4; level++) {
-                if (level > 0) ImGui::SameLine(0, 4);
-                bool isOn = int(current) == level;
-                ImGui::BeginDisabled(level > 0 && !canTrace);
-                ImGui::PushStyleColor(ImGuiCol_Button, isOn ? ImVec4(0.95f, 0.47f, 0.18f, 1) : ImGui::GetStyleColorVec4(ImGuiCol_Button));
-                if (ImGui::Button(names[level], ImVec2(width, 0))) {
-                    applyLightingQuality(settings, LightingQuality(level));
-                    if (level > 1 && !hasExtras) settings.rayTracedOcclusion = settings.rayTracedReflections = settings.rayTracedBounce = false;
-                    changed = true;
-                }
-                ImGui::PopStyleColor();
-                ImGui::EndDisabled();
-                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", what[level]);
-            }
-            ImGui::TextWrapped("%s", current == LightingQuality::Custom ? "Custom: set one by one below." : what[int(current)]);
-            // The scene asks for more than the project's quality gives: said, with the way there.
-            RenderSettings given = settings;
-            limitLightingQuality(given, most);
-            bool isLimited = canTrace && (given.rayTracedShadows != settings.rayTracedShadows || given.rayTracedOcclusion != settings.rayTracedOcclusion ||
-                                          given.rayTracedReflections != settings.rayTracedReflections || given.rayTracedBounce != settings.rayTracedBounce);
-            if (isLimited) {
-                ImGui::Spacing();
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.98f, 0.72f, 0.35f, 1));
-                ImGui::TextWrapped("The project's quality is at %s for ray tracing: this scene is drawn with that much of it.", names[int(most)]);
-                ImGui::PopStyleColor();
-                if (ImGui::SmallButton("Project Settings > Quality")) editor.showProjectSettings("Quality");
-            }
-            if (!canTrace) {
-                ImGui::TextDisabled("%s", editor.engine.renderer().device().supportsRayTracing()
-                                                ? "The ray tracing shaders did not compile here (see the console): Low only."
-                                                : "This GPU cannot trace rays: Low only.");
-            }
-        }
-        if (ui::section("Shadow Maps")) {
-            changed |= ui::checkbox("Enabled", settings.shadowsEnabled);
+    /// How this scene's shadows and shade look. How they are worked out (shadow maps or rays,
+    /// how sharp, how many rays) is the project's, the same for every scene: Project Settings > Quality.
+    void drawShading(EditorContext& editor, RenderSettings& settings, bool& changed) {
+        if (ui::section("Shadows")) {
             changed |= ui::dragFloat("Distance", settings.cascades.shadowDistance, 0.5f, 5.0f, 2000.0f, "%.0f m");
-            ui::tooltip("How far from the camera this scene's shadows should reach. A racing circuit wants more than a room");
+            ui::tooltip("How far from the camera this scene's shadows reach. A racing circuit wants more than a room");
             if (const GameQuality* quality = editor.engine.quality ? &*editor.engine.quality : nullptr; quality && quality->shadowDistance < settings.cascades.shadowDistance) {
                 ImGui::TextDisabled("Up to %.0f m at the project's quality.", quality->shadowDistance);
             }
-            ImGui::TextDisabled("How sharp: Project Settings > Quality.");
             changed |= ui::dragFloat("Bias", settings.shadowBias, 0.00001f, 0.0f, 0.01f, "%.5f");
+            ui::tooltip("Shadow maps: how far a surface's own shadow is pushed back. Raise it if surfaces are striped by their own shadow");
             changed |= ui::dragFloat("Normal Offset", settings.shadowNormalOffset, 0.05f, 0.0f, 10.0f);
-            if (settings.rayTracedShadows && canTrace) ImGui::TextDisabled("Ray traced shadows are on: the maps are not used.");
+            ui::tooltip("Shadow maps: how far along its facing a surface looks for its shadow. Raise it for stripes on slopes");
         }
-        if (ui::section("Ray Traced Shadows")) {
-            ImGui::BeginDisabled(!canTrace);
-            changed |= ui::checkbox("Enabled##rt", settings.rayTracedShadows);
-            ImGui::BeginDisabled(!settings.rayTracedShadows);
-            changed |= ui::dragInt("Rays at an Edge", settings.shadowRayCount, 0.1f, 1, 16);
-            ui::tooltip("One ray answers for a pixel well inside the light or a shadow. Along a shadow's edge this many are sent, to find how much of the sun shows: more is a smoother edge, and costs little");
-            ImGui::EndDisabled();
-            ImGui::EndDisabled();
-        }
-        // The rest uses the rays the shadows already send for: off with them.
-        bool canRest = canTrace && hasExtras && settings.rayTracedShadows;
-        if (ui::section("Ray Traced Ambient Light")) {
-            ImGui::BeginDisabled(!canRest);
-            changed |= ui::checkbox("Enabled##ao-rt", settings.rayTracedOcclusion);
-            ui::tooltip("The sky's light is hidden by what is really in the way: under a car, in a corner");
-            ImGui::BeginDisabled(!settings.rayTracedOcclusion);
-            changed |= ui::dragInt("Rays##ao", settings.occlusionRayCount, 0.1f, 1, 8);
-            ui::tooltip("Sent for one pixel in four, before the scene is drawn, and smoothed: 1 is enough for the shade of corners, 2 for bounced light");
-            changed |= ui::checkbox("Bounced Light", settings.rayTracedBounce);
-            ui::tooltip("Global illumination, one bounce: a red wall in the sun tints the floor beside it");
-            ImGui::BeginDisabled(!settings.rayTracedBounce);
-            changed |= ui::dragFloat("Bounce Strength", settings.bounceIntensity, 0.02f, 0.0f, 8.0f);
-            ImGui::EndDisabled();
-            ImGui::EndDisabled();
-            ImGui::EndDisabled();
-        }
-        if (ui::section("Ray Traced Reflections")) {
-            ImGui::BeginDisabled(!canRest);
-            changed |= ui::checkbox("Enabled##refl", settings.rayTracedReflections);
-            ui::tooltip("Smooth surfaces show what is around them. Each is weighed by the surface's own shine: rough things barely reflect");
-            ImGui::BeginDisabled(!settings.rayTracedReflections);
-            changed |= ui::sliderFloat("Up to Roughness", settings.reflectionMaxRoughness, 0.05f, 1.0f);
-            ui::tooltip("Only surfaces smoother than this send a reflection ray, fading out toward it; rougher ones mirror the sky. Lower is faster");
-            changed |= ui::sliderFloat("Strength", settings.reflectionStrength, 0.0f, 1.5f);
-            ImGui::EndDisabled();
-            ImGui::EndDisabled();
-        }
-        if (!canRest && canTrace) ImGui::TextDisabled(hasExtras ? "Ambient light and reflections need Ray Traced Shadows on." : "The extra shaders did not compile (see the console).");
-        if (ui::section("Screen Ambient Occlusion")) {
-            changed |= ui::checkbox("Enabled##ao", settings.ambientOcclusionEnabled);
-            ui::tooltip("A cheap darkening of creases from the picture itself. Ray traced ambient light does it better where it is on");
-            changed |= ui::dragFloat("Radius", settings.ambientOcclusionRadius, 0.01f, 0.01f, 10.0f);
-            changed |= ui::dragFloat("Strength", settings.ambientOcclusionIntensity, 0.01f, 0.0f, 4.0f);
-            changed |= ui::dragFloat("Contrast", settings.ambientOcclusionPower, 0.01f, 0.1f, 8.0f);
-        }
+        // Said once, with the way there: how all of it is drawn is not set here.
+        ImGui::Spacing();
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextDisabled("Shadow maps or ray tracing, and how sharp, are the project's: the same for every scene.");
+        ImGui::PopTextWrapPos();
+        if (ImGui::SmallButton("Project Settings > Quality")) editor.showProjectSettings("Quality");
     }
 
     /// Every light of the scene in one table: turn each on and off, set it, go to it.
@@ -255,7 +134,138 @@ private:
 
 };
 
-/// Rendering: how the picture is made from the lit scene. The camera's film, effects, quality.
+/// Environment: the world of the game. Its sky and clouds, the air (fog, light shafts), the
+/// weather and the wind it brings, the sea. Saved with the scene.
+class EnvironmentPanel final : public Panel {
+public:
+    EnvironmentPanel() {
+        title = "Environment";
+        firstBeside = "Lighting";
+    }
+
+    void draw(EditorContext& editor) override {
+        RenderSettings& settings = editor.engine.renderer().settings;
+        bool changed = false;
+        if (ui::section("Sky")) {
+            // Automatic: the sky follows the sun by itself, day, sunset, night with its moon and
+            // stars, and lights the fog and the clouds to match. Or a sky of fixed colors.
+            int kind = settings.sky.sunsetColors ? 0 : 1;
+            if (ui::combo("Sky", kind, {"Automatic: day, sunset, night", "Fixed colors"})) {
+                settings.sky.sunsetColors = kind == 0;
+                if (settings.sky.sunsetColors && settings.sky.stars <= 0.0f) settings.sky.stars = 1.0f;
+                changed = true;
+            }
+            ui::tooltip(settings.sky.sunsetColors ? "Turn the sun (its rotation) and the sky follows: gold, orange and red as it sets, the clouds lit from below, then night with the moon across the sky from it and the stars. The colors below are the clear day's"
+                                                  : "The sky is the colors below, whatever the sun does");
+            changed |= ui::color(settings.sky.sunsetColors ? "Day Zenith" : "Zenith", settings.sky.zenithColor, true);
+            changed |= ui::color(settings.sky.sunsetColors ? "Day Horizon" : "Horizon", settings.sky.horizonColor, true);
+            if (settings.sky.sunsetColors) {
+                changed |= ui::sliderFloat("Moon", settings.sky.moon, 0.0f, 2.0f);
+                ui::tooltip("At night: the moon across the sky from the sun, which lights the scene with a cold, dim light and casts shadows. 0 a night with no moon, 1 a full moon");
+                changed |= ui::sliderFloat("Stars", settings.sky.stars, 0.0f, 3.0f);
+                ui::tooltip("At night, when the sun is down: 0 none, 1 a clear night far from any town");
+            }
+            changed |= ui::color("Ground", settings.sky.groundColor, true);
+            changed |= ui::dragFloat("Brightness", settings.sky.intensity, 0.01f, 0.0f, 100.0f);
+        }
+        if (ui::section("Clouds")) {
+            changed |= ui::sliderFloat("Coverage", settings.sky.cloudCoverage, 0.0f, 1.0f);
+            changed |= ui::dragFloat("Scale", settings.sky.cloudScale, 0.01f, 0.05f, 20.0f);
+            changed |= ui::dragVec2("Drift", settings.sky.cloudSpeed, 0.001f);
+            changed |= ui::checkbox("With Depth", settings.sky.cloudsHaveDepth);
+            ui::tooltip("Clouds as volumes, thick and thin, lit by the sun through them: a camera can fly in, through and above them. Costs more than the flat layer");
+            if (settings.sky.cloudsHaveDepth) {
+                changed |= ui::dragFloat("Height", settings.sky.cloudHeight, 5.0f, 50.0f, 12000.0f, "%.0f m");
+                ui::tooltip("Meters above the ground where their base is");
+                changed |= ui::dragFloat("Thickness", settings.sky.cloudThickness, 5.0f, 50.0f, 8000.0f, "%.0f m");
+            }
+        }
+        if (ui::section("Fog")) {
+            changed |= ui::color("Color##fog", settings.fogColor, true);
+            if (settings.sky.sunsetColors) {
+                changed |= ui::checkbox("Lit by the Sun", settings.fogLitBySun);
+                ui::tooltip("The color above is the fog's at noon: it goes gold as the sun sets and dark at night, lit then by the moon. Off: always this color");
+            }
+            changed |= ui::dragFloat("Density", settings.fogDensity, 0.0005f, 0.0f, 1.0f, "%.4f");
+            changed |= ui::dragFloat("Thins With Height", settings.fogHeightFalloff, 0.001f, 0.0f, 2.0f, "%.3f");
+            ui::tooltip("Above zero the fog lies low, as mist in a valley, and thins at this rate per meter of height");
+            changed |= ui::dragFloat("Glow Toward Sun", settings.fogSunScatter, 0.02f, 0.0f, 20.0f);
+            bool shafts = settings.fogShaftSteps > 0;
+            if (ui::checkbox("Light Shafts", shafts)) {
+                settings.fogShaftSteps = shafts ? 16 : 0;
+                if (shafts && settings.fogSunScatter <= 0.0f) settings.fogSunScatter = 2.0f;
+                if (shafts && settings.fogDensity <= 0.0f) settings.fogDensity = 0.002f;
+                changed = true;
+            }
+            ui::tooltip("The air glows only where the sun reaches it: what stands in its way (a tree, a building, a cloud's edge) casts beams of light and shadow through it. How finely: Project Settings > Quality > Effects");
+        }
+        if (ui::section("Weather")) {
+            // Built in, none by default: a game that wants its own leaves these at 0.
+            changed |= ui::sliderFloat("Rain", settings.weather.rain, 0.0f, 1.0f);
+            ui::tooltip("Rain round the camera, with the wind: drops that splash on whatever they hit and leave rings on water. The sky clouds over and the sun dims as it rains. 0 none, 1 a downpour");
+            changed |= ui::sliderFloat("Storm", settings.weather.storm, 0.0f, 1.0f);
+            ui::tooltip("Lightning now and then, a few kilometers away or nearer: bolts down from the clouds, and flashes inside them that light them from within. 1 every few seconds. The wind rises with it, to a gale. With rain or without");
+            changed |= ui::sliderFloat("Snow", settings.weather.snow, 0.0f, 1.0f);
+            ui::tooltip("Snow round the camera: flakes that drift down slowly, sway, go with the wind and melt where they land (nothing settles yet). The sky clouds over. 0 none, 1 a heavy fall");
+            if (settings.weather.rain > 0 || settings.weather.storm > 0 || settings.weather.snow > 0) ImGui::TextDisabled("It moves while the game runs, or with Simulate on.");
+            // The wind is the weather's too: rain freshens it, a storm makes a gale of it.
+            ui::subheading("Wind");
+            // One wind for the whole scene, set as how hard it blows and which way (what is kept is its velocity along x and z).
+            static float lastHeading = 73.0f;
+            float speed = simd::length(Vec2{settings.wind.x, settings.wind.z});
+            float heading = speed > 1e-4f ? std::atan2(settings.wind.x, -settings.wind.z) * (180.0f / kPi) : lastHeading;
+            if (heading < 0) heading += 360.0f;
+            bool isMoved = ui::dragFloat("Speed", speed, 0.05f, 0.0f, 40.0f, "%.1f m/s");
+            ui::tooltip("The scene's own, before the weather adds to it (rain a little, a storm a gale): 2 a light air, 6 a breeze that raises small waves, 12 a strong wind and white crests, 20 a gale");
+            isMoved |= ui::dragFloat("Blows Toward", heading, 0.5f, 0.0f, 360.0f, "%.0f deg");
+            ui::tooltip("0 toward -Z, 90 toward +X: the way waves run, grass leans and smoke drifts");
+            if (isMoved) {
+                lastHeading = heading;
+                float turn = heading * (kPi / 180.0f);
+                settings.wind = Vec3{std::sin(turn) * speed, 0, -std::cos(turn) * speed};
+                changed = true;
+            }
+            changed |= ui::sliderFloat("Gusts", settings.windGustiness, 0.0f, 1.0f);
+        }
+        if (ui::section("Water")) {
+            // The scene's sea: everywhere below its level. Its waves are the wind's and the weather's.
+            SeaSettings& sea = settings.sea;
+            changed |= ui::checkbox("Sea", sea.enabled);
+            ui::tooltip("Water everywhere below a level, out to the horizon: things float on it (Buoyancy), its waves rise with the wind and the weather, the sun's light crawls in lines over its bottom, and under its level the camera is under water. Off: no sea. (Water of the game's own, a pond or a pool, is a shader: Assets > New > Water Shader)");
+            if (sea.enabled) {
+                changed |= ui::dragFloat("Level", sea.level, 0.05f, -10000.0f, 10000.0f, "%.2f m");
+                ui::tooltip("The height of its surface at rest. Below it all is under water");
+                ui::subheading("Color");
+                changed |= ui::color("Deep##sea", sea.color, false);
+                ui::tooltip("Its color where it is deep: what is left of white light after a long way through it. Red goes first, then green");
+                changed |= ui::color("Shallow##sea", sea.shallowColor, false);
+                ui::tooltip("The color it takes over a light bottom a meter or two down: turquoise over sand in the tropics, green in a northern sea");
+                changed |= ui::dragFloat("Clarity", sea.clarity, 0.1f, 0.2f, 80.0f, "%.1f m");
+                ui::tooltip("How far one sees through it, down from above and across under it: 3 a murky harbor, 10 a clear sea, 40 a lagoon");
+                changed |= ui::sliderFloat("Scattering", sea.scattering, 0.0f, 3.0f);
+                ui::tooltip("How much light its body sends back up, in its deep color: 0 dark ink, 1 a real sea, 2 and more a glowing cartoon lagoon");
+                ui::subheading("Surface");
+                changed |= ui::sliderFloat("Reflections", sea.reflections, 0.0f, 1.0f);
+                ui::tooltip("How much it mirrors the sky and what stands over it: 1 as real water does, less for a stylized look");
+                changed |= ui::sliderFloat("Ripples", sea.ripples, 0.0f, 2.0f);
+                ui::tooltip("The small waves on it, over the swell: 0 a glassy surface, 1 a real sea's, 2 choppy");
+                changed |= ui::sliderFloat("Caustics", sea.caustics, 0.0f, 3.0f);
+                ui::tooltip("The lines of light its waves gather on its bottom, moving with them: 0 none, 1 as real, more to draw them strong");
+                ui::subheading("Foam");
+                changed |= ui::sliderFloat("Shore", sea.foam, 0.0f, 2.0f);
+                ui::tooltip("White where it meets the shore and what stands in it: a beach, a rock, a hull");
+                changed |= ui::sliderFloat("Whitecaps", sea.whitecaps, 0.0f, 2.0f);
+                ui::tooltip("White on the crests of waves that break: none below a fresh breeze (5 m/s), more the harder it blows");
+                ImGui::TextDisabled("Its waves: the wind, in Weather.");
+            }
+        }
+        if (changed) editor.scene.markChanged();
+    }
+};
+
+/// Rendering: how the lit scene is drawn. The shade in corners, what is out of focus, what moves
+/// too fast to be sharp. How many pixels, how smooth the edges and whether light is traced with
+/// rays are the project's: Project Settings > Quality.
 class RenderingPanel final : public Panel {
 public:
     RenderingPanel() { title = "Rendering"; }
@@ -264,21 +274,54 @@ public:
         RenderSettings& settings = editor.engine.renderer().settings;
         bool changed = false;
 
-        if (ui::section("Bloom")) {
-            changed |= ui::checkbox("Enabled##bloom", settings.bloomEnabled);
-            changed |= ui::dragFloat("Amount", settings.bloomIntensity, 0.002f, 0.0f, 2.0f);
-            changed |= ui::dragFloat("Threshold", settings.bloomThreshold, 0.01f, 0.0f, 50.0f);
-            changed |= ui::dragFloat("Knee", settings.bloomKnee, 0.01f, 0.0f, 1.0f);
+        if (ui::section("Ambient Occlusion")) {
+            changed |= ui::checkbox("Enabled##ao", settings.ambientOcclusionEnabled);
+            ui::tooltip("The sky's light kept out of creases and corners, worked out from the picture. Where light is ray traced, the rays do it instead");
+            changed |= ui::dragFloat("Radius", settings.ambientOcclusionRadius, 0.01f, 0.01f, 10.0f);
+            ui::tooltip("How wide the shade in creases and corners is, in meters");
+            changed |= ui::dragFloat("Strength", settings.ambientOcclusionIntensity, 0.01f, 0.0f, 4.0f);
+            changed |= ui::dragFloat("Contrast", settings.ambientOcclusionPower, 0.01f, 0.1f, 8.0f);
         }
-        if (ui::section("Camera and Film")) {
+        if (ui::section("Depth of Field")) {
+            changed |= ui::checkbox("Enabled##dof", settings.depthOfField);
+            if (settings.depthOfField) {
+                changed |= ui::dragFloat("Focus Distance", settings.focusDistance, 0.05f, 0.1f, 1000.0f, "%.2f m");
+                changed |= ui::dragFloat("In Focus", settings.focusRange, 0.05f, 0.0f, 500.0f, "%.2f m");
+                ui::tooltip("How many meters around the focus distance stay sharp");
+                changed |= ui::sliderFloat("Blur", settings.focusBlur, 0.0f, 32.0f);
+            }
+        }
+        if (ui::section("Motion Blur")) {
+            changed |= ui::checkbox("Enabled##motion", settings.motionBlur);
+            ui::tooltip("What streaks past as the camera turns or speeds along");
+            if (settings.motionBlur) changed |= ui::sliderFloat("Shutter", settings.motionBlurAmount, 0.0f, 1.0f);
+        }
+        ImGui::Spacing();
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextDisabled("How many pixels, how smooth the edges, the shadows' sharpness and ray tracing are the project's: the same for every scene.");
+        ImGui::PopTextWrapPos();
+        if (ImGui::SmallButton("Project Settings > Quality")) editor.showProjectSettings("Quality");
+        if (changed) editor.scene.markChanged();
+    }
+};
+
+/// Post Processing: what is done to the finished picture, as a camera and its film do: how it is
+/// exposed, its glow, its colors, the lens it was taken through.
+class PostProcessingPanel final : public Panel {
+public:
+    PostProcessingPanel() {
+        title = "Post Processing";
+        firstBeside = "Rendering";
+    }
+
+    void draw(EditorContext& editor) override {
+        RenderSettings& settings = editor.engine.renderer().settings;
+        bool changed = false;
+
+        if (ui::section("Exposure and Tone Mapping")) {
             changed |= ui::dragFloat("Exposure", settings.exposure, 0.01f, 0.01f, 50.0f);
             changed |= ui::combo("Tone Mapping", settings.toneMapper, {"ACES", "Reinhard", "None"});
-            changed |= ui::sliderFloat("Vignette", settings.vignette, 0.0f, 1.0f);
-            changed |= ui::sliderFloat("Lens Distortion", settings.lensDistortion, 0.0f, 1.0f);
-            changed |= ui::dragFloat("Color Fringes", settings.chromaticAberration, 0.0005f, 0.0f, 0.1f, "%.4f");
-            changed |= ui::dragFloat("Film Grain", settings.filmGrain, 0.001f, 0.0f, 0.5f);
-        }
-        if (ui::section("Exposure and Color")) {
+            ui::tooltip("How the light of the scene, brighter than any screen, is brought within it. ACES as film does; None cuts what is too bright");
             changed |= ui::checkbox("Adapts", settings.autoExposure);
             ui::tooltip("The exposure follows how bright the scene is, as an eye does: brighter in a tunnel, darker in the sun");
             if (settings.autoExposure) {
@@ -287,22 +330,12 @@ public:
                 changed |= ui::dragFloat("Darkest", settings.darkestExposure, 0.01f, 0.01f, 10.0f);
                 changed |= ui::dragFloat("Brightest", settings.brightestExposure, 0.05f, 0.1f, 100.0f);
             }
-            changed |= pickValue(editor, Entity{}, "picture", "Grading Table", settings.colorGrading);
-            ui::tooltip("A picture in Assets of 32 squares of 32 pixels side by side (red across, green down, blue square to square). "
-                        "Assets/Grading/Neutral 32.png changes nothing: grade a copy of it in a photo editor. Empty: none");
-            if (!settings.colorGrading.empty()) changed |= ui::sliderFloat("Grading Amount", settings.colorGradingAmount, 0.0f, 1.0f);
         }
-        if (ui::section("Depth of Field and Motion Blur")) {
-            changed |= ui::checkbox("Depth of Field", settings.depthOfField);
-            if (settings.depthOfField) {
-                changed |= ui::dragFloat("Focus Distance", settings.focusDistance, 0.05f, 0.1f, 1000.0f, "%.2f m");
-                changed |= ui::dragFloat("In Focus", settings.focusRange, 0.05f, 0.0f, 500.0f, "%.2f m");
-                ui::tooltip("How many meters around the focus distance stay sharp");
-                changed |= ui::sliderFloat("Blur", settings.focusBlur, 0.0f, 32.0f);
-            }
-            changed |= ui::checkbox("Motion Blur", settings.motionBlur);
-            ui::tooltip("What streaks past as the camera turns or speeds along");
-            if (settings.motionBlur) changed |= ui::sliderFloat("Shutter", settings.motionBlurAmount, 0.0f, 1.0f);
+        if (ui::section("Bloom")) {
+            changed |= ui::checkbox("Enabled##bloom", settings.bloomEnabled);
+            changed |= ui::dragFloat("Amount", settings.bloomIntensity, 0.002f, 0.0f, 2.0f);
+            changed |= ui::dragFloat("Threshold", settings.bloomThreshold, 0.01f, 0.0f, 50.0f);
+            changed |= ui::dragFloat("Knee", settings.bloomKnee, 0.01f, 0.0f, 1.0f);
         }
         if (ui::section("Color")) {
             changed |= ui::sliderFloat("Contrast", settings.contrast, 0.5f, 1.5f);
@@ -311,10 +344,18 @@ public:
             ui::tooltip("Below zero bluer, as at dusk; above, warmer, as by a fire");
             changed |= ui::sliderFloat("Tint", settings.tint, -1.0f, 1.0f);
             ui::tooltip("Below zero greener, above more magenta");
+            changed |= pickValue(editor, Entity{}, "picture", "Grading Table", settings.colorGrading);
+            ui::tooltip("A picture in Assets of 32 squares of 32 pixels side by side (red across, green down, blue square to square). "
+                        "Assets/Grading/Neutral 32.png changes nothing: grade a copy of it in a photo editor. Empty: none");
+            if (!settings.colorGrading.empty()) changed |= ui::sliderFloat("Grading Amount", settings.colorGradingAmount, 0.0f, 1.0f);
+        }
+        if (ui::section("Lens and Film")) {
+            changed |= ui::sliderFloat("Vignette", settings.vignette, 0.0f, 1.0f);
+            changed |= ui::sliderFloat("Lens Distortion", settings.lensDistortion, 0.0f, 1.0f);
+            changed |= ui::dragFloat("Color Fringes", settings.chromaticAberration, 0.0005f, 0.0f, 0.1f, "%.4f");
+            changed |= ui::dragFloat("Film Grain", settings.filmGrain, 0.001f, 0.0f, 0.5f);
             changed |= ui::sliderFloat("Sharpen", settings.sharpen, 0.0f, 1.0f);
             ui::tooltip("Crisper edges: good with a render scale below 1");
-        }
-        if (ui::section("Lens")) {
             changed |= ui::sliderFloat("Flare##flare", settings.lensFlare, 0.0f, 2.0f);
             ui::tooltip("Light of the sun scattered in the camera's glass: a glow round it, a star of streaks, a halo, and colored ghosts across the picture, "
                         "while the sun is in view and not hidden. 0: none");
@@ -366,7 +407,7 @@ public:
             if (ImGui::Selectable("##row", chosen_ == i, ImGuiSelectableFlags_AllowOverlap, ImVec2(0, 24))) chosen_ = chosen_ == i ? -1 : i;
             ImDrawList* draw = ImGui::GetWindowDrawList();
             ui::drawIcon(draw, ImVec2(rowAt.x + 10, rowAt.y + 12), 13, action.isAxis ? "logic" : "ui", ImGui::GetColorU32(ImGuiCol_Text));
-            draw->AddText(ImVec2(rowAt.x + 24, rowAt.y + 4), ImGui::GetColorU32(ImGuiCol_Text), action.name.empty() ? "(no name)" : action.name.c_str());
+            draw->AddText(ImVec2(rowAt.x + 28, rowAt.y + 4), ImGui::GetColorU32(ImGuiCol_Text), action.name.empty() ? "(no name)" : action.name.c_str());
             std::string bound = summaryOf(action);
             draw->AddText(ImVec2(rowAt.x + 160, rowAt.y + 4), ImGui::GetColorU32(ImGuiCol_TextDisabled), bound.c_str());
             // The meter: lit while pressed; an axis from the middle.
@@ -763,7 +804,9 @@ private:
 
 void registerRenderingPanel(EditorContext& editor) {
     editor.registry.addPanel(nullptr, std::make_unique<LightingPanel>());
+    editor.registry.addPanel(nullptr, std::make_unique<EnvironmentPanel>());
     editor.registry.addPanel(nullptr, std::make_unique<RenderingPanel>());
+    editor.registry.addPanel(nullptr, std::make_unique<PostProcessingPanel>());
 }
 
 void drawInputSettings(EditorContext& editor) {

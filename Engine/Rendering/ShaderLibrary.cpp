@@ -235,6 +235,13 @@ MTL::RenderPipelineState* ShaderLibrary::pipeline(const PipelineDescription& des
                 color->setSourceAlphaBlendFactor(MTL::BlendFactorZero);
                 color->setDestinationAlphaBlendFactor(MTL::BlendFactorOne);
             }
+            if (description.blend == BlendMode::Through) {
+                // What is there, times the second color, plus the first: each color of it kept on its own.
+                color->setSourceRGBBlendFactor(MTL::BlendFactorOne);
+                color->setDestinationRGBBlendFactor(MTL::BlendFactorSource1Color);
+                color->setSourceAlphaBlendFactor(MTL::BlendFactorZero);
+                color->setDestinationAlphaBlendFactor(MTL::BlendFactorOne);
+            }
         }
     }
     if (description.secondColorFormat != MTL::PixelFormatInvalid) {

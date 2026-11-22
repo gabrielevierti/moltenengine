@@ -492,7 +492,7 @@ private:
                 else if (ImGui::IsKeyPressed(ImGuiKey_Enter, false)) picked = first;
             } else {
                 // The order people look for things in: what is seen, then how it behaves.
-                std::vector<std::string> categories = {"Mesh", "Rendering", "Physics", "Audio", "Effects", "UI", "Vehicles", "Gameplay", "Scripts"};
+                std::vector<std::string> categories = {"Mesh", "Rendering", "Physics", "Animation", "Audio", "Effects", "Navigation", "Paths", "Vehicles", "UI", "Network", "Scripts", "Miscellaneous"};
                 for (const Choice& choice : choices) {
                     if (std::find(categories.begin(), categories.end(), choice.category) == categories.end()) categories.push_back(choice.category);
                 }
@@ -626,12 +626,13 @@ private:
 /// A piece of the game's interface: something of the UI category, drawn on the screen.
 bool isInterfacePiece(Scene& scene, Entity entity) {
     for (const ComponentType& type : ComponentRegistry::instance().types()) {
-        if (type.category == "UI" && type.get && type.get(scene, entity)) return true;
+        // (Something of the world that only draws over the game with the interface, a weapon's sights, is not one: it has no place on the screen.)
+        if ((type.category == "UI" || (type.isInterfacePiece && type.findField("anchor"))) && type.get && type.get(scene, entity)) return true;
     }
     return false;
 }
 
-void drawAddComponentMenu(EditorContext& editor) {
+std::vector<MenuEntry> addComponentEntries(EditorContext& editor) {
     Scene& scene = editor.engine.scene;
     std::vector<Entity> selected = editor.scene.selection();
     // Each by category, in the order people look for things in: what is seen, then how it behaves.
@@ -656,27 +657,35 @@ void drawAddComponentMenu(EditorContext& editor) {
         choices.push_back({type.category, ComponentRegistry::displayName(type.name), [has, &scene](Entity entity) { return has(scene, entity); },
                            [add, &scene](Entity entity) { add(scene, entity); }});
     }
-    std::vector<std::string> categories = {"Mesh", "Rendering", "Physics", "Audio", "Effects", "UI", "Vehicles", "Gameplay", "Scripts"};
+    std::vector<std::string> categories = {"Mesh", "Rendering", "Physics", "Animation", "Audio", "Effects", "Navigation", "Paths", "Vehicles", "UI", "Network", "Scripts", "Miscellaneous"};
     for (const Choice& choice : choices) {
         if (std::find(categories.begin(), categories.end(), choice.category) == categories.end()) categories.push_back(choice.category);
     }
+    std::vector<MenuEntry> entries;
     for (const std::string& category : categories) {
-        bool any = false;
-        for (const Choice& choice : choices) any = any || choice.category == category;
-        if (!any || !ImGui::BeginMenu(category.c_str())) continue;
+        MenuEntry submenu;
+        submenu.label = category;
         for (const Choice& choice : choices) {
             if (choice.category != category) continue;
             // Offered while any of the selected lacks it.
             bool isMissing = false;
             for (Entity entity : selected) isMissing = isMissing || (scene.isAlive(entity) && !choice.has(entity));
-            if (!ImGui::MenuItem(choice.name.c_str(), nullptr, false, isMissing)) continue;
-            for (Entity entity : selected) {
-                if (scene.isAlive(entity) && !choice.has(entity)) choice.add(entity);
-            }
-            editor.scene.markChanged();
+            MenuEntry entry;
+            entry.label = choice.name;
+            entry.isEnabled = isMissing;
+            auto has = choice.has;
+            auto add = choice.add;
+            entry.run = [&editor, has, add, selected] {
+                for (Entity entity : selected) {
+                    if (editor.engine.scene.isAlive(entity) && !has(entity)) add(entity);
+                }
+                editor.scene.markChanged();
+            };
+            submenu.children.push_back(std::move(entry));
         }
-        ImGui::EndMenu();
+        if (!submenu.children.empty()) entries.push_back(std::move(submenu));
     }
+    return entries;
 }
 
 void registerInspectorPanel(EditorContext& editor) {
@@ -861,7 +870,7 @@ bool drawEmitterProperties(EditorContext& editor, ParticleEmitter& emitter, bool
         changed |= ui::dragFloat("Drag", emitter.drag, 0.01f, 0.0f, 20.0f);
         ui::tooltip("How quickly the air slows them: light things (smoke) a lot, heavy ones (sparks) little");
         changed |= ui::sliderFloat("Wind", emitter.windInfluence, 0.0f, 1.0f);
-        ui::tooltip("How much the scene's wind (Lighting > Wind) carries them: 1 for smoke that goes wherever the air goes");
+        ui::tooltip("How much the scene's wind (Environment > Weather > Wind) carries them: 1 for smoke that goes wherever the air goes");
         ImGui::TreePop();
     }
     bool hasNoise = emitter.turbulence > 0;

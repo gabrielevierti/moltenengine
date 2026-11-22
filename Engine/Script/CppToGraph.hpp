@@ -11,9 +11,12 @@
 //     the component's own number fields (they become the script's variables);
 //   - a key pressed at the top of update (On Key Pressed), and a timer (On Timer).
 //
-// A line it has no box for is left out and named in `notConverted`, with its line number:
-// nothing is dropped without saying so. Code made from a graph and not changed since goes
-// back to that very graph, as it was laid out.
+// Code that says more than those boxes can (and most C++ does: a loop over the wheels, a
+// table of gears, a function of its own) is not cut down to what they can say. It becomes a
+// graph of C++ boxes instead (Script/CppBoxes.hpp): each statement in a box as it is written,
+// wired in the shape the code has, and written back out it is the same file to the character.
+// So every C++ file has a graph, and nothing in it is ever left out. Code made from a graph
+// and not changed since goes back to that very graph, as it was laid out.
 #pragma once
 
 #include "Script/Graph.hpp"
@@ -27,9 +30,10 @@ namespace molten::script {
 struct CppToGraphResult {
     std::optional<Graph> graph;
     std::string name;                           // the component's name: "PlayerController"
-    std::vector<std::string> notConverted;      // "line 14: transform->rotation = lookRotation(target)"
+    std::vector<std::string> notConverted;      // (always empty now: what has no box of its own is a C++ box)
     bool isTheKeptGraph = false;                // the graph the code was made from, unchanged
-    std::string error;                          // why there is no graph
+    bool isCodeAsBoxes = false;                 // the code itself, a statement to a box (Script/CppBoxes.hpp)
+    std::string error;                          // why there is no graph (never, now)
 };
 
 CppToGraphResult graphFromCpp(const std::string& code);

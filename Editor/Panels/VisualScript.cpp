@@ -2,6 +2,7 @@
 // What is drawn is saved as soon as the hand is off, and a game that is playing picks
 // the change up at once: scripts can be rewired while they run.
 #include "Editor.hpp"
+#include "Script/CppBoxes.hpp"
 #include "Script/CppToGraph.hpp"
 #include "Platform.hpp"
 #include "Script/Convert.hpp"
@@ -335,6 +336,33 @@ std::string convertGraphToCpp(EditorContext& editor, const std::string& graphPat
         editor.notify("Assets/" + graphPath + " could not be read as a visual script", ConsoleMessage::Level::Error);
         return {};
     }
+    if (script::hasCppBoxes(*graph)) {
+        // C++ laid out as boxes is the file it was made from: written back beside the graph, under the same
+        // name. What the file said before is kept in the project's Library, in case the boxes were the older of the two.
+        namespace fs = std::filesystem;
+        std::string relative = (fs::path(graphPath).parent_path() / (fs::path(graphPath).stem().string() + ".cpp")).generic_string();
+        std::string file = editor.assets.absolutePath(relative);
+        std::string written = script::cppFromBoxes(*graph);
+        std::optional<std::string> before = text::readFile(file);
+        if (before && *before == written) {
+            editor.notify("Assets/" + relative + " already says what the boxes say");
+            return relative;
+        }
+        std::error_code code;
+        if (before) {
+            fs::path kept = fs::path(editor.project.libraryDirectory()) / "Before Conversion" / fs::path(relative).filename();
+            fs::create_directories(kept.parent_path(), code);
+            text::writeFile(kept.string(), *before);
+        }
+        fs::create_directories(fs::path(file).parent_path(), code);
+        if (!text::writeFile(file, written)) {
+            editor.notify("Cannot write Assets/" + relative, ConsoleMessage::Level::Error);
+            return {};
+        }
+        editor.assets.refresh();
+        editor.notify("Wrote Assets/" + relative + " from its boxes" + (before ? ". What it said before is in Library/Before Conversion" : ""));
+        return relative;
+    }
     std::string name = script::typeNameFor(std::filesystem::path(graphPath).stem().string());
     std::string relative = editor.assets.uniquePath("Scripts", name, ".cpp");
     std::string file = editor.assets.absolutePath(relative);
@@ -364,12 +392,28 @@ std::string convertCppToGraph(EditorContext& editor, const std::string& cppPath)
     }
     std::string folder = std::filesystem::path(cppPath).parent_path().string();
     std::string relative = editor.assets.uniquePath(folder, std::filesystem::path(cppPath).stem().string(), ".graph");
+    if (converted.isCodeAsBoxes) {
+        // The code itself as boxes goes by the code's own name: Motor.cpp is Motor.graph, and is made again over
+        // the one made before (but never over a visual script of that name that is something else).
+        std::string same = (std::filesystem::path(cppPath).parent_path() / (std::filesystem::path(cppPath).stem().string() + ".graph")).generic_string();
+        std::optional<std::string> there = text::readFile(editor.assets.absolutePath(same));
+        std::optional<script::Graph> old = there ? script::Graph::fromText(*there) : std::nullopt;
+        if (!there || (old && script::hasCppBoxes(*old))) relative = same;
+    }
     if (!text::writeFile(editor.assets.absolutePath(relative), converted.graph->toText())) {
         editor.notify("Cannot write Assets/" + relative, ConsoleMessage::Level::Error);
         return {};
     }
     editor.assets.refresh();
-    if (converted.notConverted.empty()) {
+    if (converted.isCodeAsBoxes) {
+        int functions = 0, statements = 0;
+        for (const script::Node& node : converted.graph->nodes) {
+            functions += node.type == "CppFunction";
+            statements += node.type == "CppCode" || node.type == "CppIf" || node.type == "CppBlock";
+        }
+        editor.notify("Wrote Assets/" + relative + ": the code itself as boxes, " + std::to_string(functions) + (functions == 1 ? " function, " : " functions, ") +
+                      std::to_string(statements) + " statements, nothing left out. Convert to C++ Script writes it back");
+    } else if (converted.notConverted.empty()) {
         editor.notify("Wrote Assets/" + relative + ": " + converted.name + " as boxes and wires");
     } else {
         // What has no box is said line by line, so nothing goes missing without a word.

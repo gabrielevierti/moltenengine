@@ -223,6 +223,26 @@ TEST(players_of_one_game_see_each_other_move) {
     CHECK_NEAR(carla.at("Player").x, 0.0f, 0.05f);                      // the places to appear at come round again
 }
 
+TEST(a_game_for_several_is_played_alone_with_no_network) {
+    std::string game = writeTheGame();
+    Machine alone(game, "Solo");
+    alone.session().playAlone(alone.world);
+    for (int i = 0; i < 30; i++) alone.world.advance(1.0 / 60.0);
+    // Its own server and its only player: the player is there, with what moves it, and the scene's rules run here.
+    CHECK(alone.session().isOnline() && alone.session().isServer() && alone.session().localId() == 0 && alone.session().playerCount() == 1);
+    CHECK(alone.has("Player") && alone.part<CharacterMover>("Player") && alone.part<Collectible>("Gem 1") && alone.part<Shuttle>("Lift"));
+    CHECK(!alone.world.input.isPointerFree());                          // no menu holds the pointer out
+    // It walks to the gem ahead of where it appeared, and the gem is counted.
+    alone.world.scene.get<Transform>(alone.world.find("Player"))->position = Vec3{4, 0.1f, 0};
+    alone.world.input.setVirtualAxis("moveZ", -1);
+    for (int i = 0; i < 100; i++) alone.world.advance(1.0 / 60.0);
+    CHECK(alone.world.value("gems") == 1 && !alone.has("Gem 1"));
+    // Leaving puts the scene back as it was.
+    alone.session().leave(alone.world);
+    for (int i = 0; i < 5; i++) alone.world.advance(1.0 / 60.0);
+    CHECK(!alone.session().isOnline() && !alone.has("Player") && alone.has("Gem 1"));
+}
+
 TEST(what_is_told_to_a_networked_thing_reaches_the_machines_it_is_for) {
     std::string game = writeTheGame();
     Table table;

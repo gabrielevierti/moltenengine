@@ -65,8 +65,9 @@ struct GameMenu {
 
     void applyQuality(World& world, int quality) {
         RenderSettings& settings = world.sceneSettings();
-        // Low: shadow maps alone, a softer picture; Medium: traced sun shadows; High: traced light.
-        applyLightingQuality(settings, quality <= 0 ? LightingQuality::Low : quality == 1 ? LightingQuality::Medium : LightingQuality::High);
+        // Low: shadow maps alone, a softer picture; Medium and High: the light ray traced, with fewer rays at Medium.
+        if (quality <= 0) settings.rayTracedShadows = settings.rayTracedOcclusion = settings.rayTracedBounce = settings.rayTracedReflections = false;
+        else applyLightingQuality(settings, quality == 1 ? LightingQuality::Medium : LightingQuality::High);
         settings.renderScale = quality <= 0 ? 0.7f : quality == 1 ? 0.85f : 1.0f;
         // And smaller still, for a moment, when the GPU falls behind 60 frames a second (a phone, a hot one).
         settings.dynamicResolution = true;

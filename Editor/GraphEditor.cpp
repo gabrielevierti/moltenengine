@@ -1,5 +1,7 @@
 #include "GraphEditor.hpp"
 
+#include "Script/CppBoxes.hpp"
+
 #include <cstdlib>
 #include <cstdio>
 #include <sstream>
@@ -49,7 +51,24 @@ std::string pinLabel(const std::string& name) {
     return out;
 }
 
+/// How large a node is on the board (before the zoom): the usual card with a row for each pin, or,
+/// for a box that holds C++, as large as its code needs.
+ImVec2 sizeOf(const Node& node, const NodeDef* definition) {
+    size_t rows = definition ? std::max<size_t>(std::max(definition->inputs.size(), definition->outputs.size()), 1) : 1;
+    ImVec2 size(kNodeWidth, kTitleHeight + float(rows) * kRowHeight + 8);
+    float width = 0, height = 0;
+    if (cppBoxSize(node, width, height)) {
+        // Its ways out to the right ("true", "false", "body") have a row each and room for their names; "then" leaves below.
+        size_t exits = 0;
+        for (size_t i = 0; definition && i < definition->outputs.size(); i++) exits += definition->outputs[i].name != "then";
+        size.x = std::max(size.x, width + (exits > 0 ? 54.0f : 0.0f));
+        size.y = std::max(kTitleHeight + float(exits) * kRowHeight + 22, height);
+    }
+    return size;
+}
+
 ImU32 categoryColor(const std::string& category) {
+    if (category == "C++") return IM_COL32(86, 156, 214, 255);
     if (category == "Events") return IM_COL32(222, 78, 64, 255);
     if (category == "Flow") return IM_COL32(150, 156, 170, 255);
     if (category == "Transform") return IM_COL32(236, 136, 52, 255);
@@ -121,12 +140,13 @@ bool GraphEditor::drawValueEditor(Node& node, const PinDef& pin, float width) {
 bool GraphEditor::drawNode(Graph& graph, Node& node, const NodeDef* definition, ImVec2 origin, ImDrawList* drawList) {
     bool changed = false;
     const float z = zoom_;
-    const float nodeWidth = kNodeWidth * z, titleHeight = kTitleHeight * z, rowHeight = kRowHeight * z;
+    const ImVec2 size = sizeOf(node, definition);
+    const bool holdsCode = isCppBox(node.type);
+    const float nodeWidth = size.x * z, titleHeight = kTitleHeight * z, rowHeight = kRowHeight * z;
     ImGui::PushID(node.id);
     size_t inputCount = definition ? definition->inputs.size() : 0, outputCount = definition ? definition->outputs.size() : 0;
-    float rows = float(std::max<size_t>(std::max(inputCount, outputCount), 1));
     ImVec2 min(origin.x + node.x * z, origin.y + node.y * z);
-    ImVec2 max(min.x + nodeWidth, min.y + titleHeight + rows * rowHeight + 8 * z);
+    ImVec2 max(min.x + nodeWidth, min.y + size.y * z);
 
     // The body: a soft shadow, the card, its header tinted with the color of the node's family
     // under a bright band of it, and the title. Selected: an outline of light round it.
@@ -253,7 +273,14 @@ bool GraphEditor::drawNode(Graph& graph, Node& node, const NodeDef* definition, 
     // One pin: the dot on the edge, the wire that can be pulled from it, its menu.
     auto drawPin = [&](const PinDef& pin, bool isOutput, int row) {
         ImVec2 center(isOutput ? max.x : min.x, min.y + titleHeight + rowHeight * (float(row) + 0.5f) + 2 * z);
-        pins_[key(node.id, pin.name, isOutput)] = PinPlace{center, pin.type};
+        // A box of code is read downward: it is come to at its top left, and goes on ("then") from its bottom left,
+        // to the box under it. Its branches leave to the right, like any node's.
+        bool leavesLeft = false;
+        if (holdsCode && pin.type == PinType::Flow) {
+            if (!isOutput) center = ImVec2(min.x, min.y + titleHeight * 0.5f);
+            else if (pin.name == "then") center = ImVec2(min.x, max.y - 10 * z), leavesLeft = true;
+        }
+        pins_[key(node.id, pin.name, isOutput)] = PinPlace{center, pin.type, leavesLeft};
         ImGui::PushID(isOutput ? 1 : 0);
         ImGui::PushID(pin.name.c_str());
         float hit = std::max(18.0f * z, 12.0f);
@@ -295,8 +322,9 @@ bool GraphEditor::drawNode(Graph& graph, Node& node, const NodeDef* definition, 
         if (refusesDrag) color = withAlpha(color, 70);
         if (takesDrag) drawList->AddCircleFilled(center, radius + 4.0f * z, withAlpha(color, 60), 20);
         if (pin.type == PinType::Flow) {
-            // Flow pins are arrows: they say "next".
+            // Flow pins are arrows: they say "next". (Downward, where next is the box below.)
             ImVec2 a(center.x - radius * 0.8f, center.y - radius), b(center.x + radius, center.y), c(center.x - radius * 0.8f, center.y + radius);
+            if (leavesLeft) a = ImVec2(center.x - radius, center.y - radius * 0.8f), b = ImVec2(center.x + radius, center.y - radius * 0.8f), c = ImVec2(center.x, center.y + radius);
             if (isWired) drawList->AddTriangleFilled(a, b, c, color);
             else {
                 drawList->AddTriangleFilled(a, b, c, kNodeBody);
@@ -312,8 +340,54 @@ bool GraphEditor::drawNode(Graph& graph, Node& node, const NodeDef* definition, 
     float textOffset = (rowHeight - ImGui::GetFontSize()) * 0.5f;
     // Far out, the values are too small to change: they are only read.
     bool showsEditors = z >= 0.6f;
+    if (holdsCode && ImGui::IsRectVisible(min, max)) {
+        // The code it holds, as it is read, under the comment written above it in the file.
+        const float lineHeight = 17.0f * z, right = max.x - (outputCount > 1 ? 54.0f : 12.0f) * z;
+        ImVec2 at(min.x + 14 * z, min.y + titleHeight + 7 * z);
+        drawList->PushClipRect(ImVec2(min.x, min.y + titleHeight), ImVec2(right, max.y - 2 * z), true);
+        int shown = 0;
+        auto lines = [&](const std::string& words, ImU32 color, const char* before) {
+            size_t start = 0;
+            while (start <= words.size() && shown < 40) {
+                size_t end = words.find('\n', start);
+                if (end == std::string::npos) end = words.size();
+                std::string line = std::string(before) + words.substr(start, end - start);
+                drawList->AddText(ImVec2(at.x, at.y + lineHeight * float(shown)), color, shown == 39 && end < words.size() ? "..." : line.c_str());
+                shown++;
+                start = end + 1;
+            }
+        };
+        std::string comment = cppBoxComment(node), code = cppBoxText(node);
+        if (!comment.empty()) lines(comment, IM_COL32(118, 162, 116, 255), "// ");
+        if (!code.empty()) lines(code, IM_COL32(226, 229, 236, 255), "");
+        else if (comment.empty()) lines(node.type == "CppFile" ? "(a line end)" : "(nothing yet: double-click to write it)", IM_COL32(120, 126, 138, 255), "");
+        drawList->PopClipRect();
+        // Double-clicked: its code in a window of its own, to change.
+        ImGui::SetCursorScreenPos(ImVec2(min.x + 10 * z, min.y + titleHeight));
+        ImGui::InvisibleButton("##code", ImVec2(std::max(right - min.x - 10 * z, 8.0f), std::max(max.y - min.y - titleHeight, 8.0f)));
+        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+            selection_ = {node.id};
+            ImGui::OpenPopup("##code-editor");
+        } else if (ImGui::IsItemActivated() && !ImGui::GetIO().KeyShift && !selected) {
+            selection_ = {node.id};
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal) && !ImGui::IsPopupOpen("##code-editor")) ImGui::SetTooltip("Double-click to change the code");
+        ImGui::SetNextWindowSize(ImVec2(720, 0), ImGuiCond_Appearing);
+        if (ImGui::BeginPopup("##code-editor")) {
+            ImGui::SetWindowFontScale(1.0f);
+            ImGui::TextDisabled("%s", node.type == "CppIf" ? "if ( ... ): what has to hold" : node.type == "CppBlock" ? "The line that opens the block: for (...), while (...), each([&](Thing& thing)"
+                                      : node.type == "CppFunction" ? "The function's first line" : "C++, as it is written in the file");
+            std::string& text = node.values["code"];
+            int rows = 1;
+            for (char c : text) rows += c == '\n';
+            if (ImGui::InputTextMultiline("##text", &text, ImVec2(700, float(std::clamp(rows + 2, 4, 30)) * ImGui::GetTextLineHeight() + 8), ImGuiInputTextFlags_AllowTabInput)) changed = true;
+            if (ImGui::Button("Done")) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+    }
     for (size_t i = 0; i < inputCount; i++) {
         const PinDef& pin = definition->inputs[i];
+        if (holdsCode && pin.type != PinType::Flow) continue;          // its code is drawn above, not as a row
         bool isWired = drawPin(pin, false, int(i));
         float rowTop = min.y + titleHeight + rowHeight * float(i) + 2 * z;
         std::string label = pin.type == PinType::Flow ? std::string() : pinLabel(pin.name);
@@ -339,11 +413,14 @@ bool GraphEditor::drawNode(Graph& graph, Node& node, const NodeDef* definition, 
             }
         }
     }
+    int outputRow = 0;
     for (size_t i = 0; i < outputCount; i++) {
         const PinDef& pin = definition->outputs[i];
-        drawPin(pin, true, int(i));
+        // (A box of code's "then" is at its foot, not in a row.)
+        int row = holdsCode && pin.name == "then" ? 0 : outputRow++;
+        drawPin(pin, true, row);
         std::string label = pin.type == PinType::Flow && pin.name == "then" ? std::string() : pinLabel(pin.name);
-        float rowTop = min.y + titleHeight + rowHeight * float(i) + 2 * z;
+        float rowTop = min.y + titleHeight + rowHeight * float(row) + 2 * z;
         float labelWidth = ImGui::CalcTextSize(label.c_str()).x;
         drawList->AddText(ImVec2(max.x - 14 * z - labelWidth, rowTop + textOffset), kLabel, label.c_str());
     }
@@ -487,8 +564,9 @@ bool GraphEditor::draw(Graph& graph, ImVec2 size) {
         for (const Node& node : graph.nodes) {
             left = std::min(left, node.x);
             top = std::min(top, node.y);
-            right = std::max(right, node.x + kNodeWidth);
-            bottom = std::max(bottom, node.y + 150);
+            ImVec2 size = sizeOf(node, NodeLibrary::instance().find(node.type));
+            right = std::max(right, node.x + size.x);
+            bottom = std::max(bottom, node.y + size.y + 40);
         }
         targetZoom_ = std::clamp(std::min((boardSize.x - 100) / std::max(right - left, 1.0f), (boardSize.y - 100) / std::max(bottom - top, 1.0f)), 0.25f, 1.0f);
         targetScroll_ = ImVec2((boardSize.x - (right - left) * targetZoom_) * 0.5f - left * targetZoom_,
@@ -587,9 +665,14 @@ bool GraphEditor::draw(Graph& graph, ImVec2 size) {
     double now = ImGui::GetTime();
     // A wire: a soft glow under a clean curve. Light runs along it only while the script runs and
     // the node it comes from has just run: it shows what is happening, not decoration.
-    auto drawWire = [&](ImVec2 from, ImVec2 to, ImU32 color, float thickness, bool flows) {
+    auto drawWire = [&](ImVec2 from, ImVec2 to, ImU32 color, float thickness, bool flows, bool leavesLeft = false) {
         float bend = std::max(std::abs(to.x - from.x) * 0.5f, 50.0f * zoom_);
         ImVec2 b(from.x + bend, from.y), c(to.x - bend, to.y);
+        if (leavesLeft) {
+            // From the foot of one box of code to the head of the next: a bracket down their left side.
+            bend = std::clamp(std::abs(to.y - from.y) * 0.5f, 14.0f * zoom_, 46.0f * zoom_) + std::max(from.x - to.x, 0.0f) * 0.5f;
+            b = ImVec2(from.x - bend, from.y);
+        }
         float width = thickness * std::max(zoom_, 0.6f);
         drawList->AddBezierCubic(from, b, c, to, withAlpha(color, 38), width * 3.2f);
         drawList->AddBezierCubic(from, b, c, to, color, width);
@@ -618,7 +701,7 @@ bool GraphEditor::draw(Graph& graph, ImVec2 size) {
         ImU32 color = pinColor(from->second.type);
         bool touchesSelection = isSelected(link.fromNode) || isSelected(link.toNode);
         if (!isFlow) color = withAlpha(color, touchesSelection ? 255 : 200);
-        drawWire(from->second.position, to->second.position, color, isFlow ? 2.8f : (touchesSelection ? 2.6f : 2.0f), hasJustRun(link.fromNode));
+        drawWire(from->second.position, to->second.position, color, isFlow ? 2.8f : (touchesSelection ? 2.6f : 2.0f), hasJustRun(link.fromNode), from->second.leavesLeft);
         // What went along it last, while the game runs: a label half way.
         if (!isFlow && debug && debug->values) {
             auto seen = debug->values->find({link.fromNode, link.fromPin});
@@ -684,10 +767,9 @@ bool GraphEditor::draw(Graph& graph, ImVec2 size) {
             isBoxSelecting_ = false;
             if (high.x - low.x > 3 || high.y - low.y > 3) {
                 for (const Node& node : graph.nodes) {
-                    const NodeDef* definition = NodeLibrary::instance().find(node.type);
-                    size_t rows = definition ? std::max<size_t>(std::max(definition->inputs.size(), definition->outputs.size()), 1) : 1;
+                    ImVec2 size = sizeOf(node, NodeLibrary::instance().find(node.type));
                     ImVec2 nodeMin(origin.x + node.x * zoom_, origin.y + node.y * zoom_);
-                    ImVec2 nodeMax(nodeMin.x + kNodeWidth * zoom_, nodeMin.y + (kTitleHeight + float(rows) * kRowHeight + 8) * zoom_);
+                    ImVec2 nodeMax(nodeMin.x + size.x * zoom_, nodeMin.y + size.y * zoom_);
                     if (nodeMax.x >= low.x && nodeMin.x <= high.x && nodeMax.y >= low.y && nodeMin.y <= high.y) selection_.insert(node.id);
                 }
             }
@@ -723,8 +805,9 @@ bool GraphEditor::draw(Graph& graph, ImVec2 size) {
         for (const Node& node : graph.nodes) {
             left = std::min(left, node.x);
             top = std::min(top, node.y);
-            right = std::max(right, node.x + kNodeWidth);
-            bottom = std::max(bottom, node.y + 120);
+            ImVec2 size = sizeOf(node, NodeLibrary::instance().find(node.type));
+            right = std::max(right, node.x + size.x);
+            bottom = std::max(bottom, node.y + size.y);
         }
         // The view's own rectangle on the board counts too, so that it is always on the map.
         float viewLeft = -scroll_.x / zoom_, viewTop = -scroll_.y / zoom_;
@@ -741,7 +824,8 @@ bool GraphEditor::draw(Graph& graph, ImVec2 size) {
         for (const Node& node : graph.nodes) {
             const NodeDef* kind = NodeLibrary::instance().find(node.type);
             ImU32 family = kind ? categoryColor(kind->category) : IM_COL32(150, 50, 50, 255);
-            drawList->AddRectFilled(onMap(node.x, node.y), onMap(node.x + kNodeWidth, node.y + 90), isSelected(node.id) ? kAccent : withAlpha(family, 200), 2);
+            ImVec2 size = sizeOf(node, kind);
+            drawList->AddRectFilled(onMap(node.x, node.y), onMap(node.x + size.x, node.y + size.y), isSelected(node.id) ? kAccent : withAlpha(family, 200), 2);
         }
         drawList->AddRect(onMap(viewLeft, viewTop), onMap(viewRight, viewBottom), IM_COL32(255, 255, 255, 170), 2, 0, 1.2f);
         ImGui::SetCursorScreenPos(mapMin);

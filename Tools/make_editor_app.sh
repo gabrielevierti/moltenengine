@@ -25,13 +25,15 @@ if [ -f "$icon" ] && { [ ! -f "$icns" ] || [ "$icon" -nt "$icns" ]; }; then
     rm -rf "$work"
 fi
 
+# Its name in the menu bar, with the version: "Molten Engine v1.2".
+short="$(echo "$version" | cut -d. -f1,2)"
 cat > "$contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key><string>Molten Metal Engine</string>
-    <key>CFBundleDisplayName</key><string>Molten Metal Engine</string>
+    <key>CFBundleName</key><string>Molten Engine v$short</string>
+    <key>CFBundleDisplayName</key><string>Molten Engine v$short</string>
     <key>CFBundleIdentifier</key><string>com.gabrielevierti.molten-editor</string>
     <key>CFBundleExecutable</key><string>molten</string>
     <key>CFBundleIconFile</key><string>Molten</string>

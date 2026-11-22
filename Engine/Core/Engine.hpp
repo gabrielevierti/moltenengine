@@ -78,6 +78,10 @@ public:
     void begin(Game& game);
     bool frame();
     int end();
+    /// A frame that does not look at the window's events: drawn while the system holds them
+    /// (a menu of the menu bar is open, the window is being resized), so that nothing stops.
+    /// Only while a frame waits in the window's events, and never inside another one.
+    void frameWhileEventsAreHeld();
     void quit() { isRunning_ = false; }
     const EngineConfig& config() const { return config_; }
     /// F1 statistics and the profiler, F2 colliders, F3 full screen, F4 a screenshot: on in a development build.
@@ -116,7 +120,6 @@ public:
     bool isSavingBattery() const override;
     void endSound(uint32_t sound) override;
     void groupSound(uint32_t sound, const std::string& group) override;
-    void showOcean(const class Ocean& ocean, Vec2 origin) override;
     void mixGroup(const std::string& group, float volume, bool isMuted) override;
     void duckGroup(const std::string& group, const std::string& under, float to) override;
     void muffleSound(uint32_t sound, float muffle) override;
@@ -181,6 +184,9 @@ private:
     int capturedFrames_ = 0;
     bool captureSaved_ = false;
     bool isRunning_ = true;
+    bool isInEvents_ = false;           // a frame is in the window's events (where a menu that opens holds it)
+    bool isInHeldFrame_ = false;
+    bool frame(bool looksAtEvents);
 };
 
 }  // namespace molten

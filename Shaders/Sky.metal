@@ -36,6 +36,23 @@ static float cloudNoise(float2 p) {
     return sum;
 }
 
+// How much flat cloud there is at a place `p` of the layer (its own units: about a kilometer), and
+// below what it is clear sky (`threshold`). Read in the wind's frame, drawn out along it; bent,
+// so that the noise's pattern does not show; and, the fewer the clouds, the more they gather in
+// groups between clear stretches instead of standing evenly over the sky.
+static float flatCloudAt(float2 p, constant FrameUniforms &frame, thread float &threshold) {
+    float speed = length(frame.cloudWind);
+    float2 along = speed > 0.1 ? frame.cloudWind / speed : float2(1.0, 0.0);
+    float stretch = 1.0 + min(speed, 30.0) * 0.033;
+    float2 q = float2(dot(p, along) / stretch, dot(p, float2(-along.y, along.x)));
+    q += (float2(cloudValueNoise(q * 0.31 + 3.1), cloudValueNoise(q * 0.31 + 8.7)) - 0.5) * 1.1;
+    float group = cloudValueNoise(q * 0.17 + float2(21.0, 5.0));
+    float coverage = frame.cloudCoverage;
+    float local = saturate(coverage + (group - 0.5) * 1.2 * pow(1.0 - coverage, 1.5));
+    threshold = 0.8 - 0.52 * local;
+    return cloudNoise(q);
+}
+
 // A field of stars, fixed to the sky and turning with it, each twinkling.
 static float3 starsAt(float3 d, float time, float brightness) {
     // The sky turns about the pole, once a day.
@@ -135,6 +152,108 @@ static float3 moonAt(float3 d, float3 toMoon, float size, float brightness) {
 // `clouds`, with `hasVolume`: the clouds with depth along this direction, walked through
 // elsewhere (Clouds.metal, at a lower resolution): the light they send toward the eye, and in
 // `a` how much of the sky behind them still shows. Without it the clouds are a flat layer.
+// ---------------------------------------------------------------- lightning
+
+static float boltRandom(uint x) {
+    x ^= x >> 16;
+    x *= 0x7feb352du;
+    x ^= x >> 15;
+    x *= 0x846ca68bu;
+    x ^= x >> 16;
+    return float(x) * (1.0 / 4294967296.0);
+}
+
+// How bright the line of sight `d` from `eye` is for passing near the stretch of bolt from `a`
+// to `b`: a core as wide as the channel (never less than a pixel), and the glow of the air
+// round it. `beside` is the angle to the nearest point of it, in radians.
+static float boltPiece(float3 eye, float3 d, float3 a, float3 b, float width) {
+    float3 u = b - a, w = a - eye;
+    float du = dot(d, u), dw = dot(d, w), uu = dot(u, u), uw = dot(u, w);
+    float s = saturate((dw * du - uw) / max(uu - du * du, 1e-3));
+    float3 p = w + u * s;
+    float t = dot(p, d);
+    if (t <= 0.0) return 0.0;
+    float beside = length(p - d * t) / t;
+    float core = max(width / t, 0.0011);
+    return exp(-(beside * beside) / (core * core)) * 70.0 + exp(-beside / 0.008) * 1.4 + exp(-beside / 0.05) * 0.18;
+}
+
+// A bolt down from the clouds to the ground where the stroke is: a channel that zigzags down in
+// short straight pieces (two to each step of its way, the second bent a little off the first), and
+// a few branches that leave it on the way and fade out. Its shape comes from the stroke's seed;
+// the same for each flash of the stroke, as a real channel is lit again by each return stroke.
+static float3 lightningBolt(float3 d, constant FrameUniforms &frame) {
+    if (frame.lightningSeed <= 0.0 || frame.lightning <= 0.0) return float3(0.0);
+    float3 eye = frame.cameraPosition;
+    float top = frame.cloudBase + 60.0, ground = frame.lightningGround;
+    float tall = top - ground;
+    if (tall < 20.0) return float3(0.0);
+    float2 strike = float2(frame.lightningX, frame.lightningZ);
+    // Nowhere near it, for most of the sky: an upright cylinder round its way, and the glow round that.
+    float reach = tall * 0.6 + 250.0;
+    float2 flat = d.xz;
+    float ahead = max(dot(strike - eye.xz, flat) / max(dot(flat, flat), 1e-6), 0.0);
+    float height = eye.y + d.y * ahead;
+    float far = length(strike - eye.xz) + 1.0;
+    if (length(eye.xz + flat * ahead - strike) > reach + far * 0.08 || height < ground - reach || height > top + reach) return float3(0.0);
+
+    uint seed = uint(frame.lightningSeed) * 7919u;
+    const int steps = 26;
+    float rise = tall / float(steps);
+    // It leans as a whole, and zigzags on the way; the zigzags are evened out along it so that it
+    // ends exactly where the stroke is.
+    float2 lean = (float2(boltRandom(seed), boltRandom(seed + 1u)) - 0.5) * (tall * 0.35);
+    float2 wander = float2(0.0);
+    for (int i = 0; i < steps; i++) {
+        uint h = seed + 100u + uint(i) * 6u;
+        wander += (float2(boltRandom(h), boltRandom(h + 1u)) - 0.5) * 1.9;
+    }
+    float3 forks[4];
+    int forkAt[4];
+    for (int k = 0; k < 4; k++) forkAt[k] = 2 + int(boltRandom(seed + 40u + uint(k)) * float(steps) * 0.6);
+    float light = 0.0;
+    float2 walked = float2(0.0);
+    float3 p = float3(strike.x + lean.x, top, strike.y + lean.y);
+    for (int i = 0; i < steps; i++) {
+        uint h = seed + 100u + uint(i) * 6u;
+        walked += (float2(boltRandom(h), boltRandom(h + 1u)) - 0.5) * 1.9;
+        float share = float(i + 1) / float(steps);
+        float2 across = strike + lean * (1.0 - share) + (walked - wander * share) * rise;
+        float3 q = float3(across.x, top - rise * float(i + 1), across.y);
+        float3 bend = (p + q) * 0.5 + float3(boltRandom(h + 2u) - 0.5, 0.0, boltRandom(h + 3u) - 0.5) * (rise * 0.6);
+        light += boltPiece(eye, d, p, bend, 1.4) + boltPiece(eye, d, bend, q, 1.4);
+        for (int k = 0; k < 4; k++) {
+            if (forkAt[k] == i) forks[k] = q;
+        }
+        p = q;
+    }
+    // The branches: off to one side and down, more steeply as they go, dimmer to their ends.
+    for (int k = 0; k < 4; k++) {
+        uint h = seed + 400u + uint(k) * 97u;
+        float2 away = normalize(float2(boltRandom(h), boltRandom(h + 1u)) - 0.5 + 1e-4);
+        float3 b = forks[k];
+        const int pieces = 9;
+        float stride = rise * (0.6 + 0.6 * boltRandom(h + 2u));
+        for (int j = 0; j < pieces; j++) {
+            float2 jag = (float2(boltRandom(h + 10u + uint(j) * 2u), boltRandom(h + 11u + uint(j) * 2u)) - 0.5) * 1.4;
+            float3 c = b + float3((away.x * 1.2 + jag.x) * stride, -stride * (0.5 + 0.08 * float(j)), (away.y * 1.2 + jag.y) * stride);
+            light += boltPiece(eye, d, b, c, 0.8) * (0.45 * (1.0 - float(j) / float(pieces)));
+            b = c;
+        }
+    }
+    // Through the rain and the haze, a far bolt is dimmer.
+    float haze = exp(-far * frame.fogDensity * 0.35);
+    return float3(0.86, 0.9, 1.0) * (light * frame.lightning * haze);
+}
+
+// Where the clouds glow from inside when lightning flashes: brightest round the stroke, fading
+// over a kilometer or two; and a little everywhere, the light scattered on through them.
+static float lightningGlow(float3 at, constant FrameUniforms &frame) {
+    float3 heart = float3(frame.lightningX, frame.cloudBase + (frame.cloudTop - frame.cloudBase) * 0.3, frame.lightningZ);
+    float3 away = (at - heart) / 1000.0;
+    return frame.lightning * (0.08 + 1.6 / (1.0 + dot(away, away) * 5.0));
+}
+
 static float3 skyRadianceWithClouds(float3 direction, constant FrameUniforms &frame, bool withSunDisk, float4 clouds, bool hasVolume) {
     float3 d = normalize(direction);
     // The sky follows the sun; the clouds are lit by what lights the scene: the sun, or the moon at night.
@@ -158,8 +277,20 @@ static float3 skyRadianceWithClouds(float3 direction, constant FrameUniforms &fr
     if (moon > 0.0 && night > 0.0 && d.y > -0.02) {
         color += moonAt(d, -toSun, frame.sunDiskSize, moon * night) * (withSunDisk ? 1.0 : 0.25);
     }
-    // Below the horizon, blend quickly into the ground color.
-    color = mix(frame.skyGroundColor * dark, color, smoothstep(-0.12, 0.0, d.y));
+    // Below the horizon, blend quickly into the ground color; or, with a sea, into the sea far
+    // away, beyond what the camera draws of it: the sky mirrored in it, more of it the flatter
+    // one looks along it, its own color under that, and the haze of the distance over both.
+    float3 below = frame.skyGroundColor * dark;
+    if (hasSea(frame) && frame.cameraPosition.y > frame.seaColor.w && d.y < 0.0) {
+        float down = max(-d.y, 0.002);
+        float3 mirrored = mix(frame.skyHorizonColor, frame.skyZenithColor, sqrt(down)) * dark;
+        float fresnel = 0.02 + 0.98 * pow(1.0 - down, 5.0);
+        float3 deep = frame.seaColor.rgb * (frame.skyHorizonColor * 0.9 + frame.sunColor * saturate(toSun.y) * 0.25) * dark;
+        float3 sea = mix(deep, mirrored, fresnel);
+        float away = (frame.cameraPosition.y - frame.seaColor.w) / down;
+        below = mix(sea, frame.fogColor * dark, saturate(1.0 - exp(-frame.fogDensity * away)));
+    }
+    color = mix(below, color, smoothstep(hasSea(frame) ? -0.02 : -0.12, 0.0, d.y));
 
     // A glow around the sun: a tight one and a wide one.
     float towardSun = saturate(dot(d, toSun));
@@ -175,18 +306,20 @@ static float3 skyRadianceWithClouds(float3 direction, constant FrameUniforms &fr
         // Clouds as a flat layer overhead. Dividing by the height of the direction is the
         // perspective of looking along a ceiling: clouds get smaller and closer together
         // toward the horizon.
-        float2 p = d.xz / (d.y + 0.1) * frame.cloudScale + frame.cloudOffset;
-        float density = cloudNoise(p);
-        float threshold = 0.78 - 0.5 * frame.cloudCoverage;
+        float2 p = d.xz / (d.y + 0.1) * frame.cloudScale - frame.cloudOffset;      // read upwind: they go the way the wind blows
+        float threshold = 0.0, ignored = 0.0;
+        float density = flatCloudAt(p, frame, threshold);
         cover = smoothstep(threshold, threshold + 0.2, density) * smoothstep(0.0, 0.1, d.y);
         // A second look a little toward the light: where the cloud is thinner there than
         // here, this side is lit; where it is thicker, this side is in its shade.
         float2 sunward = toLight.xz / max(length(toLight.xz), 0.001) * 0.3;
-        float light = saturate(0.62 + (density - cloudNoise(p + sunward)) * 3.0);
+        float light = saturate(0.62 + (density - flatCloudAt(p + sunward, frame, ignored)) * 3.0);
         float3 shade = (frame.skyHorizonColor * 0.9 + frame.skyZenithColor * 0.35) * dark;
         shade = mix(shade, shade * float3(0.62, 0.5, 0.66) + sunsetHue(toSun.y) * 0.18 * dark, dusk);
         float3 lit = cloudSun * 0.3 + frame.skyHorizonColor * 0.5 * dark;
-        color = mix(color, mix(shade, lit, light), cover);
+        // Lightning lights them from inside: round the stroke, where this line of sight meets them.
+        float glow = frame.lightning > 0.0 ? lightningGlow(frame.cameraPosition + d * max((frame.cloudBase - frame.cameraPosition.y) / max(d.y, 0.02), 0.0), frame) : 0.0;
+        color = mix(color, mix(shade, lit, light) + float3(0.78, 0.82, 1.0) * (glow * 2.6), cover);
     }
 
     if (withSunDisk) {
@@ -198,7 +331,12 @@ static float3 skyRadianceWithClouds(float3 direction, constant FrameUniforms &fr
         float3 sunLight = frame.sunsetColors != 0u ? frame.sunColor * (1.0 - night) : frame.sunColor;
         color += sunLight * frame.sunDiskIntensity * disk * limb * (1.0 - cover);
     }
-    return color * frame.skyIntensity;
+    color *= frame.skyIntensity;
+    // A bolt is in front of the clouds it leaves, seen from under them; from above, they hide it.
+    if (withSunDisk && frame.lightningSeed > 0.0) {
+        color += lightningBolt(d, frame) * (frame.cameraPosition.y > frame.cloudBase ? 1.0 - cover : 1.0);
+    }
+    return color;
 }
 
 static float3 skyRadiance(float3 direction, constant FrameUniforms &frame, bool withSunDisk) {
@@ -233,6 +371,9 @@ fragment float4 fragment_sky(SkyOut in [[stage_in]],
                              constant FrameUniforms &frame [[buffer(MMBufferFrame)]],
                              texture2d<float> clouds [[texture(MMTextureClouds)]],
                              sampler linearSampler [[sampler(MMSamplerLinearClamp)]]) {
+    // Under the sea, what is below the horizon is the water itself, far away. (Above it the sky is
+    // drawn as ever: the water's surface, drawn over it, shows it through its window overhead.)
+    if (hasSea(frame) && frame.cameraUnderwater > 0.0 && in.direction.y <= 0.0) return float4(seaHaze(frame, frame.cameraUnderwater), 1.0);
 #if MOLTEN_EXTRAS
     // Clouds with depth were walked through before this pass, into a smaller picture: read
     // here, smoothed up to the size of this one, and put in front of the sky.

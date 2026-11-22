@@ -100,6 +100,8 @@ public:
 
     std::string title;                  // also its identity: unique among panels
     bool isOpen = true;
+    /// The first time it is opened, a tab beside this window (where that one is docked). Empty: floating.
+    std::string firstBeside;
 };
 
 struct MenuItem {
@@ -186,6 +188,9 @@ struct EditorContext {
 
     SceneDocument scene;                // the scene being edited: files, undo, play, entities
     GizmoSettings gizmo;
+    /// While a scene is edited, what moves by itself (particles, water, sway, clouds) moves in the
+    /// Scene and Game views: the Simulate button. Off, it moves only while such a thing is selected.
+    bool simulatesInViews = false;
     Registry registry;
 
     /// The asset shown in the inspector when no entity is selected: a path relative to Assets.
@@ -230,7 +235,10 @@ struct EditorContext {
     bool frameSelectionRequested = false;
     bool alignWithViewRequested = false;    // put the selection where the view's camera is, facing the same way
     bool wantsNewScript = false;            // a panel asked for the New Script window
-    bool gameViewHasFocus = false;          // the Game window has the keyboard: while playing, keys are the game's
+    bool gameViewHasFocus = false;          // the game has the keys and the mouse: from Run or a click on its picture, until Esc or a click elsewhere
+    bool gameWindowIsFocused = false;       // the Game window is the one in use, whether the game hears it or not
+    /// A picture file as something ImGui can draw (read again when the file changes); 0 if there is none.
+    std::function<ImTextureID(const std::string& path)> pictureAt;
 
     // ---- commands: what the menus, the keys and the search (Cmd+K) all do. See Commands.hpp.
     Commands commands;

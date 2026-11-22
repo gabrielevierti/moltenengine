@@ -1,4 +1,3 @@
-#include "Water/Ocean.hpp"
 #include "Core/Engine.hpp"
 #include "Core/TextFile.hpp"
 #include "Platform/DeviceState.hpp"
@@ -79,6 +78,8 @@ Engine::Engine(const EngineConfig& config) : config_(config) {
     if (!isCapturing) {
         window_ = std::make_unique<Window>(config_.title, config_.width, config_.height, config_.fullscreen, device_.device());
         window_->setVSync(config_.vsync);
+        // A menu open, the window being resized: the game goes on meanwhile.
+        window_->whileEventsAreHeld([](void* engine) { static_cast<Engine*>(engine)->frameWhileEventsAreHeld(); }, this);
     }
     renderer_ = std::make_unique<Renderer>(device_, root + "/Shaders");
     assets_ = std::make_unique<Assets>(device_, root + "/Assets");
@@ -129,7 +130,16 @@ void Engine::begin(Game& game) {
     previousTime_ = secondsNow();
 }
 
-bool Engine::frame() {
+bool Engine::frame() { return frame(true); }
+
+void Engine::frameWhileEventsAreHeld() {
+    if (!isInEvents_ || isInHeldFrame_ || !window_) return;
+    isInHeldFrame_ = true;
+    frame(false);
+    isInHeldFrame_ = false;
+}
+
+bool Engine::frame(bool looksAtEvents) {
     if (!game_ || !isRunning_) return false;
     AutoreleaseScope pool;
     Game& game = *game_;
@@ -157,9 +167,11 @@ bool Engine::frame() {
     if (window_->shouldClose()) return false;
     profiler.beginFrame();
     renderer_->profiler = &profiler;
-    {
+    if (looksAtEvents) {
         Profiler::Scope timed(profiler, "Events");
-        window_->pollEvents(input);
+        isInEvents_ = true;
+        window_->pollEvents(input);         // (a menu opened from the menu bar stays in here until it closes: see frameWhileEventsAreHeld)
+        isInEvents_ = false;
     }
     if (config_.developerKeys) handleDeveloperKeys();
 
@@ -178,7 +190,7 @@ bool Engine::frame() {
         RenderTarget target;
         target.texture = drawable->texture();
         target.drawable = drawable;
-        renderer_->render(scene, canvas_, target, time.elapsed);
+        renderer_->render(scene, canvas_, target, effectsTime);     // the clock of what moves by itself: it stands still when that does
     }
     profiler.setGpuTime(renderer_->lastGpuMilliseconds());
     // The device's heat, read now and then: hot, the scene is drawn smaller until it cools.
@@ -219,9 +231,59 @@ void Engine::onUpdate(float dt) {
 const RenderSettings& Engine::effectSettings() { return renderer_->settings; }
 
 void Engine::simulate(Game& game, double realDelta) {
+    // Where it rains around (Kit/Weather.hpp): the camera of each view of the scene, where an
+    // editor shows it in several; or, with none, the scene's own camera, which the weather finds.
+    weatherNow.viewers.clear();
+    for (const Renderer::SceneView& view : renderer_->views) {
+        if (view.width <= 0 || view.height <= 0) continue;
+        Entity camera = view.camera;
+        if (!camera.isValid() || !scene.isAlive(camera)) {
+            camera = Entity{};
+            scene.each<Camera, Transform>([&](Entity entity, Camera& candidate, Transform& transform) {
+                if (!camera.isValid() && candidate.isActive && transform.isActiveInHierarchy) camera = entity;
+            });
+        }
+        if (const Transform* transform = camera.isValid() ? scene.get<Transform>(camera) : nullptr) weatherNow.viewers.push_back(transform->worldPosition());
+    }
+
     // The frame is the World's own (World::simulateFrame): the Game and the Behaviors are called
     // from it, through onFixedUpdate and onUpdate above. What is added here is the picture.
     simulateFrame(realDelta);
+    renderer_->settings.weather.flash = weatherNow.flash;      // the lightning, this frame, and where it is
+    renderer_->settings.weather.strikePlace = weatherNow.strikePlace;
+    renderer_->settings.weather.bolt = weatherNow.bolt;
+    // What floats, and its wake: the nearest few to where it is seen from.
+    {
+        gpu::WaterWakes& out = renderer_->waterWakes;
+        out.count = 0;
+        Vec3 from = weatherNow.viewers.empty() ? Vec3{0, 0, 0} : weatherNow.viewers.front();
+        std::vector<const World::Wake*> nearest;
+        for (const World::Wake& wake : wakes) nearest.push_back(&wake);
+        std::sort(nearest.begin(), nearest.end(), [&](const World::Wake* a, const World::Wake* b) {
+            return simd::length_squared(a->middle - from) < simd::length_squared(b->middle - from);
+        });
+        for (const World::Wake* wake : nearest) {
+            if (out.count >= uint32_t(gpu::MMMaxWakes)) break;
+            gpu::WaterWake& to = out.wakes[out.count++];
+            Vec3 stern = wake->middle - Vec3{wake->heading.x, 0, wake->heading.y} * wake->halfLength;
+            to.trail[0] = Vec4{stern.x, stern.y, stern.z, 0.0f};
+            float speeds[gpu::MMWakeTrail] = {wake->speed};
+            for (int i = 1; i < gpu::MMWakeTrail; i++) {
+                size_t laid = size_t(i - 1);
+                if (laid < wake->trail.size()) {
+                    const Vec4& point = wake->trail[laid];
+                    to.trail[i] = Vec4{point.x, point.y, point.z, std::max(float(effectsTime - double(point.w)), 0.0f)};
+                    speeds[i] = wake->trailSpeed[laid];
+                } else {
+                    to.trail[i] = Vec4{0, 0, 0, -1.0f};
+                    speeds[i] = 0;
+                }
+            }
+            for (int i = 0; i < gpu::MMWakeTrail / 4; i++) to.trailSpeed[i] = Vec4{speeds[i * 4], speeds[i * 4 + 1], speeds[i * 4 + 2], speeds[i * 4 + 3]};
+            to.body = Vec4{wake->middle.x, wake->middle.y, wake->middle.z, wake->speed};
+            to.shape = Vec4{wake->heading.x, wake->heading.y, wake->halfWidth, wake->halfLength};
+        }
+    }
 
     // The canvas covers the screen, or, in an editor that shows the game in a view of its
     // own, that view: the game's interface is part of the picture of the game.
@@ -313,10 +375,6 @@ bool Engine::listener(Mat4& world) {
 
 void Engine::endSound(uint32_t sound) {
     audio_->stop(sound);
-}
-
-void Engine::showOcean(const Ocean& ocean, Vec2 origin) {
-    renderer_->showOcean(ocean, origin);
 }
 
 void Engine::groupSound(uint32_t sound, const std::string& group) {

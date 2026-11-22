@@ -2,6 +2,7 @@
 // The editor as the engine sees it: a Game whose "gameplay" is editing the scene it shows.
 #pragma once
 
+#include "Platform.hpp"
 #include "Shortcuts.hpp"
 #include "Assets/FileChanges.hpp"
 #include "CommandPalette.hpp"
@@ -99,6 +100,10 @@ private:
     // The commands (EditorCommands.cpp): the one list the menus, the keys and the search are made from.
     void registerCommands();
     void drawMenuBar();
+    std::vector<std::string> menuBarMenus() const;
+    std::vector<platform::NativeMenuRow> nativeMenuRows(const Commands& commands, const std::string& menuPath) const;
+    void updateNativeMenuBar();
+    std::vector<std::string> nativeMenus_;      // the menus put in the Mac's menu bar, to make it again when they change
     void drawMenuRows(const Commands& commands, const std::string& menuPath);
     void drawRegisteredMenuItems(const std::string& menu);
     void copySelection(bool cuts);
@@ -114,6 +119,7 @@ private:
     void drawPanels();
     void drawProjectList();
     void saveProjectPreview();
+    int framesWithProject_ = 0;         // since the open project has been on the screen: a missing preview is made after a moment
     void makeMissingTemplatePreviews();
     ImTextureID pictureAt(const std::string& path);
     void drawPlayBar();
@@ -188,6 +194,7 @@ private:
     double nextAssetScan_ = 0;
     FileChanges assetChanges_;          // pictures, models, materials written by other programs: read again
     std::string shownTitle_;
+    bool shownEdited_ = false;
 
     // The project list's "new project" form.
     ProjectWindow projectWindow_;

@@ -74,6 +74,12 @@ struct Game {
                  Vec3 scale = Vec3{1, 1, 1}, Quat rotation = Quat{}, bool castsShadows = true);
     /// Keeps a model under a name, and gives the name back.
     std::string model(const std::string& name, const Model& made);
+    /// What has this look lies on another surface in the same place: a road on the grass (1), the
+    /// line on the road (2), a stripe along a hull (1). It is set a little apart once the game is
+    /// built, so that the depth buffer has no tie to break: lifted a centimeter a level where it is
+    /// flat, grown a few millimeters each way where it is not.
+    void laidOver(const std::shared_ptr<Material>& look, int level) { laid[look.get()] = level; }
+    std::map<const Material*, int> laid;
 };
 
 /// Their names: "Car Game", "Plane Game", "Boat Game", "Third Person Game", "Shooter Game", "Online Game".

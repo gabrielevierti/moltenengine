@@ -22,7 +22,7 @@ TEST(gpu_structs_have_the_sizes_the_shaders_expect) {
     CHECK(sizeof(gpu::PassUniforms) == 400);
     CHECK(sizeof(gpu::InstanceData) == 144);
     CHECK(sizeof(gpu::LightData) == 96);
-    CHECK(sizeof(gpu::MaterialUniforms) == 224);
+    CHECK(sizeof(gpu::MaterialUniforms) == 224 && offsetof(gpu::MaterialUniforms, isSea) == 216);
     CHECK(offsetof(gpu::MaterialUniforms, customShader) == 72);
     CHECK(offsetof(gpu::MaterialUniforms, custom) == 80);
     CHECK(offsetof(gpu::MaterialUniforms, water) == 64);
@@ -33,7 +33,14 @@ TEST(gpu_structs_have_the_sizes_the_shaders_expect) {
     CHECK(offsetof(gpu::PassUniforms, time) == 336);
     CHECK(offsetof(gpu::LightData, type) == 48);
     CHECK(offsetof(gpu::FrameUniforms, cascadeSplits) == 256);
-    CHECK(sizeof(gpu::FrameUniforms) == 608);
+    CHECK(sizeof(gpu::FrameUniforms) == 816 && offsetof(gpu::FrameUniforms, lightning) == 624);
+    CHECK(sizeof(gpu::CloudResolveUniforms) == 160 && offsetof(gpu::CloudResolveUniforms, offset) == 144);
+    CHECK(offsetof(gpu::FrameUniforms, seaShallow) == 768 && offsetof(gpu::FrameUniforms, seaLook) == 784 && offsetof(gpu::FrameUniforms, seaFoam) == 800);
+    CHECK(offsetof(gpu::FrameUniforms, seaAbsorb) == 720 && offsetof(gpu::FrameUniforms, seaColor) == 736 && offsetof(gpu::FrameUniforms, cameraUnderwater) == 752);
+    CHECK(offsetof(gpu::FrameUniforms, lightningX) == 628 && offsetof(gpu::FrameUniforms, lightningSeed) == 640 && offsetof(gpu::FrameUniforms, wetness) == 644);
+    CHECK(offsetof(gpu::FrameUniforms, rainViewProjection) == 656);
+    CHECK(offsetof(gpu::FrameUniforms, frameIndex) == 608 && offsetof(gpu::FrameUniforms, tracedSunReady) == 612 && offsetof(gpu::FrameUniforms, cloudWind) == 616);
+    CHECK(sizeof(gpu::TracedHistoryUniforms) == 144 && offsetof(gpu::TracedHistoryUniforms, hasHistory) == 128);
     CHECK(offsetof(gpu::FrameUniforms, fogShaftSteps) == 528);
     CHECK(offsetof(gpu::FrameUniforms, volumetricClouds) == 532);
     CHECK(offsetof(gpu::FrameUniforms, fogHeightFalloff) == 508);

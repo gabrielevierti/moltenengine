@@ -35,7 +35,7 @@ class AnimationPanel final : public Panel {
 public:
     AnimationPanel() {
         title = "Timeline";
-        isOpen = false;                 // Window > Animation > Timeline, or Open Timeline on an Animator
+        isOpen = false;                 // Window > Timeline, or Open Timeline on an Animator
     }
 
     void draw(EditorContext& editor) override {
