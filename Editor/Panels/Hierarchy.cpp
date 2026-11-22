@@ -10,6 +10,7 @@
 #include "Kit/Layout.hpp"
 #include "Kit/Terrain.hpp"
 #include "Kit/Foliage.hpp"
+#include "Kit/Cloth.hpp"
 #include "Panels/Widgets.hpp"
 
 #include <algorithm>
@@ -733,6 +734,22 @@ void registerCreateEntries(EditorContext& editor) {
     add("3D Object/Sphere", Primitive::Sphere);
     add("3D Object/Cylinder", Primitive::Cylinder);
     add("3D Object/Plane", Primitive::Plane);
+    // A sheet of cloth stood up, hanging from its top edge: a curtain, a flag, a banner to change.
+    editor.registry.addCreateEntry(nullptr, "3D Object/Cloth", [](EditorContext& context) {
+        Entity made = context.scene.create(Primitive::Plane);
+        Scene& scene = context.engine.scene;
+        if (Transform* transform = scene.get<Transform>(made)) {
+            transform->rotation = axisAngle(Vec3{1, 0, 0}, kPi * 0.5f);         // its -z edge on top
+            transform->scale = Vec3{2.0f, 1.0f, 1.5f};
+            transform->position.y += 2.0f;
+        }
+        scene.remove<Collider>(made);                   // the cloth is not a wall
+        scene.add(made, kit::Cloth{});
+        if (Name* name = scene.get<Name>(made)) name->value = "Cloth";
+        scene.updateTransforms();
+        context.scene.markChanged();
+        return made;
+    });
     // Ground to shape with brushes: flat at first, its heights a file once it is shaped.
     editor.registry.addCreateEntry(nullptr, "3D Object/Terrain", [](EditorContext& context) {
         Scene& scene = context.engine.scene;

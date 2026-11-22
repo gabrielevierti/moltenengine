@@ -248,10 +248,11 @@ std::string writeScene(Scene& scene, const std::vector<NamedMaterial>& materials
             .flag(settings.rayTracedBounce).number(settings.bounceIntensity).to(out);
         Line("rayTracedReflections").number(settings.reflectionMaxRoughness).number(settings.reflectionStrength).to(out);
         Line("fogShape").number(settings.fogHeightFalloff).number(settings.fogSunScatter).flag(settings.fogLitBySun).to(out);
-        if (settings.weather.rain > 0 || settings.weather.storm > 0 || settings.weather.snow > 0) {
+        if (settings.weather.rain > 0 || settings.weather.storm > 0 || settings.weather.snow > 0 || settings.weather.snowSettles) {
             Line weather("weather");
             weather.number(settings.weather.rain).number(settings.weather.storm);
-            if (settings.weather.snow > 0) weather.number(settings.weather.snow);      // (a file of before snow has two)
+            if (settings.weather.snow > 0 || settings.weather.snowSettles) weather.number(settings.weather.snow);      // (a file of before snow has two)
+            if (settings.weather.snowSettles) weather.flag(true);
             weather.to(out);
         }
         Line("wind").vec(settings.wind).number(settings.windGustiness).to(out);
@@ -284,7 +285,6 @@ std::string writeScene(Scene& scene, const std::vector<NamedMaterial>& materials
         if (settings.motionBlur) Line("motionBlur").flag(true).number(settings.motionBlurAmount).to(out);
         if (settings.contrast != 1 || settings.saturation != 1 || settings.temperature != 0 || settings.tint != 0 || settings.sharpen != 0)
             Line("color").number(settings.contrast).number(settings.saturation).number(settings.temperature).number(settings.tint).number(settings.sharpen).to(out);
-        Line("lensFlare").number(settings.lensFlare).to(out);
         if (!settings.lensDirt.empty()) Line("lensDirt").string(settings.lensDirt).number(settings.lensDirtAmount).to(out);
         if (settings.interference > 0) Line("interference").number(settings.interference).to(out);
     }
@@ -362,6 +362,9 @@ std::string writeScene(Scene& scene, const std::vector<NamedMaterial>& materials
         if (const Light* l = scene.get<Light>(entity)) {
             Line("light").word(kLightTypes[int(l->type)]).vec(l->color).number(l->intensity).number(l->range)
                 .number(l->innerConeAngle).number(l->outerConeAngle).flag(l->castsShadows).flag(l->isEnabled).number(l->areaSize.x).number(l->areaSize.y).to(out);
+            // What came later, only when it is not as it was: in the air, how much, and its cookie.
+            if (l->isVolumetric || l->volumetricStrength != 1.0f || !l->cookie.empty())
+                Line("lightAir").flag(l->isVolumetric).number(l->volumetricStrength).string(l->cookie).to(out);
         }
         if (const MeshRenderer* r = scene.get<MeshRenderer>(entity)) {
             bool isAsset = r->material && !r->material->assetName.empty();
@@ -645,6 +648,7 @@ bool readSceneAsWritten(const std::string& text, Scene& scene, std::vector<Named
                 settings.weather.rain = std::clamp(words.number(0), 0.0f, 1.0f);
                 settings.weather.storm = std::clamp(words.number(0), 0.0f, 1.0f);
                 settings.weather.snow = std::clamp(words.number(0), 0.0f, 1.0f);
+                settings.weather.snowSettles = words.flag(false);
             } else if (key == "fogShape") {
                 settings.fogHeightFalloff = words.number(0);
                 settings.fogSunScatter = words.number(0);
@@ -676,7 +680,7 @@ bool readSceneAsWritten(const std::string& text, Scene& scene, std::vector<Named
                 settings.tint = words.number(0);
                 settings.sharpen = words.number(0);
             }
-            else if (key == "lensFlare") settings.lensFlare = words.number(0.6f);
+            else if (key == "lensFlare") {}            // of before: the lens flare was taken out
             else if (key == "lensDirt") {
                 settings.lensDirt = words.string();
                 settings.lensDirtAmount = words.number(1);
@@ -803,6 +807,12 @@ bool readSceneAsWritten(const std::string& text, Scene& scene, std::vector<Named
                 l.areaSize.x = words.number(l.areaSize.x);
                 l.areaSize.y = words.number(l.areaSize.y);
                 scene.add(entity, l);
+            } else if (key == "lightAir") {
+                if (Light* l = scene.get<Light>(entity)) {
+                    l->isVolumetric = words.flag(false);
+                    l->volumetricStrength = std::max(words.number(1.0f), 0.0f);
+                    l->cookie = words.string();
+                }
             } else if (key == "mesh") {
                 MeshRenderer r;
                 std::string name = words.string();

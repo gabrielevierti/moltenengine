@@ -252,6 +252,7 @@ void Engine::simulate(Game& game, double realDelta) {
     renderer_->settings.weather.flash = weatherNow.flash;      // the lightning, this frame, and where it is
     renderer_->settings.weather.strikePlace = weatherNow.strikePlace;
     renderer_->settings.weather.bolt = weatherNow.bolt;
+    renderer_->settings.weather.snowCover = weatherNow.snowCover;
     // What floats, and its wake: the nearest few to where it is seen from.
     {
         gpu::WaterWakes& out = renderer_->waterWakes;

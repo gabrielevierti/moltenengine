@@ -3,6 +3,7 @@
 // components live next to the systems that use them.
 #pragma once
 
+#include <string>
 #include "Scene/Scene.hpp"
 
 #include <functional>
@@ -44,6 +45,15 @@ struct Light {
     bool castsShadows = false;             // honored for the first directional light (the sun)
     bool isEnabled = true;                 // off: it is there, and gives no light
     Vec2 areaSize{2.0f, 1.0f};             // area: the glowing rectangle, meters across (x) and up (y), facing its -Z
+    /// Spot: a cookie, as in Unity: a picture in Assets the light shines through, spread across its
+    /// cone (white lets it through, black stops it, colors tint it): a window's frame, leaves, a gobo.
+    /// Turned with the light about its axis. Empty: none.
+    std::string cookie;
+    /// Point and spot: it lights the air it passes through, as a lamp in the mist or a beam in a
+    /// dusty room; more where there is more fog. It is seen in front of what it lights, not
+    /// through walls, and casts no shadow in the air.
+    bool isVolumetric = false;
+    float volumetricStrength = 1.0f;       // how much it lights the air, 1 as fog would be lit
 };
 
 /// Game logic attached to one entity. `update` runs once per frame, `fixedUpdate` once

@@ -59,6 +59,7 @@ enum {
     MMTextureTracedSun         = 14,  // how much of the sun reaches each of those pixels, gathered over frames (MMTextureTracedLight's size)
     MMTextureRainMap           = 15,  // depth2d: the scene round the camera seen from above, nearest first: under a roof it does not rain
     MMTextureSceneNormal       = 16,  // the normals of what is opaque (the prepass), in the view's axes: which way the bottom under water faces
+    MMTextureLightCookies      = 17,  // texture2d_array: the spot lights' cookies, a slice each (LightData::cookie), MMCookieSize square
 };
 
 enum {
@@ -69,6 +70,8 @@ enum {
 
 enum {
     MMMaxLights   = 64,
+    MMMaxCookies  = 16,      // different cookies in a scene at once; lights past these shine without theirs
+    MMCookieSize  = 256,
     MMMaxCascades = 4,
     MMMaxWakes    = 8,
     MMWakeTrail   = 16,
@@ -181,6 +184,7 @@ typedef struct {
     simd_float4 seaShallow;          // rgb: the color it takes over a light bottom, a meter or two down; w: how far one sees through it, meters
     simd_float4 seaLook;             // x how much light its body scatters back, y how much it mirrors, z its ripples, w its caustics
     simd_float4 seaFoam;             // x foam where it meets what stands in it, y white crests where waves break
+    simd_float4 snow;                // x how much snow has settled on what faces up and is out in it, 0 to 1 (WeatherSettings::snowSettles)
 } FrameUniforms;
 
 // The clouds are walked for one pixel in four each frame (in turn), and the rest kept from the
@@ -234,6 +238,9 @@ typedef struct {
     float spotScale;                 // 1 / (cos(inner) - cos(outer))
     float spotOffset;                // -cos(outer) * spotScale
     float areaWidth, areaHeight;     // an area light's rectangle, in meters
+    simd_float3 right;               // the light's own x axis: which way a cookie's picture lies across its cone
+    float cookie;                    // a spot light's cookie: 0 none, else 1 + its slice of MMTextureLightCookies
+    float volumetric;                // how much it lights the air it passes through (the fog), 0 none: beams in the mist
 } LightData;
 
 // ---------------------------------------------------------------- per draw
@@ -316,17 +323,13 @@ typedef struct {
     float lutAmount;                 // 0 the colors as they were, 1 as the table makes them
     uint32_t autoExposure;           // 1: the exposure follows how bright the scene is (texture 3)
     float exposureCompensation;      // in stops, on top of what the adapting exposure says
-    // Color, and the lens's flare.
+    // Color, and the glass.
     float contrast;
     float saturation;
     float temperature;
     float tint;
-    simd_float2 sunScreen;           // where the sun is on the picture, 0 to 1 (outside: not in view)
-    float lensFlare;                 // 0 none
     float sharpen;
-    float sunInView;                 // 1 in front of the camera, 0 behind
-    float lensDirt;                  // how much the dirt on the glass (texture 4) lights up under the bloom and the flare; 0 none
-    simd_float3 sunColor;            // its light, for the flare's color
+    float lensDirt;                  // how much the dirt on the glass (texture 4) lights up under the bloom; 0 none
     // The camera going through the sea's surface (SeaSettings::lensThroughSurface).
     simd_float4 lensWater;           // xyz: how high each place of the glass is over the water, meters, as x * u + y * v + z (u, v the picture's 0 to 1); w 0 off, 1 the picture is of above the water, 2 of under it
     simd_float4 lensSea;             // xyz what a meter of the sea takes of each color; w how wet the glass still is from coming out, 0 to 1

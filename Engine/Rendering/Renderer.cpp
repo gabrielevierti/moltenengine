@@ -274,6 +274,8 @@ int Renderer::collectLights(Scene& scene, gpu::LightData* lights, gpu::FrameUnif
     gpu::LightData sun{};
     std::vector<gpu::LightData> others;
     sunCastsShadows = false;
+    cookiesWanted_.clear();
+    hasLightsInAir_ = false;
 
     scene.each<Light, Transform>([&](Entity, Light& light, Transform& transform) {
         if (!transform.isActiveInHierarchy) return;
@@ -290,6 +292,17 @@ int Renderer::collectLights(Scene& scene, gpu::LightData* lights, gpu::FrameUnif
         data.spotOffset = -cosOuter * data.spotScale;
         data.areaWidth = std::max(light.areaSize.x, 0.01f) * std::abs(transform.scale.x);
         data.areaHeight = std::max(light.areaSize.y, 0.01f) * std::abs(transform.scale.y);
+        data.right = safeNormalize(xyz(transform.world.columns[0]), Vec3{1, 0, 0});              // the entity's X axis
+        if (light.type == LightType::Spot && !light.cookie.empty()) {
+            // The same picture for many lights is one slice.
+            auto found = std::find(cookiesWanted_.begin(), cookiesWanted_.end(), light.cookie);
+            if (found == cookiesWanted_.end() && cookiesWanted_.size() < size_t(gpu::MMMaxCookies)) found = cookiesWanted_.insert(cookiesWanted_.end(), light.cookie);
+            if (found != cookiesWanted_.end()) data.cookie = float(found - cookiesWanted_.begin() + 1);
+        }
+        if (light.isVolumetric && (light.type == LightType::Point || light.type == LightType::Spot) && light.volumetricStrength > 0) {
+            data.volumetric = light.volumetricStrength;
+            hasLightsInAir_ = true;
+        }
 
         // The first directional light is the sun: it lights the sky and may cast shadows.
         if (light.type == LightType::Directional && !hasSun) {
@@ -721,6 +734,7 @@ void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const
     gpu::LightData lights[gpu::MMMaxLights];
     bool sunCastsShadows = false;
     int lightCount = collectLights(scene, lights, frame, sunCastsShadows);
+    updateCookies(commandBuffer);
     // The weather (Kit/Weather.hpp): rain and storms cloud the sky over and hide the sun behind
     // it; lightning lights the clouds from inside, and the world with them, for a moment.
     const float clouded = settings.weather.clouded();
@@ -742,12 +756,6 @@ void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const
     const float flashLight = flash * (0.25f + 0.75f / (1.0f + (strikeAway / 1800.0f) * (strikeAway / 1800.0f)));
     frame.lightCount = uint32_t(lightCount);
     stats.lights = std::max(stats.lights, lightCount);
-    if (withOverlay) {
-        // The main view: where its sun is, for the lens flare of the final pass.
-        flareSunDirection_ = frame.sunDirection;
-        flareSunColor_ = frame.sunColor;
-        flareViewProjection_ = view.viewProjection;
-    }
 
     // Ray-traced sun shadows replace the shadow maps where they are available and asked for.
     bool wantsTracedShadows = settings.shadowsEnabled && sunCastsShadows && settings.rayTracedShadows && canTraceRays();
@@ -893,8 +901,11 @@ void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const
     // moved by whole texels so that its edges do not crawl as the camera moves.
     rainMapDrawn_ = false;
     frame.wetness = 0.0f;
+    frame.snow = Vec4{0, 0, 0, 0};
     Mat4 rainViewProjection = identity();
-    if (settings.weather.rain > 0.0f) {
+    // (The same map says where settled snow lies: not under a roof either.)
+    const float snowCover = settings.weather.snowSettles ? std::clamp(settings.weather.snowCover, 0.0f, 1.0f) : 0.0f;
+    if (settings.weather.rain > 0.0f || snowCover > 0.0f) {
         constexpr float half = 40.0f, texel = 2.0f * half / float(kRainMapSize);
         Vec3 middle{std::round(view.position.x / texel) * texel, view.position.y, std::round(view.position.z / texel) * texel};
         Vec3 above = middle + Vec3{0, 200.0f, 0};
@@ -902,6 +913,7 @@ void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const
         if (renderRainMap(commandBuffer, items, rainViewProjection)) {
             rainMapDrawn_ = true;
             frame.wetness = std::clamp(settings.weather.rain, 0.0f, 1.0f);
+            frame.snow = Vec4{snowCover, 0, 0, 0};
         }
     }
     frame.rainViewProjection = rainViewProjection;

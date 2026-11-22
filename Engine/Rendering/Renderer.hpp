@@ -76,7 +76,9 @@ struct SkySettings {
 struct WeatherSettings {
     float rain = 0.0f;                          // 0 none, 1 a downpour: drops around the camera, splashes, rings on water; the sky clouds over
     float storm = 0.0f;                         // 0 none, 1 lightning every few seconds: bolts in and under the clouds, lighting them from inside
-    float snow = 0.0f;                          // 0 none, 1 a heavy fall: flakes drifting down round the camera (nothing settles yet)
+    float snow = 0.0f;                          // 0 none, 1 a heavy fall: flakes drifting down round the camera
+    bool snowSettles = false;                   // what falls lies: what faces up and is out in it turns white, more the longer it snows
+    float snowCover = 0.0f;                     // how much has settled now, 0 to 1: the world's (World::weatherNow), never saved
     float flash = 0.0f;                         // the lightning's light this frame: the world's (World::weatherNow), not the scene's; never saved
     Vec3 strikePlace{0, 0, 0};                  // and where its stroke is: x and z, and the height of the ground it strikes (never saved)
     float bolt = 0.0f;                          // the shape of its bolt down to that ground; 0 a flash inside the clouds only (never saved)
@@ -215,7 +217,6 @@ struct RenderSettings {
     float contrast = 1.0f, saturation = 1.0f;   // 1 as it is
     float temperature = 0.0f, tint = 0.0f;      // -1 to 1: cooler or warmer; greener or more magenta
     float sharpen = 0.0f;                       // 0 to 1
-    float lensFlare = 0.6f;                     // the sun's light scattered in the camera's glass; 0 none
     /// Smudges and specks on the camera's glass (a picture of Assets, mostly black): lit up where
     /// bright light falls on them, by the bloom and the flare. Empty: a clean lens.
     std::string lensDirt;
@@ -522,6 +523,11 @@ private:
     View findView(Scene& scene, float aspect) const;
     void collectItems(Scene& scene, const View& view, std::vector<DrawItem>& items) const;
     int collectLights(Scene& scene, gpu::LightData* lights, gpu::FrameUniforms& frame, bool& sunCastsShadows) const;
+    /// The cookies the lights of this picture ask for, in the array the shaders read: made again only
+    /// when they are not the ones it holds.
+    void updateCookies(MTL::CommandBuffer* commandBuffer);
+    /// The light the volumetric lights give the air, over the whole picture (fragment_lights_in_air).
+    void drawLightsInAir(MTL::RenderCommandEncoder* encoder);
     std::vector<Batch> makeBatches(std::vector<const DrawItem*>& items, bool sortByState);
     gpu::PassUniforms makePassUniforms(const Mat4& view, const Mat4& projection, Vec3 position, int width, int height,
                                        float nearPlane, float farPlane, double time) const;
@@ -562,7 +568,7 @@ private:
     /// that reads the picture back, which is how it is asked).
     bool readsBehindWater() const { return shaders_.hasExtras() && device_.supportsFramebufferRead(); }
     bool wantsDepth() const {
-        return settings.ambientOcclusionEnabled || settings.depthOfField || settings.motionBlur || hasDecals_ || waterLastFrame_ || settings.sea.enabled || particlesWantDepth_ ||
+        return hasLightsInAir_ || settings.ambientOcclusionEnabled || settings.depthOfField || settings.motionBlur || hasDecals_ || waterLastFrame_ || settings.sea.enabled || particlesWantDepth_ ||
                wantsTracedAmbient();
     }
     /// The light around things is asked to be found with rays: done before the scene, at half the
@@ -652,9 +658,6 @@ private:
     NS::SharedPtr<MTL::Texture> postColor_, luminance_, adapted_[2];
     int adaptIndex_ = 0;
     Mat4 previousViewProjection_ = identity();
-    Mat4 flareViewProjection_ = identity();      // the last view drawn, and the sun then: for the lens flare
-    Vec3 flareSunDirection_{0, -1, 0};
-    Vec3 flareSunColor_{0, 0, 0};
     // The camera through the sea's surface, for the last pass (PostUniforms::lensWater...): the last view drawn.
     Vec4 lensWater_{0, 0, 0, 0}, lensSea_{0, 0, 0, 0}, lensMore_{0, 0, 0, 0};
     int lensWasUnder_ = -1;                         // the view before: 1 under, 0 above, -1 not known
@@ -690,6 +693,15 @@ private:
     Vec2 cloudDrift_{0, 0};             // how far the wind has carried the clouds, in their units of 2.4 km
     double cloudDriftTime_ = -1;
     mutable Vec3 sunAtNoon_{0, 0, 0};               // the sun's light before the air takes any of it: what the fog's color is for
+    // Spot lights' cookies (Light::cookie): the pictures asked for by the lights of this picture, a
+    // slice each, and the array they were last put in, with what it was made of (a picture read
+    // again, or changed, is another texture: the array is made again).
+    mutable std::vector<std::string> cookiesWanted_;
+    std::vector<std::string> cookieNames_;
+    std::vector<std::shared_ptr<Texture>> cookiePictures_;
+    std::vector<MTL::Texture*> cookieSources_;
+    NS::SharedPtr<MTL::Texture> cookies_;
+    mutable bool hasLightsInAir_ = false;           // a light of this picture lights the air (Light::isVolumetric)
     uint32_t pictureCount_ = 0;                     // pictures drawn: the rays traced before the scene turn with it
     NS::SharedPtr<MTL::Texture> cloudColor_;        // the clouds of this picture: their light, and how much shows through them
     bool cloudsDrawn_ = false;                      // into cloudColor_, for the picture being drawn

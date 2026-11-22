@@ -168,18 +168,6 @@ public:
             changed |= ui::color("Ground", settings.sky.groundColor, true);
             changed |= ui::dragFloat("Brightness", settings.sky.intensity, 0.01f, 0.0f, 100.0f);
         }
-        if (ui::section("Clouds")) {
-            changed |= ui::sliderFloat("Coverage", settings.sky.cloudCoverage, 0.0f, 1.0f);
-            changed |= ui::dragFloat("Scale", settings.sky.cloudScale, 0.01f, 0.05f, 20.0f);
-            changed |= ui::dragVec2("Drift", settings.sky.cloudSpeed, 0.001f);
-            changed |= ui::checkbox("With Depth", settings.sky.cloudsHaveDepth);
-            ui::tooltip("Clouds as volumes, thick and thin, lit by the sun through them: a camera can fly in, through and above them. Costs more than the flat layer");
-            if (settings.sky.cloudsHaveDepth) {
-                changed |= ui::dragFloat("Height", settings.sky.cloudHeight, 5.0f, 50.0f, 12000.0f, "%.0f m");
-                ui::tooltip("Meters above the ground where their base is");
-                changed |= ui::dragFloat("Thickness", settings.sky.cloudThickness, 5.0f, 50.0f, 8000.0f, "%.0f m");
-            }
-        }
         if (ui::section("Fog")) {
             changed |= ui::color("Color##fog", settings.fogColor, true);
             if (settings.sky.sunsetColors) {
@@ -206,8 +194,23 @@ public:
             changed |= ui::sliderFloat("Storm", settings.weather.storm, 0.0f, 1.0f);
             ui::tooltip("Lightning now and then, a few kilometers away or nearer: bolts down from the clouds, and flashes inside them that light them from within. 1 every few seconds. The wind rises with it, to a gale. With rain or without");
             changed |= ui::sliderFloat("Snow", settings.weather.snow, 0.0f, 1.0f);
-            ui::tooltip("Snow round the camera: flakes that drift down slowly, sway, go with the wind and melt where they land (nothing settles yet). The sky clouds over. 0 none, 1 a heavy fall");
+            ui::tooltip("Snow round the camera: flakes that drift down slowly, sway and go with the wind. The sky clouds over. 0 none, 1 a heavy fall");
+            changed |= ui::checkbox("Snow Settles", settings.weather.snowSettles);
+            ui::tooltip("What falls lies: what faces up and is out in it (not under a roof) turns white, unevenly, in drifts, more the longer it snows "
+                        "(a full cover in a minute and a half of a heavy fall, a thin one in a light fall); it melts in some minutes once it stops. Off: it melts as it lands");
             if (settings.weather.rain > 0 || settings.weather.storm > 0 || settings.weather.snow > 0) ImGui::TextDisabled("It moves while the game runs, or with Simulate on.");
+            // The clouds are the weather's: rain, a storm and snow cloud the sky over on top of these.
+            ui::subheading("Clouds");
+            changed |= ui::sliderFloat("Coverage", settings.sky.cloudCoverage, 0.0f, 1.0f);
+            changed |= ui::dragFloat("Scale", settings.sky.cloudScale, 0.01f, 0.05f, 20.0f);
+            changed |= ui::dragVec2("Drift", settings.sky.cloudSpeed, 0.001f);
+            changed |= ui::checkbox("With Depth", settings.sky.cloudsHaveDepth);
+            ui::tooltip("Clouds as volumes, thick and thin, lit by the sun through them: a camera can fly in, through and above them. Costs more than the flat layer");
+            if (settings.sky.cloudsHaveDepth) {
+                changed |= ui::dragFloat("Height", settings.sky.cloudHeight, 5.0f, 50.0f, 12000.0f, "%.0f m");
+                ui::tooltip("Meters above the ground where their base is");
+                changed |= ui::dragFloat("Thickness", settings.sky.cloudThickness, 5.0f, 50.0f, 8000.0f, "%.0f m");
+            }
             // The wind is the weather's too: rain freshens it, a storm makes a gale of it.
             ui::subheading("Wind");
             // One wind for the whole scene, set as how hard it blows and which way (what is kept is its velocity along x and z).
@@ -359,12 +362,9 @@ public:
             changed |= ui::dragFloat("Film Grain", settings.filmGrain, 0.001f, 0.0f, 0.5f);
             changed |= ui::sliderFloat("Sharpen", settings.sharpen, 0.0f, 1.0f);
             ui::tooltip("Crisper edges: good with a render scale below 1");
-            changed |= ui::sliderFloat("Flare##flare", settings.lensFlare, 0.0f, 2.0f);
-            ui::tooltip("Light of the sun scattered in the camera's glass: a glow round it, a star of streaks, a halo, and colored ghosts across the picture, "
-                        "while the sun is in view and not hidden. 0: none");
             changed |= pickValue(editor, Entity{}, "picture", "Dirt", settings.lensDirt);
             ui::tooltip("Smudges and specks on the glass (a mostly black picture: Lens/Dirt.png comes with the engine), lit up where the sun, "
-                        "the lamps and other bright light fall on them, through the bloom and the flare. None: a clean lens");
+                        "the lamps and other bright light fall on them, through the bloom. None: a clean lens");
             if (!settings.lensDirt.empty()) changed |= ui::sliderFloat("Dirt Amount", settings.lensDirtAmount, 0.0f, 3.0f);
             changed |= ui::sliderFloat("Signal Noise", settings.interference, 0.0f, 1.0f);
             ui::tooltip("An analog video link: 0 clean, 1 about to drop (a drone's camera)");

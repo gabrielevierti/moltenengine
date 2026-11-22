@@ -21,7 +21,7 @@ TEST(gpu_structs_have_the_sizes_the_shaders_expect) {
     // same numbers. If a field is added to ShaderTypes.h, update them on purpose.
     CHECK(sizeof(gpu::PassUniforms) == 400);
     CHECK(sizeof(gpu::InstanceData) == 144);
-    CHECK(sizeof(gpu::LightData) == 96);
+    CHECK(sizeof(gpu::LightData) == 128);
     CHECK(sizeof(gpu::MaterialUniforms) == 224 && offsetof(gpu::MaterialUniforms, isSea) == 216);
     CHECK(offsetof(gpu::MaterialUniforms, customShader) == 72);
     CHECK(offsetof(gpu::MaterialUniforms, custom) == 80);
@@ -32,8 +32,9 @@ TEST(gpu_structs_have_the_sizes_the_shaders_expect) {
     CHECK(offsetof(gpu::PassUniforms, cameraPosition) == 320);
     CHECK(offsetof(gpu::PassUniforms, time) == 336);
     CHECK(offsetof(gpu::LightData, type) == 48);
+    CHECK(offsetof(gpu::LightData, right) == 96 && offsetof(gpu::LightData, cookie) == 112 && offsetof(gpu::LightData, volumetric) == 116);
     CHECK(offsetof(gpu::FrameUniforms, cascadeSplits) == 256);
-    CHECK(sizeof(gpu::FrameUniforms) == 816 && offsetof(gpu::FrameUniforms, lightning) == 624);
+    CHECK(sizeof(gpu::FrameUniforms) == 832 && offsetof(gpu::FrameUniforms, lightning) == 624 && offsetof(gpu::FrameUniforms, snow) == 816);
     CHECK(sizeof(gpu::CloudResolveUniforms) == 160 && offsetof(gpu::CloudResolveUniforms, offset) == 144);
     CHECK(offsetof(gpu::FrameUniforms, seaShallow) == 768 && offsetof(gpu::FrameUniforms, seaLook) == 784 && offsetof(gpu::FrameUniforms, seaFoam) == 800);
     CHECK(offsetof(gpu::FrameUniforms, seaAbsorb) == 720 && offsetof(gpu::FrameUniforms, seaColor) == 736 && offsetof(gpu::FrameUniforms, cameraUnderwater) == 752);

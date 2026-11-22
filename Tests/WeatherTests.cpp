@@ -229,3 +229,52 @@ TEST(rain_and_snow_go_with_the_wind) {
     float wind = simd::length(rainy.world.wind());                  // the scene's, with what the rain adds to it
     CHECK(std::abs(along - wind) < 0.05 * wind && across < 0.05);
 }
+
+TEST(snow_that_settles_builds_up_while_it_snows_and_melts_after) {
+    RainyWorld snowy(0.0f, false);
+    WeatherSettings& weather = snowy.world.sceneSettings().weather;
+    weather.snow = 1.0f;
+    snowy.run(20.0f);
+    CHECK(snowy.world.weatherNow.snowCover == 0.0f);                 // not asked to settle: it melts as it lands
+    weather.snowSettles = true;
+    snowy.run(45.0f);
+    float half = snowy.world.weatherNow.snowCover;
+    CHECK(half > 0.4f && half < 0.6f);                              // half a cover in 45 seconds of a heavy fall
+    snowy.run(60.0f);
+    CHECK(snowy.world.weatherNow.snowCover > 0.99f);
+    weather.snow = 0.0f;
+    snowy.run(30.0f);
+    float after = snowy.world.weatherNow.snowCover;
+    CHECK(after < 0.95f && after > 0.85f);                          // it melts slowly once it stops
+    // Kept with the scene.
+    Scene empty, read;
+    std::vector<NamedMaterial> none;
+    RenderSettings back;
+    CHECK(readScene(writeScene(empty, none, snowy.world.sceneSettings()), read, none, back, SceneAssets{}) && back.weather.snowSettles);
+}
+
+TEST(a_light_keeps_its_cookie_and_its_light_in_the_air) {
+    Scene scene, read;
+    Entity lamp = scene.create("Lamp");
+    scene.add(lamp, Transform{});
+    Light light;
+    light.type = LightType::Spot;
+    light.cookie = "Textures/Window Frame.png";
+    light.isVolumetric = true;
+    light.volumetricStrength = 2.5f;
+    scene.add(lamp, light);
+    Entity plain = scene.create("Plain");
+    scene.add(plain, Transform{});
+    scene.add(plain, Light{});
+    std::vector<NamedMaterial> none;
+    RenderSettings settings, back;
+    std::string text = writeScene(scene, none, settings);
+    CHECK(text.find("lightAir") != std::string::npos);
+    CHECK(readScene(text, read, none, back, SceneAssets{}));
+    int found = 0;
+    read.each<Light>([&](Entity, Light& l) {
+        if (l.type == LightType::Spot && l.cookie == "Textures/Window Frame.png" && l.isVolumetric && l.volumetricStrength == 2.5f) found++;
+        if (l.type == LightType::Point && l.cookie.empty() && !l.isVolumetric && l.volumetricStrength == 1.0f) found++;
+    });
+    CHECK(found == 2);
+}

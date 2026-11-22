@@ -83,6 +83,7 @@ public:
         float flash = 0;                    // the lightning's light now: 0 none, 1 the brightest flash
         Vec3 strikePlace{0, 0, 0};          // where the last stroke is: x, z, and the height of the ground under it
         float bolt = 0;                     // the shape of its bolt (a seed); 0 a flash inside the clouds, no bolt
+        float snowCover = 0;                // the snow that has settled, 0 to 1 (WeatherSettings::snowSettles): it builds up while it snows, and melts slowly after
         double nextStrike = -1;             // effectsTime of the next stroke (below 0: not chosen yet)
         double strikeAt = -1000;            // and of the last one's start: its thunder follows it
         int flickers = 0;                   // flashes left in this stroke

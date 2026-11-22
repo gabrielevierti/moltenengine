@@ -5,6 +5,7 @@
 #include "Rendering/Renderer.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace molten {
 
@@ -620,6 +621,7 @@ void Renderer::renderScene(MTL::CommandBuffer* commandBuffer, Scene& scene, cons
     encoder->setFragmentBuffer(lights.buffer, lights.offset, gpu::MMBufferLights);
     encoder->setFragmentTexture(shadowMap_.get(), gpu::MMTextureShadowMap);
     encoder->setFragmentTexture(rainMapDrawn_ ? rainMap_.get() : nullptr, gpu::MMTextureRainMap);
+    encoder->setFragmentTexture(cookies_.get(), gpu::MMTextureLightCookies);
     // Water reads which way the bottom faces under it (for the sun's lines on it), and what floats on it.
     encoder->setFragmentTexture(wantsDepth() && prepassNormal_ ? prepassNormal_.get() : nullptr, gpu::MMTextureSceneNormal);
     FrameAllocator::Allocation wakes = allocator().copy(waterWakes);
@@ -670,6 +672,8 @@ void Renderer::renderScene(MTL::CommandBuffer* commandBuffer, Scene& scene, cons
         encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0), NS::UInteger(3));
         stats.passes++;
     }
+    // The air the volumetric lights pass through, lit: over what is opaque and the sky, under what is seen through.
+    if (hasLightsInAir_) drawLightsInAir(encoder);
 
     // Transparent objects, already sorted from far to near.
     encoder->pushDebugGroup(label("Transparent"));
@@ -679,6 +683,85 @@ void Renderer::renderScene(MTL::CommandBuffer* commandBuffer, Scene& scene, cons
     drawParticles(encoder, scene, view);
     drawDebugLines(encoder);
     encoder->endEncoding();
+}
+
+void Renderer::drawLightsInAir(MTL::RenderCommandEncoder* encoder) {
+    PipelineDescription description;
+    description.vertexFunction = "vertex_lights_in_air";
+    description.fragmentFunction = "fragment_lights_in_air";
+    description.colorFormat = kSceneFormat;
+    description.depthFormat = kDepthFormat;
+    description.sampleCount = targetSamples_;
+    description.blend = BlendMode::Additive;
+    MTL::RenderPipelineState* pipeline = shaders_.pipeline(description);
+    if (!pipeline) return;
+    encoder->pushDebugGroup(label("Lights in the air"));
+    encoder->setRenderPipelineState(pipeline);
+    encoder->setCullMode(MTL::CullModeNone);
+    encoder->setDepthStencilState(device_.depthReadOnly());       // nearer than anything: it passes everywhere
+    encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0), NS::UInteger(3));
+    encoder->popDebugGroup();
+    stats.passes++;
+}
+
+void Renderer::updateCookies(MTL::CommandBuffer* commandBuffer) {
+    std::vector<std::shared_ptr<Texture>> pictures;
+    std::vector<MTL::Texture*> sources;
+    for (const std::string& name : cookiesWanted_) {
+        std::shared_ptr<Texture> picture = loadPicture ? loadPicture(name, TextureFormat::RGBA8) : nullptr;
+        sources.push_back(picture ? picture->handle() : nullptr);
+        pictures.push_back(std::move(picture));
+    }
+    if (cookiesWanted_ == cookieNames_ && sources == cookieSources_ && (cookies_ || cookiesWanted_.empty())) return;
+    cookieNames_ = cookiesWanted_;
+    cookieSources_ = sources;
+    cookiePictures_ = pictures;
+    cookies_.reset();
+    if (cookiesWanted_.empty()) return;
+
+    // One slice for each, the same size whatever the picture's, with its smaller copies: a cookie
+    // far away, or seen in the air, is read blurred.
+    auto descriptor = NS::TransferPtr(MTL::TextureDescriptor::alloc()->init());
+    descriptor->setTextureType(MTL::TextureType2DArray);
+    descriptor->setPixelFormat(MTL::PixelFormatRGBA8Unorm);
+    descriptor->setWidth(gpu::MMCookieSize);
+    descriptor->setHeight(gpu::MMCookieSize);
+    descriptor->setArrayLength(cookiesWanted_.size());
+    descriptor->setMipmapLevelCount(NS::UInteger(std::log2(double(gpu::MMCookieSize))) + 1);
+    descriptor->setUsage(MTL::TextureUsageShaderRead | MTL::TextureUsageRenderTarget);
+    descriptor->setStorageMode(MTL::StorageModePrivate);
+    cookies_ = NS::TransferPtr(device_.device()->newTexture(descriptor.get()));
+    if (!cookies_) return;
+    cookies_->setLabel(NS::String::string("Light cookies", NS::UTF8StringEncoding));
+
+    PipelineDescription description;
+    description.vertexFunction = "vertex_fullscreen";
+    description.fragmentFunction = "fragment_cookie";
+    description.colorFormat = MTL::PixelFormatRGBA8Unorm;
+    MTL::RenderPipelineState* pipeline = shaders_.pipeline(description);
+    for (size_t slice = 0; slice < cookiesWanted_.size(); slice++) {
+        auto pass = NS::TransferPtr(MTL::RenderPassDescriptor::alloc()->init());
+        MTL::RenderPassColorAttachmentDescriptor* color = pass->colorAttachments()->object(0);
+        color->setTexture(cookies_.get());
+        color->setSlice(slice);
+        color->setLevel(0);
+        // A picture that cannot be read lets all the light through.
+        bool drawn = pipeline && pictures[slice];
+        color->setLoadAction(drawn ? MTL::LoadActionDontCare : MTL::LoadActionClear);
+        color->setClearColor(MTL::ClearColor(1.0, 1.0, 1.0, 1.0));
+        color->setStoreAction(MTL::StoreActionStore);
+        MTL::RenderCommandEncoder* encoder = encoderFor(commandBuffer, pass.get(), "Light cookie");
+        if (drawn) {
+            encoder->setRenderPipelineState(pipeline);
+            encoder->setFragmentTexture(pictures[slice]->handle(), 0);
+            encoder->setFragmentSamplerState(device_.linearClampSampler(), gpu::MMSamplerLinearClamp);
+            encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0), NS::UInteger(3));
+        }
+        encoder->endEncoding();
+    }
+    MTL::BlitCommandEncoder* blit = commandBuffer->blitCommandEncoder();
+    blit->generateMipmaps(cookies_.get());
+    blit->endEncoding();
 }
 
 void Renderer::drawParticles(MTL::RenderCommandEncoder* encoder, Scene& scene, const View& view) {
@@ -921,7 +1004,6 @@ void Renderer::renderFinal(MTL::CommandBuffer* commandBuffer, const Canvas& canv
     uniforms.temperature = settings.temperature;
     uniforms.tint = settings.tint;
     uniforms.sharpen = settings.sharpen;
-    uniforms.lensFlare = settings.lensFlare;
     // The dirt on the glass, read again when another is named.
     if (settings.lensDirt != lensDirtName_) {
         lensDirtName_ = settings.lensDirt;
@@ -930,11 +1012,6 @@ void Renderer::renderFinal(MTL::CommandBuffer* commandBuffer, const Canvas& canv
     MTL::Texture* dirt = lensDirt_ ? lensDirt_->handle() : nullptr;
     uniforms.lensDirt = dirt ? std::max(settings.lensDirtAmount, 0.0f) : 0.0f;
     upscaleDirt_ = dirt;
-    // Where the sun is on the picture: its direction, as a point infinitely far.
-    Vec4 sun = flareViewProjection_ * Vec4{-flareSunDirection_.x, -flareSunDirection_.y, -flareSunDirection_.z, 0.0f};
-    uniforms.sunInView = sun.w > 1e-4f && flareSunColor_.x + flareSunColor_.y + flareSunColor_.z > 0.001f ? 1.0f : 0.0f;
-    if (uniforms.sunInView > 0) uniforms.sunScreen = Vec2{sun.x / sun.w * 0.5f + 0.5f, 0.5f - sun.y / sun.w * 0.5f};
-    uniforms.sunColor = flareSunColor_;
     uniforms.lensWater = lensWater_;
     uniforms.lensSea = lensSea_;
     uniforms.lensMore = lensMore_;

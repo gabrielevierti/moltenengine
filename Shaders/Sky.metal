@@ -5,6 +5,7 @@
 // ambient light always match what the player sees.
 
 #include "Common.metal"
+#include "Lighting.metal"      // the lights, for the light they give the air (fragment_lights_in_air)
 
 // ---------------------------------------------------------------- clouds
 
@@ -388,6 +389,133 @@ fragment float4 fragment_sky(SkyOut in [[stage_in]],
     }
 #endif
     return float4(skyRadiance(in.direction, frame, true), 1.0);
+}
+
+// ---------------------------------------------------------------- lights in the air
+
+// The air a light passes through, lit by it (Light::isVolumetric): along each line of sight, from
+// the eye to the first thing seen there (the prepass's depth; the sky is as far as the light
+// reaches), what the air scatters toward the eye of that light, added to the picture. A light is
+// walked only where its sphere is crossed, in steps spread as its light falls off (as many for each
+// angle seen from the light: "equiangular"), so that the glow right by a lamp is not missed; a spot
+// light's cone and cookie are looked up at each. The air is thicker where the fog is (and low,
+// if the fog lies low), and what is farther is dimmed by the fog in front of it. Scattered forward
+// more than back, as by haze: brightest looking toward the light.
+// (Drawn over the whole picture, nearer than anything: z is 0.)
+// Where a line (from `eye`, along `d`) is inside a spot light's cone, between `t0` and `t1`: the
+// span in it, or an empty one (x > y). Outside the cone the light gives the air nothing, so the
+// steps are spent only inside.
+static float2 insideCone(float3 eye, float3 d, LightData light, float t0, float t1) {
+    float co = clamp(-light.spotOffset / light.spotScale, 0.0, 0.9999);          // the cosine of the outer half-angle
+    float co2 = co * co;
+    float3 v = eye - light.position;
+    float da = dot(d, light.direction), va = dot(v, light.direction);
+    float A = da * da - co2, B = 2.0 * (da * va - co2 * dot(v, d)), C = va * va - co2 * dot(v, v);
+    // On the side the light shines toward (not the cone's mirror behind it).
+    float lo = t0, hi = t1;
+    if (abs(da) > 1e-6) {
+        float turn = -va / da;
+        if (da > 0.0) lo = max(lo, turn); else hi = min(hi, turn);
+    } else if (va < 0.0) {
+        return float2(1.0, 0.0);
+    }
+    if (lo >= hi) return float2(1.0, 0.0);
+    // Inside the double cone: A t² + B t + C >= 0.
+    if (abs(A) < 1e-6) {
+        if (abs(B) < 1e-9) return C >= 0.0 ? float2(lo, hi) : float2(1.0, 0.0);
+        float r = -C / B;
+        if (B > 0.0) lo = max(lo, r); else hi = min(hi, r);
+        return float2(lo, hi);
+    }
+    float disc = B * B - 4.0 * A * C;
+    if (disc < 0.0) return A > 0.0 ? float2(lo, hi) : float2(1.0, 0.0);
+    float root = sqrt(disc);
+    float r1 = (-B - root) / (2.0 * A), r2 = (-B + root) / (2.0 * A);
+    if (r1 > r2) { float swap = r1; r1 = r2; r2 = swap; }
+    if (A < 0.0) return float2(max(lo, r1), min(hi, r2));
+    // Outside the two roots: of the two pieces, what is left on this side (the hull, if both are).
+    float2 before = float2(lo, min(hi, r1)), after = float2(max(lo, r2), hi);
+    bool hasBefore = before.x < before.y, hasAfter = after.x < after.y;
+    if (hasBefore && hasAfter) return float2(before.x, after.y);
+    return hasBefore ? before : after;
+}
+
+vertex SkyOut vertex_lights_in_air(uint vertexID [[vertex_id]],
+                                   constant PassUniforms &pass [[buffer(MMBufferPass)]]) {
+    SkyOut out = vertex_sky(vertexID, pass);
+    out.position.z = 0.0;
+    return out;
+}
+
+fragment float4 fragment_lights_in_air(SkyOut in [[stage_in]],
+                                       constant PassUniforms &pass [[buffer(MMBufferPass)]],
+                                       constant FrameUniforms &frame [[buffer(MMBufferFrame)]],
+                                       constant LightData *lights [[buffer(MMBufferLights)]],
+                                       depth2d<float> sceneDepth [[texture(MMTextureSceneDepth)]],
+                                       texture2d_array<float> cookies [[texture(MMTextureLightCookies)]],
+                                       sampler linearSampler [[sampler(MMSamplerLinearClamp)]]) {
+    if (hasSea(frame) && frame.cameraUnderwater > 0.0) return float4(0.0);       // in the water there is no air to light
+    float3 eye = pass.cameraPosition;
+    float3 d = normalize(in.direction);
+    float farthest = 1e7;
+    if (!is_null_texture(sceneDepth)) {
+        uint2 pixel = min(uint2(in.position.xy), uint2(sceneDepth.get_width() - 1, sceneDepth.get_height() - 1));
+        float stored = sceneDepth.read(pixel);
+        if (stored < 1.0) {
+            float2 ndc = in.position.xy / pass.viewportSize * float2(2.0, -2.0) + float2(-1.0, 1.0);
+            float4 world = pass.inverseViewProjection * float4(ndc, stored, 1.0);
+            farthest = length(world.xyz / world.w - eye);
+        }
+    }
+    const float g = 0.3;                                         // how much more it scatters forward
+    float start = pixelNoise(in.position.xy);
+    float3 total = float3(0.0);
+    for (uint i = 0; i < frame.lightCount; i++) {
+        LightData light = lights[i];
+        if (light.volumetric <= 0.0 || (light.type != MMLightPoint && light.type != MMLightSpot)) continue;
+        float range = light.range;
+        float3 toLight = light.position - eye;
+        float s = dot(toLight, d);                               // how far along the line it passes nearest the light
+        float aside2 = max(dot(toLight, toLight) - s * s, 0.0);
+        if (aside2 >= range * range) continue;
+        float half = sqrt(range * range - aside2);
+        float t0 = max(s - half, 0.0), t1 = min(s + half, farthest);
+        if (light.type == MMLightSpot) {
+            float2 span = insideCone(eye, d, light, t0, t1);
+            t0 = span.x, t1 = span.y;
+        }
+        if (t1 <= t0) continue;
+        // Its light falls off as 1 / (r² + 1) (Lighting.metal): spread the steps by that, and what is
+        // left at each (the window to its range, the cone, the cookie, the fog) is all they look up.
+        float h = sqrt(aside2 + 1.0);
+        float a0 = atan((t0 - s) / h), a1 = atan((t1 - s) / h);
+        uint steps = light.type == MMLightSpot ? 16u : 6u;
+        float3 sum = float3(0.0);
+        for (uint k = 0; k < steps; k++) {
+            float t = s + h * tan(mix(a0, a1, (float(k) + start) / float(steps)));
+            float3 at = eye + d * t;
+            float3 fromLight = at - light.position;
+            float r2 = max(dot(fromLight, fromLight), 1e-6);
+            float ratio2 = r2 / (range * range);
+            float window = saturate(1.0 - ratio2 * ratio2);
+            float lit = window * window;
+            float3 way = fromLight * rsqrt(r2);
+            if (light.type == MMLightSpot) {
+                float cone = saturate(dot(way, light.direction) * light.spotScale + light.spotOffset);
+                lit *= cone * cone;
+            }
+            if (lit <= 0.0) continue;
+            float phase = (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * dot(way, -d), 1.5);
+            float thick = frame.fogHeightFalloff > 0.00001 ? exp(clamp(-frame.fogHeightFalloff * at.y, -40.0, 40.0)) : 1.0;
+            float3 seen = float3(lit * phase * thick * exp(-frame.fogDensity * thick * t));
+            if (light.cookie > 0.5) seen *= lightCookie(light, at, cookies, linearSampler, 1.0);
+            sum += seen;
+        }
+        total += light.color * light.volumetric * sum * ((a1 - a0) / (h * float(steps)));
+    }
+    // Clear air lights a little; fog more.
+    float air = 0.01 + 4.0 * max(frame.fogDensity, 0.0);
+    return float4(clamp(total * air, 0.0, 60000.0), 1.0);
 }
 
 // ---------------------------------------------------------------- the sky as a cubemap

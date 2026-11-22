@@ -48,7 +48,7 @@ them is its own code (a script, or a visual script):
 | --- | --- |
 | Mesh | Mesh Renderer |
 | Rendering | Camera, Light, Decal, Terrain, Foliage, LOD Group |
-| Physics | Box, Sphere, Capsule and Mesh Collider, Rigidbody, Joint, Character Controller, Buoyancy, Rope, Ragdoll |
+| Physics | Box, Sphere, Capsule and Mesh Collider, Rigidbody, Joint, Character Controller, Buoyancy, Rope, Cloth, Ragdoll |
 | Animation | Animator, Two Bone IK |
 | Audio | Audio Source, Reverb Zone |
 | Effects | Particle System, Liquid |
@@ -507,10 +507,10 @@ its **Shadows** reach, and the scene's lights in a list that opens when wanted. 
 the world of the game: the **Sky**, from a simulated atmosphere by default (sunlight scattered by
 the air and the haze, as on the Earth: blue by day; gold, orange and red round a low sun with the
 earth's shadow rising opposite; dark at night; all from the sun's height, so turn the sun);
+**Fog** and its light shafts; the **Weather**: rain, storm and snow (which can settle), the
 **Clouds** (with depth, at a height and a thickness of your choosing: a camera can fly in, through
-and above them, and inside them the world fades into white); **Fog** and its light shafts; the
-**Weather**, with the **Wind** (how hard, which way, how gusty), which the weather raises; and the
-sea (**Water**). How all of it is drawn (shadow maps or ray tracing, how sharp, how many rays) is
+and above them, and inside them the world fades into white) and the **Wind** (how hard, which way,
+how gusty), which the weather raises; and the sea (**Water**). How all of it is drawn (shadow maps or ray tracing, how sharp, how many rays) is
 not set here: it is the project's, in Project Settings > Quality.
 
 The sky is **Automatic** by default: turn the sun and the sky follows it, day, sunset, then night
@@ -531,23 +531,26 @@ hit (any collider, the ground's mesh, a car's roof) or at the water, and ends th
 droplets thrown off the way the surface faces, a widening ring on water, and on what is steep (a
 wall, a windscreen, the side of a car) drops that run down it. What is out in the rain gets wet:
 darker where it soaks the water up, glossier, with rings spreading where the drops land on what
-lies flat and thin trails running down what stands upright; under a roof, a porch or inside a car
+lies flat; on what slopes (a bonnet, a windscreen, a wall) the water stands in beads that gather,
+and now and then one grown heavy sets off down the slope, as gravity and the wind take it along
+the surface, sweeping up the beads in its way and leaving a clear trail; under a roof, a porch or inside a car
 it stays dry (the scene round the camera is seen from above to know). As it rains the sky clouds
 over, the sun dims and the air thickens. **Storm** adds lightning, a few kilometers away or
 nearer: some strokes stay inside the clouds and light them from within, round where they are;
 the others are a bolt down from the clouds to the ground, zigzagging, with branches, flashing a
 few times in quick succession, the clouds glowing round it and the scene lit the more the nearer
 it is (the moment of each stroke is in `World::weatherNow`, for a game's thunder). **Snow** falls
-as rain does but slowly: flakes that sway, go with the wind, and melt a moment after they land
-(nothing settles yet). A game that wants a weather of its own leaves all three at 0 and makes its
+as rain does but slowly: flakes that sway and go with the wind. With **Snow Settles** it lies: what
+faces up and is out in it turns white, unevenly, in drifts, more the longer it snows, and melts in
+some minutes once it stops (how much lies now is in `World::weatherNow.snowCover`); without, it melts
+a moment after it lands. A game that wants a weather of its own leaves all three at 0 and makes its
 own from the Rain effect. The Hierarchy's funnel button shows only one kind of thing (lights, cameras...).
 
 **Rendering** is what is drawn of the scene beyond its light: ambient occlusion (how the screen's
 own looks), depth of field and motion blur. **Post Processing** is what is done to the picture
 afterwards, as a camera does: exposure and tone mapping (none by default), bloom, color (contrast,
-saturation, temperature, tint, grading, sharpen), and the lens and the film: the **lens flare**
-(the sun's light scattered in the glass, a glow, a star, a halo and ghosts, while the sun is in
-view and not hidden), vignette, grain.
+saturation, temperature, tint, grading, sharpen), and the lens and the film: vignette, distortion,
+color fringes, dirt on the glass lit up by the bloom, grain.
 
 **Project Settings > Quality** is how well the game draws as it ships, the same for every scene.
 A scene says what it wants to look like (where its sun is, whether its clouds have depth, how
@@ -598,6 +601,17 @@ pixels instead of fewer frames.
 
 **Area lights** (Entity > Light > Area Light) are glowing rectangles: a window, a ceiling panel, a
 screen, shining from their front, softly, as much as their size.
+
+A **spot light's cookie**, as in Unity: a picture in Assets that the light shines through, spread
+across its cone (white lets it through, black stops it, colors tint it): the frame of a window on
+the floor, leaves, stained glass, a theatre's gobo. It turns with the light about its axis. Drop a
+picture on the Light's **Cookie** slot in the Inspector.
+
+**Volumetric** lights (point and spot, a box in the Inspector) light the air they pass through: a
+lamp's glow in the mist, a car's headlights in the rain, a beam across a dusty room, the cookie's
+pattern in it too. **In The Air** is how much (1 as fog would be lit); the fog makes it thicker
+(Environment > Fog), and what is far is dimmed by the fog in front of it. It is seen in front of
+what it lights and not through walls, and it casts no shadows in the air.
 
 ## The picture: grading, exposure, focus, motion, sky, decals, wind
 
@@ -676,6 +690,32 @@ round what they meet and are pulled by what hangs from them, and it does not str
 heavy the load. One mesh is drawn along it, of the entity's own material: a tube, or rings with
 **Is Chain**. If the entity it starts at has a RigidBody, the rope moves with it and pulls it.
 **Bend** makes it stiffer: the most each link turns from the next.
+
+## Cloth
+
+**Entity > 3D Object > Cloth** makes a sheet of cloth stood up, hanging from its top edge; or add
+**Cloth** (Add Component > Physics) to any entity with a mesh. With the built-in plane it is a sheet
+of **Segments** by Segments squares, as large as the entity's scale; with a model, the model's own
+points (a cape, a sail, a flag made in Blender). While the game runs it hangs, falls, folds,
+drapes over what it meets and flaps in the wind.
+
+- **Pinned**: which points hold where the entity puts them, and go where it goes: the top edge (a
+  curtain, washing on a line), the top corners (a banner, a hammock), the left edge (a flag on its
+  pole), the four corners (a canopy, a sail), or none (it falls: a tablecloth). The top is the
+  mesh's up; for the plane, the edge on top once it is stood up. Put the entity under a moving one
+  (a boat, a character) and the cloth is carried with it, the rest of it trailing.
+- **Stretch** (1: it does not stretch; lower as a knit, 0 as rubber), **Stiffness** (how it resists
+  folding: 0 silk, 0.2 cotton, 0.6 leather), **Weight** (kilograms per square meter: 0.05 silk,
+  0.25 cotton, 0.5 canvas), **Damping** (how soon it settles).
+- **Wind**: how much the scene's wind and its gusts push it (Environment > Weather > Wind); a flag
+  edge-on to the wind still flaps, in waves that run down it. At 0 it still falls through the
+  air, slowly, as cloth does.
+- **Collides**: kept out of the colliders around it (box, sphere, capsule, mesh, convex), held a
+  little by them (it lies on a table and does not slide off at once), **Thickness** away from
+  them. It does not collide with itself, and it does not push bodies.
+
+It is seen from both sides whatever its material. From a game's code, `kit::Cloth` on the entity has
+the same fields, changed at once while it runs; its `simulation->points()` are where it is.
 
 ## Animation, as in Unity
 

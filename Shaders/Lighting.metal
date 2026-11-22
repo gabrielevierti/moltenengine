@@ -122,6 +122,25 @@ static LightSample sampleLight(LightData light, float3 position) {
     return result;
 }
 
+// A spot light's cookie, as Unity has it: the picture the light shines through, spread across its
+// cone (the cone just fits in the picture's square), what passes of it (white all, black none,
+// colors tint it) for light that reaches `position`. `blur` is the picture's mip to read, 0 sharp;
+// below 0 the GPU picks it, as for any texture.
+static float3 lightCookie(LightData light, float3 position, texture2d_array<float> cookies, sampler linearSampler, float blur = -1.0) {
+    if (light.cookie < 0.5 || light.type != MMLightSpot || is_null_texture(cookies)) return float3(1.0);
+    float3 v = position - light.position;
+    float ahead = dot(v, light.direction);
+    if (ahead <= 0.0001) return float3(0.0);
+    float3 up = cross(light.right, light.direction);
+    float cosOuter = clamp(-light.spotOffset / light.spotScale, 0.0001, 0.9999);
+    float tanOuter = sqrt(1.0 - cosOuter * cosOuter) / cosOuter;
+    float2 across = float2(dot(v, light.right), dot(v, up)) / (ahead * tanOuter);
+    float2 uv = across * float2(0.5, -0.5) + 0.5;
+    uint slice = uint(light.cookie - 0.5);
+    if (blur >= 0.0) return cookies.sample(linearSampler, uv, slice, level(blur)).rgb;
+    return cookies.sample(linearSampler, uv, slice).rgb;
+}
+
 // ---------------------------------------------------------------- sun shadows
 
 // How much sunlight reaches the point: 0 in full shadow, 1 fully lit.

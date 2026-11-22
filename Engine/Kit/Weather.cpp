@@ -234,6 +234,17 @@ void updateWeather(World& world, float dt) {
     now.seed = random.nextUInt() | (uint64_t(random.nextUInt()) << 32);
     const double time = world.effectsTime;
 
+    // ---- snow that settles: a full cover in a minute and a half of a heavy fall, a thin one in a
+    // light fall (it settles as it falls, and some melts as it does); melted in some minutes after.
+    if (weather.snowSettles) {
+        const float falling = std::clamp(weather.snow, 0.0f, 1.0f);
+        const float lies = falling * (0.4f + 0.6f * falling);                  // what a fall this heavy can cover
+        if (now.snowCover < lies) now.snowCover = std::min(lies, now.snowCover + dt * falling / 90.0f);
+        else now.snowCover = std::max(lies, now.snowCover - dt / 300.0f);
+    } else {
+        now.snowCover = 0.0f;
+    }
+
     // ---- lightning
     const float storm = std::clamp(weather.storm, 0.0f, 1.0f);
     now.flash = std::max(now.flash - dt * 9.0f, 0.0f);
@@ -317,14 +328,17 @@ void updateWeather(World& world, float dt) {
                 droplet.sizeScale = random.range(0.7f, 1.2f);
                 splashes->particles.push_back(droplet);
             }
-            // On what is steep, the water gathers and runs down it: down along the surface.
+            // On what is steep, the water gathers and runs down it: down along the surface, as gravity
+            // pulls it, and a little the way the wind pushes it along the surface.
             if (normal.y < kSteep && normal.y > -0.2f && random.next() < 0.35f && int(runs->particles.size()) < runs->maxParticles) {
                 Vec3 downhill = Vec3{0, -1, 0} - normal * (-normal.y);
-                float length = simd::length(downhill);
-                if (length > 0.05f) {
+                Vec3 pushed = Vec3{wind.x, 0, wind.z} - normal * simd::dot(Vec3{wind.x, 0, wind.z}, normal);
+                Vec3 goes = downhill * 9.8f + pushed * 0.15f;
+                float length = simd::length(goes);
+                if (simd::length(downhill) > 0.05f && length > 0.05f) {
                     Particle run;
                     run.position = at + normal * 0.004f;
-                    run.velocity = downhill / length * random.range(0.35f, 0.8f);
+                    run.velocity = goes / length * random.range(0.35f, 0.8f);
                     run.lifetime = random.range(0.5f, 1.3f);
                     run.sizeScale = random.range(0.8f, 1.2f);
                     runs->particles.push_back(run);

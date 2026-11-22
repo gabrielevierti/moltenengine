@@ -1011,7 +1011,7 @@ void registerBuiltinComponents(EditorContext& editor) {
         return changed;
     });
 
-    registry.addComponent<Light>(nullptr, "Light", [](EditorContext&, Entity, Light& light) {
+    registry.addComponent<Light>(nullptr, "Light", [](EditorContext& context, Entity, Light& light) {
         bool changed = false;
         int type = int(light.type);
         if (ui::combo("Type", type, {"Directional", "Point", "Spot", "Area"})) {
@@ -1025,6 +1025,23 @@ void registerBuiltinComponents(EditorContext& editor) {
             changed |= ui::dragDegrees("Inner Cone", light.innerConeAngle, 0.0f, 89.0f);
             changed |= ui::dragDegrees("Outer Cone", light.outerConeAngle, 0.0f, 89.0f);
             light.outerConeAngle = std::max(light.outerConeAngle, light.innerConeAngle);
+            // The cookie: a picture shown as it is in the slot, kept by its name.
+            std::shared_ptr<Texture> cookie = light.cookie.empty() ? nullptr : context.engine.assets().texture(light.cookie, TextureFormat::RGBA8);
+            if (textureSlot(context, "Cookie", cookie, TextureFormat::RGBA8)) {
+                light.cookie = cookie ? cookie->name : std::string();
+                changed = true;
+            }
+            ui::tooltip("A picture the light shines through, spread across its cone, as Unity's cookies: white lets it through, black stops it, "
+                        "colors tint it (a window's frame, leaves, stained glass, a gobo). It turns with the light about its axis");
+        }
+        if (light.type == LightType::Point || light.type == LightType::Spot) {
+            changed |= ui::checkbox("Volumetric", light.isVolumetric);
+            ui::tooltip("It lights the air it passes through: a lamp's glow in the mist, a beam in a dusty room, through its cookie if it has one. "
+                        "More where there is more fog (Environment > Fog). Seen in front of what it lights, not through walls");
+            if (light.isVolumetric) {
+                changed |= ui::dragFloat("In The Air", light.volumetricStrength, 0.02f, 0.0f, 50.0f);
+                ui::tooltip("How much it lights the air: 1 as the fog would be lit, more for a hazier room");
+            }
         }
         if (light.type == LightType::Area) {
             changed |= ui::dragVec2("Size", light.areaSize, 0.02f);

@@ -101,45 +101,6 @@ static float3 gradeWithTable(float3 linearColor, texture2d<float> table, sampler
     return gradeToLinear(mix(a, b, blue - lower));
 }
 
-// The sun's light scattered in the camera's glass: a glow round it, a star of streaks, a halo, and
-// ghosts (reflections between the lenses) along the line from the sun through the middle.
-constant float kFlareGhostAt[5] = {-0.35, 0.25, 0.55, 0.9, 1.35};
-constant float kFlareGhostSize[5] = {0.05, 0.03, 0.08, 0.045, 0.12};
-constant float3 kFlareGhostColor[5] = {float3(0.9, 0.6, 0.3), float3(0.4, 0.7, 1.0), float3(0.6, 1.0, 0.6), float3(1.0, 0.5, 0.8), float3(0.5, 0.6, 1.0)};
-
-static float3 lensFlare(float2 uv, constant PostUniforms &post, texture2d<float> scene, sampler linearSampler, float aspect) {
-    float2 sun = post.sunScreen;
-    // As much as the sun is seen: how bright the picture is where it is (hidden behind a wall or a
-    // cloud, it is not), and less as it nears the picture's edges.
-    float seen = 0.0;
-    for (int i = 0; i < 5; i++) {
-        float2 offset = float2(i == 1 ? 0.004 : i == 2 ? -0.004 : 0.0, i == 3 ? 0.004 : i == 4 ? -0.004 : 0.0);
-        float2 at = sun + offset;
-        if (any(at < 0.0) || any(at > 1.0)) continue;
-        float3 c = scene.sample(linearSampler, at).rgb;
-        seen += saturate((max(c.r, max(c.g, c.b)) - 1.5) / 6.0);
-    }
-    seen /= 5.0;
-    float2 edge = min(sun, 1.0 - sun);
-    seen *= saturate(min(edge.x, edge.y) * 8.0 + 0.6);
-    if (seen <= 0.0) return float3(0.0);
-    float3 light = normalize(max(post.sunColor, float3(1e-4))) * min(length(post.sunColor), 3.0) * seen * post.lensFlare;
-    float2 d = (uv - sun) * float2(aspect, 1.0);
-    float r = length(d);
-    float3 add = light * 0.02 / (r * r * 30.0 + 0.02) * 0.5;                        // the glow
-    float angle = atan2(d.y, d.x);
-    add += light * pow(abs(cos(angle * 3.0)), 60.0) * exp(-r * 5.0) * 0.35;           // the star
-    add += light * float3(0.6, 0.8, 1.0) * exp(-abs(r - 0.32) * 60.0) * 0.06;          // the halo
-    float2 axis = float2(0.5) - sun;
-    for (int i = 0; i < 5; i++) {
-        float2 ghost = sun + axis * (1.0 + kFlareGhostAt[i]);
-        float gr = length((uv - ghost) * float2(aspect, 1.0));
-        float disc = smoothstep(kFlareGhostSize[i], kFlareGhostSize[i] * 0.6, gr);
-        add += light * kFlareGhostColor[i] * disc * 0.05;
-    }
-    return add;
-}
-
 // ---------------------------------------------------------------- the camera through the sea's surface
 
 static float glassHash(float2 p) {
@@ -286,7 +247,6 @@ fragment float4 fragment_tonemap(FullscreenOut in [[stage_in]],
         hdr = max(hdr + (hdr - around * 0.25) * post.sharpen * 1.5, float3(0.0));
     }
     float3 glare = bloom.sample(linearSampler, lensUV).rgb * post.bloomIntensity;
-    if (post.lensFlare > 0.0 && post.sunInView > 0.5) glare += lensFlare(in.uv, post, scene, linearSampler, aspect);
     hdr += glare;
     // Dirt on the glass shows only where bright light falls on it: smudges lit up round the sun and the lamps.
     if (post.lensDirt > 0.0) hdr += glare * lensDirt.sample(linearSampler, in.uv).rgb * (post.lensDirt * 6.0);
@@ -346,6 +306,15 @@ fragment float4 fragment_copy(FullscreenOut in [[stage_in]],
                               texture2d<float> picture [[texture(0)]],
                               sampler linearSampler [[sampler(MMSamplerLinearClamp)]]) {
     return float4(picture.sample(linearSampler, in.uv).rgb, 1.0);
+}
+
+// A spot light's cookie, put into its slice of the cookies' array (Renderer::updateCookies): what
+// passes of the light is the picture's color where it is opaque, none where it is clear.
+fragment float4 fragment_cookie(FullscreenOut in [[stage_in]],
+                                texture2d<float> picture [[texture(0)]],
+                                sampler linearSampler [[sampler(MMSamplerLinearClamp)]]) {
+    float4 texel = picture.sample(linearSampler, in.uv);
+    return float4(texel.rgb * texel.a, 1.0);
 }
 
 fragment float4 fragment_ssao(FullscreenOut in [[stage_in]],

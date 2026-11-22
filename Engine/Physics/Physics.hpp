@@ -147,6 +147,10 @@ struct RaycastHit {
     float distance = 0;
 };
 
+/// Where a collider without a body of its own stands in the world (under whatever it is under):
+/// its place and its turn, without the scale. For code that tests against colliders itself.
+void worldPlace(const Transform& transform, Vec3& position, Quat& rotation);
+
 class Physics {
 public:
     Vec3 gravity{0, -9.81f, 0};

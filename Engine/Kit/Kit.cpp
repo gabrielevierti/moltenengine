@@ -12,6 +12,7 @@
 #include "Kit/Sound.hpp"
 #include "Kit/Ragdoll.hpp"
 #include "Kit/Rope.hpp"
+#include "Kit/Cloth.hpp"
 #include "Animation/Timeline.hpp"
 
 #include "Kit/Vehicles.hpp"
@@ -675,6 +676,7 @@ void registerKit() {
     linkSound();
     linkRagdoll();
     linkRope();
+    linkCloth();
     linkTimeline();
     (void)script::typeNameFor("kit");
     (void)&sharedGltfModel;                 // and the Animator       // and what scripts made from visual scripts are written with         // names something in Vehicles.cpp, so that a program that links the kit gets the vehicles too

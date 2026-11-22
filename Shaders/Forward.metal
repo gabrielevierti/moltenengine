@@ -173,11 +173,68 @@ static float rainHash(float2 p) {
     return fract(sin(dot(p, float2(127.1, 311.7))) * 43758.5453);
 }
 
+// Water on a sloping surface (a car's bonnet, a windscreen, a roof, a wall): beads of every size
+// that the rain leaves and that slowly gather; and now and then one grown heavy enough that sets
+// off down the slope, the way gravity pulls it along the surface and the wind pushes it, sweeping
+// up the beads in its way and leaving a clear, wet trail behind it. Returns the tilt the water
+// gives the surface (in the surface's own two directions: across the slope and down it), and in
+// `z` how much of the pixel is under water.
+static float3 rainBeads(float3 at, float steep, float time, float wet, float near) {
+    float3 result = float3(0.0);
+    // ---- the beads that sit: two sizes, more of them the longer it has rained
+    for (int layer = 0; layer < 2; layer++) {
+        float size = layer == 0 ? 38.0 : 85.0;               // cells of 2.6 and 1.2 cm
+        float2 q = at.xy * size + float2(layer * 7.13, layer * 3.71);
+        float2 cell = floor(q);
+        float there = rainHash(cell + float2(11.0 * float(layer), 3.0));
+        if (there > wet * (layer == 0 ? 0.55 : 0.75)) continue;
+        float2 middle = float2(rainHash(cell + 1.7), rainHash(cell + 8.3)) * 0.6 + 0.2;
+        float radius = mix(0.12, 0.34, rainHash(cell + 4.1)) * mix(0.7, 1.0, wet);
+        float2 off = fract(q) - middle;
+        off.y *= 1.0 + 0.4 * steep;                          // a bead on a slope hangs, longer than wide
+        float r = length(off) / radius;
+        if (r >= 1.0) continue;
+        float bulge = sqrt(1.0 - r * r);
+        result.xy += off / radius * (1.0 - bulge) * 1.6;
+        result.z = max(result.z, smoothstep(1.0, 0.7, r));
+    }
+    // ---- the ones that run: a column of the slope at a time, each at its own pace
+    if (steep > 0.08) {
+        float columns = 14.0;                                // 7 cm apart
+        float across = at.x * columns;
+        float column = floor(across);
+        float r = rainHash(float2(column, 7.31));
+        if (r < wet * 0.8) {
+            // The steeper, the faster it goes, as a drop of its weight does once it lets go.
+            float speed = (0.25 + 0.6 * rainHash(float2(column, 1.7))) * sqrt(steep);
+            float along = at.y * 2.2 + time * speed * 2.2 + r * 17.0;        // a drop every 45 cm or so down each column
+            float t = fract(along);
+            // It wanders a little from side to side as it picks up what is in its way.
+            float within = fract(across) - 0.5 + 0.16 * sin(at.y * 9.0 + r * 6.28) + 0.06 * sin(at.y * 23.0 + r * 3.1);
+            float2 head = float2(within * 3.4, (t - 0.06) * 26.0);
+            float headR = length(head);
+            float trail = (1.0 - smoothstep(0.0, 0.9, t)) * (1.0 - smoothstep(0.03, 0.09, abs(within)));
+            // Its trail is swept clear of beads: they were gathered into it.
+            result.xy *= 1.0 - trail * 0.9;
+            result.z *= 1.0 - trail * 0.6;
+            if (headR < 1.0) {
+                float bulge = sqrt(1.0 - headR * headR);
+                result.xy += head / max(headR, 1e-3) * (1.0 - bulge) * 1.4;
+                result.z = max(result.z, 1.0);
+            }
+            result.z = max(result.z, trail * 0.55);
+            result.xy += float2(-sign(within), 0.0) * trail * 0.15;
+        }
+    }
+    return result * float3(near, near, 1.0);
+}
+
 // What the rain does to a surface out in it: what soaks water up (stone, wood, asphalt, cloth)
-// darkens; a film of water makes it smoother, most where it lies flat and the water pools; on
-// what faces up, the drops' rings spread on that film; down what is steep (a wall, the side of
-// a car) the water runs in thin wandering trails, a drop at the head of each.
-static void wetten(thread MaterialSample &m, MeshVertexOut in, constant FrameUniforms &frame, float time, float reached) {
+// darkens; a film of water makes it smoother, most where it lies flat and the water pools. On what
+// lies flat (the ground, a roof, the top of a wall) the drops' rings spread on that film; on what
+// slopes (a bonnet, a windscreen, a wall) the water stands in beads that gather and run down it,
+// as gravity and the wind take them along the surface.
+static void wetten(thread MaterialSample &m, MeshVertexOut in, constant FrameUniforms &frame, float time, float reached, float3 wind) {
     float3 n = normalize(in.normal);
     float wet = frame.wetness * reached * smoothstep(-0.45, 0.05, n.y);
     if (wet <= 0.002) return;
@@ -188,25 +245,25 @@ static void wetten(thread MaterialSample &m, MeshVertexOut in, constant FrameUni
     m.roughness = mix(m.roughness, min(m.roughness, mix(0.3, 0.07, up)), film);
     m.normal = normalize(mix(m.normal, n, film * up * 0.7));
 
-    if (up < 0.75 && in.viewDepth < 45.0) {
-        float steep = (1.0 - up / 0.75) * (1.0 - smoothstep(30.0, 45.0, in.viewDepth));
-        float2 level = float2(-n.z, n.x);
-        level = dot(level, level) > 1e-6 ? normalize(level) : float2(1.0, 0.0);
-        float across = dot(in.worldPosition.xz, level) * 12.0;
-        float column = floor(across);
-        float r = rainHash(float2(column, 7.31));
-        // Trails wander from side to side as they run.
-        float within = fract(across) - 0.5 + 0.18 * sin(in.worldPosition.y * 3.0 + r * 6.28);
-        float speed = 0.8 + 1.6 * rainHash(float2(column, 1.7));
-        float trail = fract(in.worldPosition.y * 1.6 + time * speed + r * 13.0);
-        float head = smoothstep(0.0, 0.02, trail) * (1.0 - smoothstep(0.04, 0.09, trail)) * (1.0 - smoothstep(0.1, 0.26, abs(within)));
-        float behind = (1.0 - smoothstep(0.05, 0.6, trail)) * (1.0 - smoothstep(0.04, 0.12, abs(within))) * 0.6;
-        float running = step(1.0 - 0.65 * wet, r) * steep * max(head, behind);
-        m.roughness = mix(m.roughness, 0.03, running);
-        m.baseColor.rgb *= 1.0 - 0.2 * running * soaks;
-        m.normal = normalize(m.normal - float3(level.x, 0.0, level.y) * (within * 2.5 * head * running));
+    // ---- on what slopes: beads that gather and run. The surface's own two ways: across the slope,
+    // and the way a drop goes down it (gravity along the surface, and the wind along it a little).
+    if (up < 0.985 && in.viewDepth < 40.0) {
+        float steep = sqrt(saturate(1.0 - up * up));         // how much of gravity pulls along it
+        float3 downhill = float3(0.0, -1.0, 0.0) + n * up;
+        float3 pushed = float3(wind.x, 0.0, wind.z) - n * dot(float3(wind.x, 0.0, wind.z), n);
+        float3 goes = downhill * 9.8 + pushed * 0.15;
+        goes = dot(goes, goes) > 1e-6 ? normalize(goes) : normalize(cross(n, abs(n.x) < 0.9 ? float3(1, 0, 0) : float3(0, 0, 1)));
+        float3 side = normalize(cross(n, goes));
+        float2 onIt = float2(dot(in.worldPosition, side), -dot(in.worldPosition, goes));
+        float near = 1.0 - smoothstep(18.0, 40.0, in.viewDepth);
+        float3 beads = rainBeads(float3(onIt, 0.0), steep, time, wet, near);
+        float water = beads.z * near;
+        m.normal = normalize(m.normal + (side * beads.x - goes * beads.y) * 0.5 * near);
+        m.roughness = mix(m.roughness, 0.02, water);
+        m.baseColor.rgb *= 1.0 - 0.15 * water * soaks;
     }
-    if (up > 0.6 && in.viewDepth < 30.0) {
+    // ---- on what lies flat: the rings of the drops that land in the film of water on it
+    if (up > 0.95 && in.viewDepth < 30.0) {
         float2 p = in.worldPosition.xz * 2.5;               // cells of 40 cm, a drop now and then in each
         float2 tilt = float2(0.0);
         for (int layer = 0; layer < 2; layer++) {
@@ -221,9 +278,33 @@ static void wetten(thread MaterialSample &m, MeshVertexOut in, constant FrameUni
             float ring = sin(clamp((r - radius) * 40.0, -3.14159, 3.14159));
             tilt += away / max(r, 1e-3) * (ring * band * (1.0 - phase) * (1.0 - phase));
         }
-        float pools = wet * smoothstep(0.6, 0.95, up) * (1.0 - smoothstep(12.0, 30.0, in.viewDepth));
+        float pools = wet * smoothstep(0.95, 0.995, up) * (1.0 - smoothstep(12.0, 30.0, in.viewDepth));
         m.normal = normalize(m.normal + float3(tilt.x, 0.0, tilt.y) * (0.35 * pools));
     }
+}
+
+// Snow that has settled (WeatherSettings::snowSettles): on what faces up and is out in it, the more
+// the flatter, none on what is steeper than it can lie on; unevenly, in patches that spread and
+// join. White, rough, the grooves under it filled in.
+static void snowOn(thread MaterialSample &m, MeshVertexOut in, constant FrameUniforms &frame, float reached) {
+    float cover = frame.snow.x;
+    float3 n = normalize(in.normal);
+    float lies = smoothstep(0.4, 0.85, n.y) * reached;
+    if (lies <= 0.0 || cover <= 0.0) return;
+    float2 p = in.worldPosition.xz;
+    float drifts = waterNoise(p * 0.45) * 0.55 + waterNoise(p * 1.9 + 7.3) * 0.3 + waterNoise(p * 7.0 - 3.1) * 0.15;
+    drifts = saturate((drifts - 0.5) * 2.2 + 0.5);              // spread over 0 to 1
+    // White patches that spread and join as it builds up (about as much of the ground as has
+    // settled), and between them a thin dusting from the first flakes.
+    float spread = cover * lies * 1.3;
+    float patches = smoothstep(drifts - 0.05, drifts + 0.08, spread);
+    float dust = 0.3 * saturate(cover * 3.0) * lies;
+    float amount = max(patches, dust);
+    m.baseColor.rgb = mix(m.baseColor.rgb, float3(0.88, 0.9, 0.94), amount);
+    m.metallic = mix(m.metallic, 0.0, amount);
+    m.roughness = mix(m.roughness, 0.75, amount);
+    m.normal = normalize(mix(m.normal, n, amount * 0.85));
+    m.emissive *= 1.0 - amount;
 }
 
 // Surface shaders written by hand (`.shader` assets) are put here by the engine, each in a
@@ -235,7 +316,7 @@ static void wetten(thread MaterialSample &m, MeshVertexOut in, constant FrameUni
 // maps or from tracing rays, whichever the entry point used.
 static float4 shadePixel(MeshVertexOut in, MaterialSample m,
                          constant PassUniforms &pass, constant FrameUniforms &frame, constant LightData *lights,
-                         float sunLight, texturecube<float> irradianceMap,
+                         texture2d_array<float> cookies, float sunLight, texturecube<float> irradianceMap,
                          texturecube<float> prefilteredMap, texture2d<float> brdfLUT,
                          texture2d<float> ambientOcclusion, sampler linearSampler) {
 #if MOLTEN_CUSTOM
@@ -358,6 +439,7 @@ static float4 shadePixel(MeshVertexOut in, MaterialSample m,
     float3 color = m.emissive;
     for (uint i = 0; i < frame.lightCount; i++) {
         LightSample light = sampleLight(lights[i], surface.position);
+        if (lights[i].cookie > 0.5) light.radiance *= lightCookie(lights[i], surface.position, cookies, linearSampler);
         if (i == 0) {
             // By convention the shadow-casting sun is the first light. Without sun
             // shadows `sunLight` is 1 and this changes nothing.
@@ -408,12 +490,17 @@ fragment float4 fragment_pbr(MeshVertexOut in [[stage_in]],
                              texture2d<float> ambientOcclusion [[texture(MMTextureAmbientOcclusion)]],
                              depth2d<float> sceneDepth [[texture(MMTextureSceneDepth)]],
                              depth2d<float> rainMap [[texture(MMTextureRainMap)]],
+                             texture2d_array<float> cookies [[texture(MMTextureLightCookies)]],
                              sampler materialSampler [[sampler(MMSamplerMaterial)]],
                              sampler shadowSampler [[sampler(MMSamplerShadow)]],
                              sampler linearSampler [[sampler(MMSamplerLinearClamp)]]) {
     MaterialSample m = sampleMaterial(in, isFrontFacing, material, baseColorTexture, normalTexture,
                                       metallicRoughnessTexture, occlusionTexture, emissiveTexture, materialSampler);
-    if (frame.wetness > 0.0 && m.water <= 0.0) wetten(m, in, frame, pass.time, rainReaches(in.worldPosition, normalize(in.normal), frame, rainMap, shadowSampler));
+    if ((frame.wetness > 0.0 || frame.snow.x > 0.0) && m.water <= 0.0) {
+        float reached = rainReaches(in.worldPosition, normalize(in.normal), frame, rainMap, shadowSampler);      // (under a roof neither falls)
+        if (frame.wetness > 0.0) wetten(m, in, frame, pass.time, reached, pass.wind);
+        if (frame.snow.x > 0.0 && m.baseColor.a > 0.99) snowOn(m, in, frame, reached);
+    }
     float sunLight = sunVisibility(in.worldPosition, normalize(in.normal), in.viewDepth, frame, shadowMap, shadowSampler);
 #if MOLTEN_EXTRAS
     m.fogSun = fogInSunlight(in.worldPosition, pass.cameraPosition, in.viewDepth, in.position.xy, frame, shadowMap, shadowSampler);
@@ -424,7 +511,7 @@ fragment float4 fragment_pbr(MeshVertexOut in [[stage_in]],
 #else
     if (m.water > 0.0) m.waterDepth = waterDepthAt(in, pass, frame, sceneDepth);
 #endif
-    return shadePixel(in, m, pass, frame, lights, sunLight, irradianceMap, prefilteredMap, brdfLUT,
+    return shadePixel(in, m, pass, frame, lights, cookies, sunLight, irradianceMap, prefilteredMap, brdfLUT,
                       ambientOcclusion, linearSampler);
 }
 
@@ -449,6 +536,7 @@ fragment float4 fragment_pbr_masked(MeshVertexOut in [[stage_in]],
                                     texture2d<float> brdfLUT [[texture(MMTextureBRDF)]],
                                     texture2d<float> ambientOcclusion [[texture(MMTextureAmbientOcclusion)]],
                                     depth2d<float> rainMap [[texture(MMTextureRainMap)]],
+                                    texture2d_array<float> cookies [[texture(MMTextureLightCookies)]],
                                     sampler materialSampler [[sampler(MMSamplerMaterial)]],
                                     sampler shadowSampler [[sampler(MMSamplerShadow)]],
                                     sampler linearSampler [[sampler(MMSamplerLinearClamp)]]) {
@@ -458,12 +546,16 @@ fragment float4 fragment_pbr_masked(MeshVertexOut in [[stage_in]],
         discard_fragment();
     }
     m.baseColor.a = 1.0;
-    if (frame.wetness > 0.0 && m.water <= 0.0) wetten(m, in, frame, pass.time, rainReaches(in.worldPosition, normalize(in.normal), frame, rainMap, shadowSampler));
+    if ((frame.wetness > 0.0 || frame.snow.x > 0.0) && m.water <= 0.0) {
+        float reached = rainReaches(in.worldPosition, normalize(in.normal), frame, rainMap, shadowSampler);      // (under a roof neither falls)
+        if (frame.wetness > 0.0) wetten(m, in, frame, pass.time, reached, pass.wind);
+        if (frame.snow.x > 0.0 && m.baseColor.a > 0.99) snowOn(m, in, frame, reached);
+    }
     float sunLight = sunVisibility(in.worldPosition, normalize(in.normal), in.viewDepth, frame, shadowMap, shadowSampler);
 #if MOLTEN_EXTRAS
     m.fogSun = fogInSunlight(in.worldPosition, pass.cameraPosition, in.viewDepth, in.position.xy, frame, shadowMap, shadowSampler);
 #endif
-    return shadePixel(in, m, pass, frame, lights, sunLight, irradianceMap, prefilteredMap, brdfLUT,
+    return shadePixel(in, m, pass, frame, lights, cookies, sunLight, irradianceMap, prefilteredMap, brdfLUT,
                       ambientOcclusion, linearSampler);
 }
 
@@ -495,12 +587,17 @@ fragment float4 fragment_pbr_traced(MeshVertexOut in [[stage_in]],
                              texture2d<float> ambientOcclusion [[texture(MMTextureAmbientOcclusion)]],
                              depth2d<float> sceneDepth [[texture(MMTextureSceneDepth)]],
                              depth2d<float> rainMap [[texture(MMTextureRainMap)]],
+                             texture2d_array<float> cookies [[texture(MMTextureLightCookies)]],
                              sampler materialSampler [[sampler(MMSamplerMaterial)]],
                              sampler shadowSampler [[sampler(MMSamplerShadow)]],
                              sampler linearSampler [[sampler(MMSamplerLinearClamp)]]) {
     MaterialSample m = sampleMaterial(in, isFrontFacing, material, baseColorTexture, normalTexture,
                                       metallicRoughnessTexture, occlusionTexture, emissiveTexture, materialSampler);
-    if (frame.wetness > 0.0 && m.water <= 0.0) wetten(m, in, frame, pass.time, rainReaches(in.worldPosition, normalize(in.normal), frame, rainMap, shadowSampler));
+    if ((frame.wetness > 0.0 || frame.snow.x > 0.0) && m.water <= 0.0) {
+        float reached = rainReaches(in.worldPosition, normalize(in.normal), frame, rainMap, shadowSampler);      // (under a roof neither falls)
+        if (frame.wetness > 0.0) wetten(m, in, frame, pass.time, reached, pass.wind);
+        if (frame.snow.x > 0.0 && m.baseColor.a > 0.99) snowOn(m, in, frame, reached);
+    }
     // The sun's shadow: a ray from this pixel's own place toward the sun (more along an edge),
     // from the side of the surface that is seen.
     float3 seenSide = isFrontFacing ? normalize(in.normal) : -normalize(in.normal);
@@ -534,7 +631,7 @@ fragment float4 fragment_pbr_traced(MeshVertexOut in [[stage_in]],
 #else
     if (m.water > 0.0) m.waterDepth = waterDepthAt(in, pass, frame, sceneDepth);
 #endif
-    return shadePixel(in, m, pass, frame, lights, sunLight, irradianceMap, prefilteredMap, brdfLUT,
+    return shadePixel(in, m, pass, frame, lights, cookies, sunLight, irradianceMap, prefilteredMap, brdfLUT,
                       ambientOcclusion, linearSampler);
 }
 
@@ -562,6 +659,7 @@ fragment float4 fragment_pbr_masked_traced(MeshVertexOut in [[stage_in]],
                                     texture2d<float> brdfLUT [[texture(MMTextureBRDF)]],
                                     texture2d<float> ambientOcclusion [[texture(MMTextureAmbientOcclusion)]],
                                     depth2d<float> rainMap [[texture(MMTextureRainMap)]],
+                                    texture2d_array<float> cookies [[texture(MMTextureLightCookies)]],
                                     sampler materialSampler [[sampler(MMSamplerMaterial)]],
                                     sampler shadowSampler [[sampler(MMSamplerShadow)]],
                                     sampler linearSampler [[sampler(MMSamplerLinearClamp)]]) {
@@ -571,7 +669,11 @@ fragment float4 fragment_pbr_masked_traced(MeshVertexOut in [[stage_in]],
         discard_fragment();
     }
     m.baseColor.a = 1.0;
-    if (frame.wetness > 0.0 && m.water <= 0.0) wetten(m, in, frame, pass.time, rainReaches(in.worldPosition, normalize(in.normal), frame, rainMap, shadowSampler));
+    if ((frame.wetness > 0.0 || frame.snow.x > 0.0) && m.water <= 0.0) {
+        float reached = rainReaches(in.worldPosition, normalize(in.normal), frame, rainMap, shadowSampler);      // (under a roof neither falls)
+        if (frame.wetness > 0.0) wetten(m, in, frame, pass.time, reached, pass.wind);
+        if (frame.snow.x > 0.0 && m.baseColor.a > 0.99) snowOn(m, in, frame, reached);
+    }
     // The sun's shadow: a ray from this pixel's own place toward the sun (more along an edge),
     // from the side of the surface that is seen.
     float3 seenSide = isFrontFacing ? normalize(in.normal) : -normalize(in.normal);
@@ -599,7 +701,7 @@ fragment float4 fragment_pbr_masked_traced(MeshVertexOut in [[stage_in]],
         m.mirrored = seen.rgb;
     }
 #endif
-    return shadePixel(in, m, pass, frame, lights, sunLight, irradianceMap, prefilteredMap, brdfLUT,
+    return shadePixel(in, m, pass, frame, lights, cookies, sunLight, irradianceMap, prefilteredMap, brdfLUT,
                       ambientOcclusion, linearSampler);
 }
 #endif
