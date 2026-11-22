@@ -354,8 +354,9 @@ struct SkyOut {
 // A full-screen triangle placed exactly on the far plane (z = w), drawn after the
 // opaque geometry with a "less or equal" depth test: only the pixels that nothing
 // else covered run the fragment function.
-vertex SkyOut vertex_sky(uint vertexID [[vertex_id]],
-                         constant PassUniforms &pass [[buffer(MMBufferPass)]]) {
+// The corner `vertexID` of a triangle that covers the screen, on the far plane, and the way the
+// eye looks through it. (A vertex function cannot call another: both call this.)
+static SkyOut skyCorner(uint vertexID, constant PassUniforms &pass) {
     float2 uv = float2(float(vertexID & 2), float((vertexID << 1) & 2));
     float2 ndc = uv * float2(2.0, -2.0) + float2(-1.0, 1.0);
 
@@ -365,6 +366,11 @@ vertex SkyOut vertex_sky(uint vertexID [[vertex_id]],
     float4 world = pass.inverseViewProjection * float4(ndc, 1.0, 1.0);
     out.direction = world.xyz / world.w - pass.cameraPosition;
     return out;
+}
+
+vertex SkyOut vertex_sky(uint vertexID [[vertex_id]],
+                         constant PassUniforms &pass [[buffer(MMBufferPass)]]) {
+    return skyCorner(vertexID, pass);
 }
 
 fragment float4 fragment_sky(SkyOut in [[stage_in]],
@@ -442,7 +448,7 @@ static float2 insideCone(float3 eye, float3 d, LightData light, float t0, float 
 
 vertex SkyOut vertex_lights_in_air(uint vertexID [[vertex_id]],
                                    constant PassUniforms &pass [[buffer(MMBufferPass)]]) {
-    SkyOut out = vertex_sky(vertexID, pass);
+    SkyOut out = skyCorner(vertexID, pass);
     out.position.z = 0.0;
     return out;
 }
@@ -478,8 +484,8 @@ fragment float4 fragment_lights_in_air(SkyOut in [[stage_in]],
         float s = dot(toLight, d);                               // how far along the line it passes nearest the light
         float aside2 = max(dot(toLight, toLight) - s * s, 0.0);
         if (aside2 >= range * range) continue;
-        float half = sqrt(range * range - aside2);
-        float t0 = max(s - half, 0.0), t1 = min(s + half, farthest);
+        float halfChord = sqrt(range * range - aside2);       // ("half" is a type in Metal)
+        float t0 = max(s - halfChord, 0.0), t1 = min(s + halfChord, farthest);
         if (light.type == MMLightSpot) {
             float2 span = insideCone(eye, d, light, t0, t1);
             t0 = span.x, t1 = span.y;
