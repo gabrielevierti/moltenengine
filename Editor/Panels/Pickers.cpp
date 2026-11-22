@@ -222,7 +222,7 @@ std::vector<std::string> extensionsOf(const std::string& kind) {
     if (kind == "prefab") return {".prefab"};
     if (kind == "scene") return {".scene"};
     if (kind == "font") return {".ttf", ".otf"};
-    if (kind == "model") return {".gltf", ".glb", ".obj"};
+    if (kind == "model") return {".gltf", ".glb", ".fbx", ".obj", ".dae", ".stl", ".ply"};
     if (kind == "controller") return {".animator"};
     if (kind == "clip") return {".anim"};
     if (kind == "timeline") return {".timeline"};

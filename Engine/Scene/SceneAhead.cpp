@@ -134,25 +134,27 @@ SceneAhead readSceneAhead(const std::string& name, const std::string& path, cons
                 job.picture.pixels.assign(pixels, pixels + size_t(width) * size_t(height) * 4);
                 stbi_image_free(pixels);
             }
-        } else if (isGltfFile(job.file)) {
-            std::optional<GltfModel> model = GltfModel::load(file);
-            if (!model) return;
+        } else {
+            // A model of parts (glTF, FBX, Collada...: any of them, or parts of an OBJ), and an OBJ as a whole, as one mesh.
+            bool wantsParts = false;
+            for (const std::string& wanted : job.parts) wantsParts = wantsParts || isGltfFile(wanted);
+            std::optional<GltfModel> model = wantsParts ? GltfModel::load(file) : std::nullopt;
             ImportSettings settings = ImportSettings::load(file);
-            std::vector<GltfModel::Part> parts = model->parts();
+            std::vector<GltfModel::Part> parts = model ? model->parts() : std::vector<GltfModel::Part>{};
             for (const std::string& wanted : job.parts) {
-                int part = -1;
-                gltfFileOf(wanted, &part);
                 MeshData data;
-                if (part < 0) data = model->assembled(model->restPose());
-                else if (size_t(part) < parts.size()) data = model->part(parts[size_t(part)]);
+                if (isGltfFile(wanted)) {
+                    if (!model) continue;
+                    int part = -1;
+                    gltfFileOf(wanted, &part);
+                    if (part < 0) data = model->assembled(model->restPose());
+                    else if (size_t(part) < parts.size()) data = model->part(parts[size_t(part)]);
+                } else if (std::optional<std::string> obj = text::readFile(file)) {
+                    if (std::optional<MeshData> parsed = MeshData::parseOBJ(*obj)) data = std::move(*parsed);
+                }
                 if (data.positions.empty()) continue;
                 settings.apply(data);
                 job.models.push_back({wanted, std::move(data)});
-            }
-        } else if (std::optional<std::string> obj = text::readFile(file)) {
-            if (std::optional<MeshData> parsed = MeshData::parseOBJ(*obj)) {
-                ImportSettings::load(file).apply(*parsed);
-                if (!parsed->positions.empty()) job.models.push_back({job.file, std::move(*parsed)});
             }
         }
     };

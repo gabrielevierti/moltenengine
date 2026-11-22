@@ -41,7 +41,8 @@ void fitColliderToMesh(Collider& collider, const AABB& meshBounds, Vec3 scale) {
     collider.halfExtents = simd::max(half, Vec3{0.01f, 0.01f, 0.01f});
     collider.radius = collider.shape == ColliderShape::Sphere ? std::max({half.x, half.y, half.z}) : std::max(half.x, half.z);
     collider.halfHeight = std::max(half.y - collider.radius, 0.0f);
-    collider.offset = offset;
+    // A mesh collider is the model itself, where it is drawn: its middle is already in its points.
+    collider.offset = collider.shape == ColliderShape::Mesh ? Vec3{0, 0, 0} : offset;
 }
 
 bool isColliderFitted(const Collider& collider, const AABB& meshBounds, Vec3 scale) {
@@ -490,6 +491,22 @@ Entity SceneDocument::createFromMesh(const std::string& meshName, Vec3 position)
     select(entity);
     markChanged();
     return entity;
+}
+
+int SceneDocument::takeOffMissingMaterials(const std::function<bool(const std::string&)>& exists) {
+    if (isPlaying()) return 0;              // the game's copy of the scene: what is kept is the edited one
+    int count = 0;
+    std::vector<std::string> gone;
+    engine_.scene.each<MeshRenderer>([&](Entity, MeshRenderer& renderer) {
+        if (!renderer.material || renderer.material->assetName.empty() || exists(renderer.material->assetName)) return;
+        if (std::find(gone.begin(), gone.end(), renderer.material->assetName) == gone.end()) gone.push_back(renderer.material->assetName);
+        renderer.material = defaultMaterial();
+        count++;
+    });
+    // Forgotten: a material made later under the same name is that one, not this.
+    for (const std::string& name : gone) engine_.assets().reload(name);
+    if (count > 0) markChanged();
+    return count;
 }
 
 bool SceneDocument::savePrefab(Entity root, const std::string& absolutePath) {

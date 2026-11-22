@@ -56,7 +56,9 @@ FetchContent_Declare(stb GIT_REPOSITORY https://github.com/nothings/stb.git
 # miniaudio: sound output and audio file decoding.
 FetchContent_Declare(miniaudio GIT_REPOSITORY https://github.com/mackron/miniaudio.git GIT_TAG 0.11.21 GIT_SHALLOW TRUE
                      SOURCE_SUBDIR do-not-build)
-FetchContent_MakeAvailable(stb miniaudio)
+# ufbx: reading FBX files (and OBJ with its materials) into the engine's models.
+FetchContent_Declare(ufbx GIT_REPOSITORY https://github.com/ufbx/ufbx.git GIT_TAG v0.23.1 GIT_SHALLOW TRUE SOURCE_SUBDIR do-not-build)
+FetchContent_MakeAvailable(stb miniaudio ufbx)
 
 if(NOT MOLTEN_IOS)
     # GLFW: the window, keyboard, mouse and gamepads, on the Mac.
@@ -82,9 +84,10 @@ if(MOLTEN_IOS)
 else()
     set(MOLTEN_PLATFORM_SOURCES Engine/Platform/MetalLayerBridge.mm Engine/Platform/DeviceState.mm)
 endif()
-add_library(moltenengine STATIC ${MOLTEN_ENGINE_SOURCES} ${MOLTEN_PLATFORM_SOURCES} Shaders/Shared/ShaderTypes.h)
+add_library(moltenengine STATIC ${MOLTEN_ENGINE_SOURCES} ${MOLTEN_PLATFORM_SOURCES} ${ufbx_SOURCE_DIR}/ufbx.c Shaders/Shared/ShaderTypes.h)
 target_include_directories(moltenengine PUBLIC Engine Shaders/Shared)
-target_include_directories(moltenengine SYSTEM PUBLIC ${metalcpp_SOURCE_DIR} ${stb_SOURCE_DIR} ${miniaudio_SOURCE_DIR})
+target_include_directories(moltenengine SYSTEM PUBLIC ${metalcpp_SOURCE_DIR} ${stb_SOURCE_DIR} ${miniaudio_SOURCE_DIR} ${ufbx_SOURCE_DIR})
+set_source_files_properties(${ufbx_SOURCE_DIR}/ufbx.c PROPERTIES COMPILE_OPTIONS -w)
 # While developing, shaders and assets are read from this source tree (see Core/Paths.hpp).
 target_compile_definitions(moltenengine PRIVATE MOLTEN_SOURCE_ROOT="${CMAKE_SOURCE_DIR}")
 target_compile_options(moltenengine PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)

@@ -1,6 +1,8 @@
 // Gltf.hpp
-// Reading glTF 2.0 models (.gltf with its .bin, or a single .glb): meshes, the tree of
-// nodes they hang on, materials, skeletons ("skins") and the animations that move them.
+// Reading models: glTF 2.0 (.gltf with its .bin, or a single .glb), and as the same thing FBX
+// (.fbx), Collada (.dae), Wavefront OBJ with its materials (.obj, .mtl), STL and PLY: meshes,
+// the tree of nodes they hang on, materials and their pictures, skeletons ("skins") and the
+// animations that move them (glTF and FBX). The other formats are read in ModelFormats.cpp.
 //
 // A skinned model is drawn by moving every vertex with the bones it is tied to: each
 // vertex names up to four joints and how much it follows each. An animation is, for some
@@ -53,14 +55,34 @@ struct GltfAnimation {
     std::vector<GltfChannel> channels;
 };
 
+/// A picture a material uses: a file beside the model, or one carried inside it.
+struct GltfPicture {
+    std::string file;                   // as the model names it ("Textures/paint.jpg", relative to the model's file; or a path of the machine it was made on)
+    int image = -1;                     // or carried in the model file: GltfModel::images
+    bool has() const { return !file.empty() || image >= 0; }
+};
+
+/// A picture carried inside a model file (a .glb's, an FBX's): its bytes as they are, PNG or JPEG.
+struct GltfImage {
+    std::string name;
+    std::string extension;              // ".png", ".jpg"
+    std::vector<uint8_t> bytes;
+};
+
 struct GltfMaterial {
     std::string name;
     Vec4 baseColor{1, 1, 1, 1};
     float metallic = 1, roughness = 1;
     Vec3 emissive{0, 0, 0};
+    bool isBlended = false;             // seen through (glass): its color's alpha is how much it covers
+    bool isMasked = false;              // cut out where its alpha is under alphaCutoff (leaves)
+    float alphaCutoff = 0.5f;
+    bool isDoubleSided = false;
     /// The picture of its color, where the file names one beside it ("Textures/paint.jpg",
     /// relative to the model's file); empty when there is none, or it is inside the file.
     std::string baseColorTexture;
+    /// Its pictures: color (sRGB), normal map, metal in blue and roughness in green, light it gives off, occlusion in red.
+    GltfPicture colorMap, normalMap, metalRoughMap, emissiveMap, occlusionMap;
 };
 
 /// Where every node is: what an animation changes.
@@ -76,8 +98,9 @@ struct GltfModel {
     std::vector<GltfSkin> skins;
     std::vector<GltfAnimation> animations;
     std::vector<GltfMaterial> materials;
+    std::vector<GltfImage> images;          // pictures carried inside the file
 
-    /// Reads a .gltf or .glb file. On failure `error`, if given, says why.
+    /// Reads a model file of any kind isModelFile() names. On failure `error`, if given, says why.
     static std::optional<GltfModel> load(const std::string& path, std::string* error = nullptr);
     /// From the JSON text; `binary` is the .glb's own data, `directory` where other files are looked for.
     static std::optional<GltfModel> parse(const std::string& json, const std::vector<uint8_t>& binary, const std::string& directory,
@@ -108,7 +131,11 @@ struct GltfModel {
     MeshData part(const Part& which) const;
 };
 
-/// True for a file name this reads.
+/// True for a model file of any kind this reads: .gltf .glb .fbx .dae .obj .stl .ply.
+bool isModelFile(const std::string& path);
+/// True for a name that is read as a model of parts (GltfModel): every kind isModelFile() names,
+/// but an OBJ only for one of its parts ("Models/boat.obj#2"): an OBJ as a whole is read as one
+/// mesh (MeshData::parseOBJ), as it always was.
 bool isGltfFile(const std::string& path);
 /// "Models/car.glb#3" is the file "Models/car.glb" and its part 3; a name without '#' is the whole model (part -1).
 std::string gltfFileOf(const std::string& name, int* part = nullptr);

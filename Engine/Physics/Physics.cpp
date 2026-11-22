@@ -74,7 +74,8 @@ void worldPlace(const Transform& transform, Vec3& position, Quat& rotation) {
 ShapeInstance Physics::makeShape(const Collider& collider, Vec3 position, Quat rotation) {
     ShapeInstance shape;
     shape.shape = collider.shape;
-    shape.center = position + rotate(rotation, collider.offset);
+    // A mesh collider is the model's own points, where the model is: no offset.
+    shape.center = position + rotate(rotation, collider.shape == ColliderShape::Mesh ? Vec3{0, 0, 0} : collider.offset);
     shape.rotation = rotation;
     shape.halfExtents = collider.halfExtents;
     shape.radius = collider.radius;

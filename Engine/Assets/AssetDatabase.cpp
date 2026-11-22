@@ -75,7 +75,7 @@ AssetType AssetDatabase::typeOfExtension(const std::string& extension) {
     if (e == ".graph") return AssetType::Graph;
     if (e == ".prefab") return AssetType::Prefab;
     if (e == ".material") return AssetType::Material;
-    if (e == ".obj" || e == ".gltf" || e == ".glb" || e == ".fbx" || e == ".usdz") return AssetType::Mesh;
+    if (e == ".obj" || e == ".gltf" || e == ".glb" || e == ".fbx" || e == ".dae" || e == ".stl" || e == ".ply") return AssetType::Mesh;
     if (e == ".png" || e == ".jpg" || e == ".jpeg" || e == ".tga" || e == ".bmp" || e == ".hdr" || e == ".exr" || e == ".ktx2") return AssetType::Texture;
     if (e == ".wav" || e == ".mp3" || e == ".flac" || e == ".ogg" || e == ".m4a") return AssetType::Audio;
     if (e == ".ttf" || e == ".otf") return AssetType::Font;

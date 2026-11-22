@@ -256,6 +256,9 @@ public:
                 ui::tooltip("White where it meets the shore and what stands in it: a beach, a rock, a hull");
                 changed |= ui::sliderFloat("Whitecaps", sea.whitecaps, 0.0f, 2.0f);
                 ui::tooltip("White on the crests of waves that break: none below a fresh breeze (5 m/s), more the harder it blows");
+                ui::subheading("Camera");
+                changed |= ui::checkbox("Through the Surface", sea.lensThroughSurface);
+                ui::tooltip("As the camera goes through its surface: the water's edge across the picture, the world on its other side blurred; a shake as it goes in; drops on the glass that slide off as it comes out. Off: the picture just cuts from above to under");
                 ImGui::TextDisabled("Its waves: the wind, in Weather.");
             }
         }

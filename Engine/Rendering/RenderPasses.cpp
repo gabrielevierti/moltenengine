@@ -935,6 +935,9 @@ void Renderer::renderFinal(MTL::CommandBuffer* commandBuffer, const Canvas& canv
     uniforms.sunInView = sun.w > 1e-4f && flareSunColor_.x + flareSunColor_.y + flareSunColor_.z > 0.001f ? 1.0f : 0.0f;
     if (uniforms.sunInView > 0) uniforms.sunScreen = Vec2{sun.x / sun.w * 0.5f + 0.5f, 0.5f - sun.y / sun.w * 0.5f};
     uniforms.sunColor = flareSunColor_;
+    uniforms.lensWater = lensWater_;
+    uniforms.lensSea = lensSea_;
+    uniforms.lensMore = lensMore_;
 
     // Drawn smaller (renderScale): tone mapped at that size, then made the target's size by
     // MetalFX, which keeps edges and detail sharp where plain stretching blurs them.

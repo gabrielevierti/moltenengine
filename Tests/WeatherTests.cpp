@@ -213,3 +213,19 @@ TEST(lightning_strikes_a_few_kilometers_round_some_bolts_to_the_ground) {
     storm.storm = 1;
     CHECK(storm.addedWind() >= 10.0f && storm.leastGusts() > 0.8f);
 }
+
+TEST(rain_and_snow_go_with_the_wind) {
+    // The air carries a falling drop: it goes sideways as fast as the wind, so the rain slants along it.
+    RainyWorld rainy(1.0f, false);
+    rainy.world.sceneSettings().wind = Vec3{0, 0, 7};               // toward +z
+    rainy.world.sceneSettings().windGustiness = 0;
+    rainy.run(1.0f);
+    const ParticleEmitter* drops = rainy.emitter(rainy.world.weatherNow.rain);
+    CHECK(drops && drops->particles.size() > 500);
+    if (!drops) return;
+    double along = 0, across = 0;
+    for (const Particle& drop : drops->particles) along += drop.velocity.z, across += std::abs(drop.velocity.x);
+    along /= double(drops->particles.size()), across /= double(drops->particles.size());
+    float wind = simd::length(rainy.world.wind());                  // the scene's, with what the rain adds to it
+    CHECK(std::abs(along - wind) < 0.05 * wind && across < 0.05);
+}

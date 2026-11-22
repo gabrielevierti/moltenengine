@@ -1,4 +1,5 @@
 #include "Assets/Gltf.hpp"
+#include "Assets/ModelFormats.hpp"
 
 #include "Core/Json.hpp"
 
@@ -94,6 +95,18 @@ struct Source {
         }
         return out;
     }
+
+    /// The bytes of a buffer view as they are: a picture carried in a .glb.
+    std::vector<uint8_t> viewBytes(int viewIndex) const {
+        const Json& view = root["bufferViews"][size_t(std::max(viewIndex, 0))];
+        if (viewIndex < 0 || view.isNull()) return {};
+        size_t bufferIndex = size_t(view["buffer"].asInt());
+        if (bufferIndex >= buffers.size()) return {};
+        const std::vector<uint8_t>& bytes = buffers[bufferIndex];
+        size_t start = size_t(view["byteOffset"].asInt()), length = size_t(view["byteLength"].asInt());
+        if (start + length > bytes.size()) return {};
+        return std::vector<uint8_t>(bytes.begin() + long(start), bytes.begin() + long(start + length));
+    }
 };
 
 Mat4 matrixFrom(const float* m) {
@@ -142,13 +155,30 @@ MeshData GltfModel::part(const Part& which) const {
     return out;
 }
 
-bool isGltfFile(const std::string& path) {
+bool isModelFile(const std::string& path) {
     std::string extension = std::filesystem::path(gltfFileOf(path)).extension().string();
     for (char& c : extension) c = char(std::tolower(static_cast<unsigned char>(c)));
-    return extension == ".gltf" || extension == ".glb";
+    return extension == ".gltf" || extension == ".glb" || extension == ".fbx" || extension == ".dae" || extension == ".obj" ||
+           extension == ".stl" || extension == ".ply";
+}
+
+bool isGltfFile(const std::string& path) {
+    int part = -1;
+    std::string file = gltfFileOf(path, &part);
+    if (!isModelFile(file)) return false;
+    std::string extension = std::filesystem::path(file).extension().string();
+    for (char& c : extension) c = char(std::tolower(static_cast<unsigned char>(c)));
+    return extension != ".obj" || part >= 0;
 }
 
 std::optional<GltfModel> GltfModel::load(const std::string& path, std::string* error) {
+    // The other kinds of model file: read into the same thing (ModelFormats.cpp).
+    std::string extension = std::filesystem::path(path).extension().string();
+    for (char& c : extension) c = char(std::tolower(static_cast<unsigned char>(c)));
+    if (extension == ".fbx" || extension == ".obj") return loadWithUfbx(path, error);
+    if (extension == ".dae") return loadCollada(path, error);
+    if (extension == ".stl") return loadStl(path, error);
+    if (extension == ".ply") return loadPly(path, error);
     std::optional<std::vector<uint8_t>> bytes = readBytes(path);
     if (!bytes) {
         fail(error, "cannot read " + path);
@@ -220,7 +250,45 @@ std::optional<GltfModel> GltfModel::parse(const std::string& jsonText, const std
             if (image >= 0) out.baseColorTexture = root["images"][image]["uri"].asString();
             if (out.baseColorTexture.rfind("data:", 0) == 0) out.baseColorTexture.clear();
         }
+        // Each picture: a file beside it, or one inside (its image is read below).
+        auto picture = [&](const Json& slot) {
+            GltfPicture made;
+            int index = slot["index"].asInt(-1);
+            int image = index >= 0 ? root["textures"][index]["source"].asInt(-1) : -1;
+            if (image < 0) return made;
+            std::string uri = root["images"][image]["uri"].asString();
+            if (!uri.empty() && uri.rfind("data:", 0) != 0) made.file = uri;
+            else made.image = image;
+            return made;
+        };
+        out.colorMap = picture(pbr["baseColorTexture"]);
+        out.metalRoughMap = picture(pbr["metallicRoughnessTexture"]);
+        out.normalMap = picture(material["normalTexture"]);
+        out.emissiveMap = picture(material["emissiveTexture"]);
+        out.occlusionMap = picture(material["occlusionTexture"]);
+        std::string alphaMode = material["alphaMode"].asString("OPAQUE");
+        out.isBlended = alphaMode == "BLEND";
+        out.isMasked = alphaMode == "MASK";
+        out.alphaCutoff = float(material["alphaCutoff"].asNumber(0.5));
+        out.isDoubleSided = material["doubleSided"].kind == Json::Kind::Bool && material["doubleSided"].boolean;
         model.materials.push_back(out);
+    }
+    // The pictures carried inside the file (a .glb's), or written into it as text (data: URIs).
+    for (const Json& image : root["images"].array) {
+        GltfImage made;
+        made.name = image["name"].asString("Image " + std::to_string(model.images.size() + 1));
+        std::string mime = image["mimeType"].asString();
+        std::string uri = image["uri"].asString();
+        int view = image["bufferView"].asInt(-1);
+        if (view >= 0) {
+            made.bytes = source.viewBytes(view);
+        } else if (uri.rfind("data:", 0) == 0) {
+            size_t comma = uri.find(',');
+            if (mime.empty()) mime = uri.substr(5, uri.find(';') - 5);
+            if (comma != std::string::npos) made.bytes = decodeBase64(uri.substr(comma + 1));
+        }
+        made.extension = mime == "image/jpeg" ? ".jpg" : ".png";
+        model.images.push_back(std::move(made));
     }
 
     for (const Json& mesh : root["meshes"].array) {

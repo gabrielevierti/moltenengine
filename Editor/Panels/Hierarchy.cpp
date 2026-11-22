@@ -352,13 +352,14 @@ private:
         ImGui::Dummy(ImVec2(0, 2));
     }
 
-    /// A prefab dragged from the assets lands at the origin.
-    void acceptPrefab(EditorContext& editor) {
+    /// A model or a prefab dragged from the assets goes into the scene where the Scene view looks,
+    /// in front of its camera, as it would dropped onto the view; under `parent` if it is one.
+    void acceptPrefab(EditorContext& editor, Entity parent = Entity{}) {
         const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(ui::kAssetPayload);
         if (!payload) return;
         std::string path(static_cast<const char*>(payload->Data));
         const AssetInfo* asset = editor.assets.find(path);
-        if (asset && asset->type == AssetType::Prefab) editor.scene.instantiatePrefab(path, Vec3{0, 0, 0});
+        if (asset && (asset->type == AssetType::Prefab || asset->type == AssetType::Mesh)) placeAsset(editor, path, inFrontOfCamera(editor), parent);
     }
 
     void drawNode(EditorContext& editor, Entity entity, int depth) {
@@ -457,6 +458,12 @@ private:
                             scene.select(entity);
                             scene.markChanged();
                         }
+                    }
+                } else if (asset && (asset->type == AssetType::Mesh || asset->type == AssetType::Prefab)) {
+                    // A model or a prefab onto a row: into the scene in front of the camera, under this.
+                    isBetween = false;
+                    if (ImGui::AcceptDragDropPayload(ui::kAssetPayload, ImGuiDragDropFlags_AcceptNoDrawDefaultRect)) {
+                        if (placeAsset(editor, path, inFrontOfCamera(editor), entity).isValid()) open_.insert(entity.index);
                     }
                 } else {
                     isBetween = true;                   // nothing to do with it here: no highlight

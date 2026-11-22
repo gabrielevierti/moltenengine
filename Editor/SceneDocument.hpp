@@ -74,6 +74,11 @@ public:
 
     Entity create(Primitive kind, Entity parent = Entity{});
     Entity createFromMesh(const std::string& meshName, Vec3 position);
+    /// An entity made in the scene by other code (a model's parts, PlaceAsset.cpp) joins the list at once.
+    void adopt(Entity entity) { entities_.push_back(entity); }
+    /// What wore a material file that is gone (deleted here or in the Finder) wears the scene's
+    /// plain material instead, as Unity shows it missing: the scene no longer names the file. How many.
+    int takeOffMissingMaterials(const std::function<bool(const std::string&)>& exists);
     /// Writes an entity and everything under it to a prefab file: a piece of scene that
     /// can be put in any scene, or spawned by the game while it runs.
     bool savePrefab(Entity root, const std::string& absolutePath);

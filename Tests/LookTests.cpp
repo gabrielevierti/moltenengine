@@ -47,7 +47,7 @@ TEST(the_look_of_a_scene_is_saved_with_it) {
     std::string plain = writeScene(scene, {}, RenderSettings{});
     CHECK(plain.find("depthOfField") == std::string::npos && plain.find("night") == std::string::npos);
     // What the GPU is given for them.
-    CHECK(sizeof(gpu::EffectUniforms) == 176 && sizeof(gpu::DecalUniforms) == 160 && sizeof(gpu::PostUniforms) == 128);
+    CHECK(sizeof(gpu::EffectUniforms) == 176 && sizeof(gpu::DecalUniforms) == 160 && sizeof(gpu::PostUniforms) == 176);
 }
 
 TEST(sunlight_goes_gold_and_red_as_the_sun_sinks) {

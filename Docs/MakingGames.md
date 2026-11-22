@@ -98,7 +98,7 @@ The standard list is only what nearly every game uses. A game that flies adds th
 
 ## Playing, and changing things while it plays
 
-The scene has two windows. **Scene** is the editor's view: fly around, select, move, change. **Game** is what the player will see, through the scene's own camera, with the game's interface. They start as two tabs; drag one beside the other to see both at once.
+The scene has two windows. **Scene** is the editor's view: fly around, select, move, change. **Game** is what the player will see, through the scene's own camera, with the game's interface. They start as two tabs; drag one beside the other to see both at once. **Maximize** in the Game view's bar (or Shift+Space over it) makes it fill the editor, to play in a larger picture, until **Restore**; with **Maximize On Play** on, Run does that by itself and Stop puts it back.
 
 **Play** (Cmd+P, or the button at the top) runs the scene and brings Game to the front; **Pause** (Shift+Cmd+P) freezes it and **Step** (Alt+Cmd+P) lets one frame through. The game keeps running in both windows: in Scene you can watch it from anywhere, select what is moving and change it with the same tools as when editing. Click the Game window to give the game the keyboard (it shows an orange line around it). What you change while playing is undone by Stop: it is for trying things, and for finding out why something happens.
 
@@ -168,6 +168,8 @@ animations that name a moved file are changed to name it where it is now (the op
 **Hierarchy**, a row dropped on the line between two others goes there, under the same parent (between
 two children of a parent: under it, in that place); dropped on a row, it goes under it; with several
 chosen, they all go, in their order. Delete or Cmd+Backspace deletes what is chosen in the scene.
+A material file deleted (here or in the Finder) is taken off what wore it: it wears the scene's plain material, and the scene
+no longer names the file.
 
 **Project** shows the assets with pictures made from the files: a model as its shape, a material as a lit ball, a sound as its wave, a scene or a prefab as a plan from above, a visual script as its boxes, code as its first lines. **Add Component** in the inspector is sorted as Unity's is (Mesh, Rendering, Physics, Audio, Effects, UI, Vehicles, Gameplay, Scripts) and can be searched; each component's menu has Reset, Copy Values, Paste Values and Remove.
 
@@ -522,7 +524,9 @@ its way casts beams through it.
 
 **Weather** is built in, none by default, and the wind rises with it (a shower freshens it, a
 storm makes a gale of it: the clouds, the waves, the rain and what sways all go the same way).
-**Rain** falls round the camera with the wind; each drop is aimed, as it is born, at what it will
+**Rain** falls round the camera, carried by the air: a drop goes sideways as fast as the wind
+where it falls, gusts and all, so the rain slants along the wind, the more the harder it blows
+(snow, lighter, the same, drifting). Each drop is aimed, as it is born, at what it will
 hit (any collider, the ground's mesh, a car's roof) or at the water, and ends there: a splash of
 droplets thrown off the way the surface faces, a widening ring on water, and on what is steep (a
 wall, a windscreen, the side of a car) drops that run down it. What is out in the rain gets wet:
@@ -845,12 +849,29 @@ and whose others arrive at once or never; `MemoryNetwork` is a network of nothin
 with loss and delay to ask for, which is how the tests play a game on three machines in one
 program (`Tests/NetworkTests.cpp`).
 
-## glTF models and animation
+## Models: importing them, and their animations
 
-A `.gltf` or `.glb` file is a model like an `.obj`: choose it as an entity's mesh. If it has animations, add an **Animator**: `clip` names
+Molten reads the model files most programs and stores give: **glTF** (`.gltf`, `.glb`), **FBX** (`.fbx`, through
+[ufbx](https://github.com/ufbx/ufbx)), **Collada** (`.dae`), **Wavefront OBJ** with its materials (`.obj` and `.mtl`), **STL**
+and **PLY**. Each is brought to the engine's way: meters, Y up.
+
+**Importing** is as in Unity: drag files or whole folders from the Finder onto the **Explorer** and they are copied into the
+folder it shows (onto the Scene view, they are copied and a model or a prefab is put in the scene where it is let go;
+anywhere else, into the Explorer's folder). **Import...** does the same from a list.
+
+**Into the scene**: drag a model from the Explorer onto the Scene view (where the pointer is on the ground), onto the
+Hierarchy (in front of the Scene view's camera; onto a row, under that entity), or **Add to Scene** in the Viewer. It
+becomes an entity for the model, with one under it for each of its parts, in its place, each with its material. Its
+materials become files in Materials (`Materials/<model> <material>.material`), made once: change them as any other; its
+pictures are found beside the model as it names them, or by their name anywhere in the project (pictures are often moved
+into a folder of their own), and those carried inside the file (a `.glb`'s, an FBX's) are written out into Textures. Pictures
+named as glTF exports name them (`Hull_baseColor`, `Hull_normal`, `Hull_metallicRoughness`) are taken together even where an
+OBJ's material names only the color. A model with bones stays one entity. An OBJ that is only a shape stays one mesh, as ever.
+
+If it has animations (glTF, FBX: a Mixamo character with its takes), add an **Animator**: `clip` names
 which one plays (empty plays the first), `loops`, `speed`, and `blendTime` eases from one clip into the next. From code:
 `animator->play("Run")`, `animator->isFinished()`. The model's vertices are moved by its bones on the processor each frame, which is
-fine for a few characters and too slow for a crowd. Its textures are not read yet: give the entity a material.
+fine for a few characters and too slow for a crowd.
 
 ## A sea that moves
 
@@ -872,7 +893,8 @@ carries the smoke. How it looks is set there, from a real sea to a cartoon lagoo
 | **Ripples** | The small waves over the swell: 0 glassy, 1 a real sea's, 2 choppy |
 | **Caustics** | The lines of light its waves gather on its bottom: 0 none, 1 as real, 3 drawn strong |
 | **Shore** | Foam where it meets the shore and what stands in it |
-| **Whitecaps** | White on the crests of waves that break: none below a fresh breeze, more the harder it blows |
+| **Whitecaps** | White on the crests of waves that break: none below a fresh breeze, more the harder it blows (as much of the sea as is white at sea, at each wind) |
+| **Through the Surface** | The camera going through it: the water's edge across the picture as it goes, the other side blurred, a shake going in, drops on the glass that slide off coming out. Off: it just cuts |
 
 Things float on it (Buoyancy), the rain rings it, a boat leaves its wake on it. The waves rise
 and fall for real: the sea is drawn with a grid that follows the eye, fine nearby and coarser far
@@ -925,7 +947,8 @@ object's mesh when added. Without a Rigidbody, a collider is something that stan
 a parent stand where the parent puts them.
 
 - **Mesh Collider** is the model's own shape (chosen from the list of models, or the one its Mesh Renderer draws). As it is,
-  its triangles, hollows and all: for what stands still, such as a track, a building, uneven ground.
+  its triangles, hollows and all: for what stands still, such as a track, a building, uneven ground. Chosen, it is drawn as
+  those triangles, where the model is (a mesh collider has no offset of its own: it is the model).
 - **Convex**, on a Mesh Collider, wraps the model as tightly as a convex shape can (no hollows, no holes): it can then move with
   a Rigidbody, fall, roll, be hit and hit back, against every other kind of collider. A crate of an odd shape, a rock, a car's
   body. The Inspector says how many corners and faces it has.
@@ -1140,7 +1163,7 @@ Settings that does this.
 
 ## Models in parts
 
-A glTF file with several materials is several meshes: `Models/car.glb#0`, `#1`, … one for each material, in the order the file
+A model with several materials (of any kind above) is several meshes: `Models/car.glb#0`, `#1`, … one for each material, in the order the file
 names them. Give each its own entity and material, as the Driving project does for its car (paint, glass, chrome, lamps), and a
 script can then change one of them alone: the rear lamps glow when the brakes are on.
 

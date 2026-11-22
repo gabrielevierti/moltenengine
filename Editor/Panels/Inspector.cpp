@@ -695,7 +695,7 @@ void registerInspectorPanel(EditorContext& editor) {
 std::vector<std::string> meshChoices(EditorContext& editor) {
     std::vector<std::string> names = {"cube", "sphere", "plane", "cylinder"};
     for (const AssetInfo& asset : editor.assets.assets()) {
-        if (asset.type == AssetType::Mesh && (std::filesystem::path(asset.path).extension() == ".obj" || isGltfFile(asset.path))) names.push_back(asset.path);
+        if (asset.type == AssetType::Mesh && isModelFile(asset.path)) names.push_back(asset.path);
     }
     return names;
 }
@@ -1134,6 +1134,7 @@ void registerBuiltinComponents(EditorContext& editor) {
                 if (collider.meshName.empty() && shown && shown->mesh) collider.meshName = shown->mesh->name;
                 collider.mesh = nullptr;
                 collider.meshScale = Vec3{0, 0, 0};
+                collider.offset = Vec3{0, 0, 0};       // the model's points are where it is drawn already
             }
             // The size of what it is on, if that draws a mesh.
             const MeshRenderer* renderer = scene.get<MeshRenderer>(entity);

@@ -123,7 +123,7 @@ void drawColliderOf(EditorContext& editor, Entity entity, Vec4 color, int depth)
         Quat rotation;
         Vec3 worldPosition, worldScale;
         decompose(transform->world, worldPosition, rotation, worldScale);
-        Vec3 center = worldPosition + rotate(rotation, collider->offset);
+        Vec3 center = worldPosition + rotate(rotation, collider->shape == ColliderShape::Mesh ? Vec3{0, 0, 0} : collider->offset);
         const float larger = 1.012f;
         if (collider->isTrigger) color = Vec4{1.0f, 0.85f, 0.2f, color.w};         // triggers in yellow: they let things through
         if (collider->shape == ColliderShape::Sphere) {
@@ -144,8 +144,10 @@ void drawColliderOf(EditorContext& editor, Entity entity, Vec4 color, int depth)
             }
         } else if (collider->shape == ColliderShape::Mesh && collider->isConvex) {
             // Wrapped here, the first time it is drawn: the same shape the game will use.
-            if (!collider->convex && !collider->meshName.empty() && simd::length_squared(collider->meshScale - transform->scale) > 1e-10f) {
+            if (!collider->meshName.empty() && simd::length_squared(collider->meshScale - transform->scale) > 1e-10f) {
                 collider->meshScale = transform->scale;
+                collider->convex = nullptr;
+                collider->mesh = nullptr;
                 if (std::optional<MeshData> data = editor.engine.readMeshData(collider->meshName)) {
                     collider->convex = ConvexShape::build(data->positions, transform->scale);
                 }
@@ -179,20 +181,26 @@ void drawColliderOf(EditorContext& editor, Entity entity, Vec4 color, int depth)
                 lines.box(worldPosition + rotate(rotation, box.center() * worldScale), box.halfExtents() * worldScale * larger, rotation, color);
             }
         } else if (collider->shape == ColliderShape::Mesh) {
-            if (collider->mesh && collider->mesh->triangleCount() <= 6000) {
-                // Its triangles themselves.
+            // Read here, the first time it is drawn (and again when the entity is scaled): the same
+            // triangles the game will collide with, so what is seen is the mesh it is, not a box.
+            // (One without a model's name has its triangles from a script, a Spline Road's: they are its.)
+            if (!collider->meshName.empty() && simd::length_squared(collider->meshScale - transform->scale) > 1e-10f) {
+                collider->mesh = nullptr;
+                collider->meshScale = transform->scale;
+                if (std::optional<MeshData> data = editor.engine.readMeshData(collider->meshName)) {
+                    collider->mesh = MeshShape::build(data->positions, data->indices, transform->scale);
+                }
+            }
+            if (collider->mesh) {
+                // Its triangles themselves: every one of a model up to 20000, an even share of a larger one.
                 const MeshShape& shape = *collider->mesh;
-                for (size_t t = 0; t < shape.triangleCount(); t++) {
+                const size_t count = shape.triangleCount();
+                const size_t step = count > 20000 ? (count + 19999) / 20000 : 1;
+                for (size_t t = 0; t < count; t += step) {
                     Vec3 corner[3];
-                    for (int k = 0; k < 3; k++) corner[k] = center + rotate(rotation, shape.points[shape.indices[t * 3 + size_t(k)]]) + Vec3{0, 0.01f, 0};
+                    for (int k = 0; k < 3; k++) corner[k] = center + rotate(rotation, shape.points[shape.indices[t * 3 + size_t(k)]] * 1.004f);
                     for (int k = 0; k < 3; k++) lines.line(corner[k], corner[(k + 1) % 3], color * Vec4{1, 1, 1, 0.6f});
                 }
-            } else if (collider->mesh) {
-                lines.box(center + rotate(rotation, collider->mesh->bounds.center()), collider->mesh->bounds.halfExtents(), rotation, color);
-            } else if (const MeshRenderer* renderer = scene.get<MeshRenderer>(entity); renderer && renderer->mesh) {
-                // Not read yet (that happens when the game runs): the box of the model it will be.
-                const AABB& box = renderer->mesh->bounds();
-                lines.box(worldPosition + rotate(rotation, box.center() * worldScale), box.halfExtents() * worldScale * larger, rotation, color);
             }
         }
     }
@@ -983,6 +991,8 @@ std::vector<std::string> renderStatsLines(const RenderStats& stats) {
     return lines;
 }
 
+void hideSceneView(EditorContext& editor) { hideView(editor.engine, kSceneView); }
+
 void hideSceneAndGameViews(EditorContext& editor) {
     hideView(editor.engine, kSceneView);
     hideView(editor.engine, kGameView);
@@ -1364,7 +1374,22 @@ void drawGameView(EditorContext& editor, bool takesCanvas) {
     // Playing, nothing in it is reached by the keyboard's navigation: the keys steer the game.
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoCollapse;
     if (editor.scene.isPlaying()) flags |= ImGuiWindowFlags_NoNav;
-    bool isVisible = ImGui::Begin("Game", nullptr, flags);
+    // Maximized (as Unity's): over the whole editor, the other windows out of the way until it is
+    // restored. A window of its own, so that where the Game view is docked is kept for its return.
+    static bool wasMaximized = false;
+    const bool isMaximized = editor.gameViewMaximized;
+    if (isMaximized) {
+        const ImGuiViewport* screen = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(screen->WorkPos);
+        ImGui::SetNextWindowSize(screen->WorkSize);
+        ImGui::SetNextWindowViewport(screen->ID);
+        if (!wasMaximized) ImGui::SetNextWindowFocus();
+        flags |= ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings;
+    } else if (wasMaximized) {
+        ImGui::SetNextWindowFocus();
+    }
+    wasMaximized = isMaximized;
+    bool isVisible = ImGui::Begin(isMaximized ? "Game##maximized" : "Game", nullptr, flags);
     ImGui::PopStyleVar();
     keepViewAtLeast();
     // While playing, the game hears the keys, the mouse and the controllers only while it has them:
@@ -1443,13 +1468,31 @@ void drawGameView(EditorContext& editor, bool takesCanvas) {
     // Stats: the numbers of the frame, over the corner of the picture (as Unity's Game view has them).
     static bool showsStats = false;
     {
-        const float soundWidth = ImGui::CalcTextSize("Muted").x + ImGui::GetStyle().FramePadding.x * 2 + 34;
-        const float width = ImGui::CalcTextSize("Stats").x + ImGui::GetStyle().FramePadding.x * 2;
+        const float pad = ImGui::GetStyle().FramePadding.x * 2;
+        const float soundWidth = ImGui::CalcTextSize("Muted").x + pad + 34;
+        const float width = ImGui::CalcTextSize("Stats").x + pad;
+        // Maximize (or Restore), and whether Run maximizes it by itself: as Unity's Game view has them.
+        const float maximizeWidth = ImGui::CalcTextSize("Maximize").x + pad, onPlayWidth = ImGui::CalcTextSize("Maximize On Play").x + pad;
+        const float maximizeGroup = maximizeWidth + onPlayWidth + 10;
         // Simulate, while the scene is edited: the same as the Scene view's.
         if (!editor.scene.isPlaying()) {
             const float simulateWidth = ImGui::CalcTextSize("Simulate").x + 16 + 20;
-            ImGui::SetCursorScreenPos(ImVec2(position.x + size.x - soundWidth - width - simulateWidth - 20, position.y + 1));
+            ImGui::SetCursorScreenPos(ImVec2(position.x + size.x - soundWidth - width - maximizeGroup - simulateWidth - 26, position.y + 1));
             simulateButton(editor);
+        }
+        ImGui::SetCursorScreenPos(ImVec2(position.x + size.x - soundWidth - width - maximizeGroup - 20, position.y + 3));
+        const bool onPlay = editor.maximizesOnPlay;
+        if (onPlay) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(1.0f, 0.48f, 0.18f, 0.85f));
+        if (ImGui::Button("Maximize On Play", ImVec2(onPlayWidth, 0))) editor.maximizesOnPlay = !editor.maximizesOnPlay;
+        if (onPlay) ImGui::PopStyleColor();
+        ui::tooltip("On: Run makes the Game view fill the editor, and Stop puts it back where it was");
+        ImGui::SameLine(0, 4);
+        if (ImGui::Button(isMaximized ? "Restore##maximize" : "Maximize##maximize", ImVec2(maximizeWidth, 0))) editor.gameViewMaximized = !isMaximized;
+        ui::tooltip(isMaximized ? "Back among the other windows (Shift+Space)" : "The Game view over the whole editor, to play in a larger picture (Shift+Space)");
+        // Shift+Space over the view does the same, as in Unity.
+        if (ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows) && ImGui::IsKeyPressed(ImGuiKey_Space, false) && ImGui::GetIO().KeyShift &&
+            !editor.gameViewHasFocus) {
+            editor.gameViewMaximized = !isMaximized;
         }
         ImGui::SetCursorScreenPos(ImVec2(position.x + size.x - soundWidth - width - 14, position.y + 3));
         const bool wasOn = showsStats;
@@ -1969,6 +2012,17 @@ void drawSceneView(EditorContext& editor) {
         triedOn = Entity{};
         wornBefore.reset();
     }
+    // Files dropped onto it from the Finder: copied into the project (the Explorer's folder), and
+    // what is a model or a prefab put into the scene where they were let go.
+    if (!editor.droppedFiles.empty() && ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)) {
+        std::vector<std::string> imported = importDropped(editor, editor.droppedFiles, editor.currentFolder);
+        editor.droppedFiles.clear();
+        Vec3 point = groundPoint(viewport.screenRay(io.MousePos));
+        for (const std::string& path : imported) {
+            const AssetInfo* asset = editor.assets.find(path);
+            if (asset && (asset->type == AssetType::Mesh || asset->type == AssetType::Prefab)) placeAsset(editor, path, point);
+        }
+    }
     if (ImGui::BeginDragDropTarget()) {
         const ImGuiPayload* held = ImGui::GetDragDropPayload();
         if (held && held->IsDataType(ui::kAssetPayload)) {
@@ -1989,9 +2043,9 @@ void drawSceneView(EditorContext& editor) {
         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(ui::kAssetPayload, ImGuiDragDropFlags_AcceptNoDrawDefaultRect)) {
             std::string path(static_cast<const char*>(payload->Data));
             const AssetInfo* asset = editor.assets.find(path);
-            if (asset && asset->type == AssetType::Mesh && std::filesystem::path(path).extension() == ".obj") {
-                Vec3 point = groundPoint(viewport.screenRay(io.MousePos));
-                if (!document.createFromMesh(path, point).isValid()) editor.notify("Cannot load " + path, ConsoleMessage::Level::Error);
+            if (asset && asset->type == AssetType::Mesh) {
+                // Any model: an entity for each of its parts, with its materials.
+                placeAsset(editor, path, groundPoint(viewport.screenRay(io.MousePos)));
             } else if (asset && asset->type == AssetType::Material) {
                 // Onto whatever is under the pointer.
                 Entity hit = pick(editor, viewport.screenRay(io.MousePos));
@@ -2011,8 +2065,6 @@ void drawSceneView(EditorContext& editor) {
                 if (!document.instantiatePrefab(path, point).isValid()) editor.notify("Cannot read " + path, ConsoleMessage::Level::Error);
             } else if (asset && asset->type == AssetType::Scene) {
                 editor.requestOpenScene(editor.assets.absolutePath(path));
-            } else if (asset && asset->type == AssetType::Mesh) {
-                editor.notify("Only Wavefront OBJ models can be imported for now", ConsoleMessage::Level::Warning);
             }
         }
         ImGui::EndDragDropTarget();

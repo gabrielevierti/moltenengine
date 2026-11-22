@@ -140,6 +140,88 @@ static float3 lensFlare(float2 uv, constant PostUniforms &post, texture2d<float>
     return add;
 }
 
+// ---------------------------------------------------------------- the camera through the sea's surface
+
+static float glassHash(float2 p) {
+    p = fract(p * float2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+}
+
+// Water left on the glass when the camera comes up out of the sea: drops of all sizes that slide
+// down it, each a small lens that shows what is behind it upside down, darker at its rim. Returns
+// how far each pixel's look is moved (xy) and how much its rim darkens it (z).
+static float3 lensDrops(float2 uv, float time, float aspect) {
+    float2 p = float2(uv.x * aspect, uv.y) * 11.0;
+    float3 result = float3(0.0);
+    for (int layer = 0; layer < 2; layer++) {
+        float2 q = p * (layer == 0 ? 1.0 : 1.9) + float2(layer * 3.7, 0.0);
+        float column = floor(q.x);
+        float slide = glassHash(float2(column, 7.0 + layer)) * 0.8 + 0.2;   // each column of drops slides at its own pace
+        q.y -= time * slide * (layer == 0 ? 0.35 : 0.2);
+        float2 cell = floor(q), inCell = fract(q) - 0.5;
+        float there = glassHash(cell + float2(layer * 13.0, 5.0));
+        if (there < 0.45) continue;
+        float2 middle = (float2(glassHash(cell + 1.3), glassHash(cell + 9.1)) - 0.5) * 0.5;
+        float radius = mix(0.12, 0.34, glassHash(cell + 4.7));
+        float2 off = inCell - middle;
+        off.y *= 0.85 + 0.3 * glassHash(cell + 2.2);                         // a little longer than wide: they run
+        float r = length(off) / radius;
+        if (r >= 1.0) continue;
+        float bulge = sqrt(1.0 - r * r);
+        result.xy += -off / 11.0 * (0.9 + 0.6 * bulge) * float2(1.0 / aspect, 1.0);
+        result.z = max(result.z, smoothstep(0.7, 1.0, r) * 0.45);
+    }
+    return result;
+}
+
+// What the camera sees as it goes through the surface: where the sea's surface crosses its glass
+// a wavering line, bent by the water's edge (a meniscus); on the other side of it, the other
+// world: under the water from above (blurred, the red taken out), or above it from under (bright,
+// blurred, as through the water's skin). `hdr` is the picture here; `uv` where on the glass.
+static float3 lensThroughWater(float2 uv, float3 hdr, constant PostUniforms &post, texture2d<float> scene, sampler linearSampler, float aspect) {
+    float3 line = post.lensWater.xyz;
+    float slope = max(length(line.xy), 1e-4);
+    float over = dot(line.xy, uv) + line.z;
+    // The surface is not flat across the glass: small waves lap at it.
+    float t = post.time;
+    over += (sin(uv.x * aspect * 9.0 + t * 2.3) * 0.012 + sin(uv.x * aspect * 23.0 - t * 3.7) * 0.005 + sin(uv.y * 17.0 + t * 1.7) * 0.003);
+    float across = over / slope;                                        // in the picture's heights, signed
+    bool pictureIsUnder = post.lensWater.w > 1.5;
+    bool hereIsUnder = over < 0.0;
+    float3 color = hdr;
+    if (hereIsUnder != pictureIsUnder) {
+        // The other side: what this camera's picture is not of. Blurred, as through water on the glass.
+        float2 texel = 1.0 / float2(scene.get_width(), scene.get_height());
+        float3 blur = float3(0.0);
+        for (int i = 0; i < 8; i++) {
+            float a = float(i) * 0.785398;
+            blur += scene.sample(linearSampler, uv + float2(cos(a), sin(a)) * texel * 9.0).rgb;
+        }
+        blur = blur * 0.125 * 0.6 + hdr * 0.4;
+        if (pictureIsUnder) {
+            // Above, from under: bright, washed out.
+            float gray = dot(blur, float3(0.2126, 0.7152, 0.0722));
+            color = mix(blur, float3(gray), 0.35) * 1.7 + gray * 0.25;
+        } else {
+            // Under, from above: through a little water, the red going first.
+            color = blur * exp(-post.lensSea.xyz * 1.2) * 0.8;
+        }
+    }
+    // The water's edge on the glass: it bends what is behind it, darker in its middle, bright at its lip.
+    float edge = abs(across);
+    float width = 0.012;
+    if (edge < width) {
+        float k = 1.0 - edge / width;
+        float2 normal = line.xy / slope;
+        float3 bent = scene.sample(linearSampler, uv - normal * (k * k * 0.03 * sign(across))).rgb;
+        color = mix(color, bent, k);
+        color *= 1.0 - 0.55 * smoothstep(0.55, 1.0, k);
+        color += hdr * 0.4 * smoothstep(0.2, 0.5, k) * (1.0 - smoothstep(0.5, 0.8, k));
+    }
+    return color;
+}
+
 // The last pass: the lens, scene plus bloom, exposure, tone mapping, vignette, and the
 // flaws of a video link. The result is linear; the drawable has an sRGB format, so
 // Metal applies the gamma curve itself.
@@ -169,19 +251,33 @@ fragment float4 fragment_tonemap(FullscreenOut in [[stage_in]],
     float2 q = centered * float2(aspect, 1.0) * rsqrt(aspect * aspect + 1.0);      // the corners are at distance 1
     float r2 = dot(q, q);
     float bend = (1.0 + post.lensDistortion * r2) / (1.0 + post.lensDistortion);
-    float2 lensUV = centered * bend * 0.5 + 0.5;
+    // Water on the glass moves what each pixel shows: drops left from coming out of the sea, and
+    // the shake of going into it.
+    float2 wet = float2(0.0);
+    float rimShade = 0.0;
+    if (post.lensSea.w > 0.002) {
+        float3 drops = lensDrops(in.uv, post.time, aspect);
+        wet = drops.xy * post.lensSea.w;
+        rimShade = drops.z * post.lensSea.w;
+    }
+    if (post.lensMore.x > 0.002) {
+        wet += float2(sin(in.uv.y * 38.0 + post.time * 31.0), cos(in.uv.x * 33.0 + post.time * 27.0)) * (0.007 * post.lensMore.x);
+    }
+    float2 lensUV = centered * bend * 0.5 + 0.5 + wet;
 
     float3 hdr;
     if (post.chromaticAberration > 0.0) {
         // Glass bends red a little less than blue: the three colors come from slightly
         // different places, more so toward the corners.
         float spread = post.chromaticAberration * r2;
-        hdr.r = scene.sample(linearSampler, centered * bend * (1.0 - spread) * 0.5 + 0.5).r;
+        hdr.r = scene.sample(linearSampler, centered * bend * (1.0 - spread) * 0.5 + 0.5 + wet).r;
         hdr.g = scene.sample(linearSampler, lensUV).g;
-        hdr.b = scene.sample(linearSampler, centered * bend * (1.0 + spread) * 0.5 + 0.5).b;
+        hdr.b = scene.sample(linearSampler, centered * bend * (1.0 + spread) * 0.5 + 0.5 + wet).b;
     } else {
         hdr = scene.sample(linearSampler, lensUV).rgb;
     }
+    if (post.lensWater.w > 0.5) hdr = lensThroughWater(lensUV, hdr, post, scene, linearSampler, aspect);
+    hdr *= 1.0 - rimShade;
     // Crisper edges: the picture less what is round it.
     if (post.sharpen > 0.0) {
         float2 texel = 1.0 / float2(scene.get_width(), scene.get_height());

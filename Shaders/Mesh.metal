@@ -142,6 +142,9 @@ static float waterNoise(float2 p) {
 // a pixel is left out, since it could only flicker.
 static float2 waterRipples(float2 place, float time, float3 wind, float fineness, float heightScale, float footprint) {
     const float lengths[4] = {0.072, 0.052, 0.037, 0.027};
+    // In a light air the trains would all be as short as ripples get: each has a shortest of its
+    // own, none a multiple of another, or four of one length crossing make a grid.
+    const float shortest[4] = {0.43, 0.34, 0.27, 0.21};
     const float turnCos[4] = {0.88295, 0.68200, 0.48481, 0.95630};
     const float turnSin[4] = {-0.46947, 0.73135, -0.87462, 0.29237};
     float2 along = waterWindDirection(wind);
@@ -149,12 +152,14 @@ static float2 waterRipples(float2 place, float time, float3 wind, float fineness
     float longest = waterSeaState(wind, fineness, 1.0).x;
     float strength = clamp(speed / 7.0, 0.35, 1.6) * min(max(heightScale, 0.0), 2.0);
     float2 slope = float2(0.0);
+    // Their crests are not straight: bent this way and that over a meter or two, as real ripples are.
+    float2 bend = float2(waterNoise(place * 0.47 + float2(3.7, 1.3)), waterNoise(place * 0.47 + float2(-6.1, 8.9))) - 0.5;
     for (int i = 0; i < 4; i++) {
-        float waveLength = max(longest * lengths[i], 0.3);
+        float waveLength = max(longest * lengths[i], shortest[i]);
         float seen = saturate(waveLength / max(footprint * 3.0, 0.0001) - 0.6);
         float number = 6.2831853 / waveLength;
         float2 d = float2(along.x * turnCos[i] - along.y * turnSin[i], along.x * turnSin[i] + along.y * turnCos[i]);
-        float phase = number * dot(d, place) - sqrt(9.81 * number) * time;
+        float phase = number * dot(d, place) - sqrt(9.81 * number) * time + dot(bend, i % 2 == 0 ? float2(5.1, 2.3) : float2(-2.7, 4.9));
         slope -= d * (0.055 * strength * seen * sin(phase));
     }
     // Ripples: two sizes of noise carried downwind, their slope taken by looking a little to each side.

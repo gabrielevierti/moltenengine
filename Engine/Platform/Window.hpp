@@ -12,6 +12,7 @@
 #include <QuartzCore/QuartzCore.hpp>
 
 #include <string>
+#include <vector>
 
 struct GLFWwindow;
 
@@ -53,6 +54,10 @@ public:
     /// The program's icon while it runs, from a picture file (a square PNG). Nothing on a phone, where the application's own is used.
     void setIcon(const std::string& picturePath);
 
+    /// Files and folders dragged onto the window from the Finder since the last call, by their
+    /// full paths: what the editor imports. Empty most of the time.
+    std::vector<std::string> takeDroppedFiles() { return std::move(dropped_); }
+
     /// The GLFW window itself: for tools, like the editor's interface, that listen to its events.
     GLFWwindow* nativeHandle() const { return window_; }
 
@@ -73,6 +78,7 @@ private:
     bool isCursorCaptured_ = false;
     bool isFullscreen_ = false;
     int windowedX_ = 0, windowedY_ = 0, windowedWidth_ = 1280, windowedHeight_ = 720;
+    std::vector<std::string> dropped_;
 };
 
 }  // namespace molten

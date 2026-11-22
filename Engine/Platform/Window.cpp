@@ -86,6 +86,13 @@ Window::Window(const std::string& title, int width, int height, bool fullscreen,
         Window* self = static_cast<Window*>(glfwGetWindowUserPointer(window));
         if (self->input_) self->input_->handleText(codepoint);
     });
+    // Files dropped from the Finder: kept until asked for. (GLFW puts the pointer where they were let go first.)
+    glfwSetDropCallback(window_, [](GLFWwindow* window, int count, const char** paths) {
+        Window* self = static_cast<Window*>(glfwGetWindowUserPointer(window));
+        for (int i = 0; i < count; i++) {
+            if (paths[i]) self->dropped_.push_back(paths[i]);
+        }
+    });
 
     if (fullscreen) setFullscreen(true);
 }

@@ -521,6 +521,37 @@ void Renderer::adjustDynamicScale() {
     if (dynamicScale_ != before) framesSinceScaleChange_ = 0;
 }
 
+void Renderer::updateLensWater(const View& view, const gpu::FrameUniforms& frame, const RenderSettings& settings, double) {
+    // On the clock of the screen, not of the scene: the glass dries while the scene stands still too.
+    const double time = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    lensWater_ = lensSea_ = lensMore_ = Vec4{0, 0, 0, 0};
+    const bool hasSea = settings.sea.enabled && settings.sea.lensThroughSurface;
+    const int isUnder = hasSea && frame.cameraUnderwater > 0.0f ? 1 : 0;
+    // Gone through since the last picture of this view (not a cut: a view drawn again within a moment).
+    const bool isFollowing = lensWasUnder_ >= 0 && time - lensSeenAt_ < 0.5 && time >= lensSeenAt_;
+    if (hasSea && isFollowing && isUnder != lensWasUnder_) (isUnder ? lensPlungedAt_ : lensSurfacedAt_) = time;
+    lensWasUnder_ = hasSea ? isUnder : -1;
+    lensSeenAt_ = time;
+    if (!hasSea) return;
+    // The glass is taken as this tall, in meters, where the surface crosses it: as the camera goes
+    // through, the water's edge sweeps across the whole picture instead of flicking past.
+    const float glass = 0.35f;
+    Vec3 right = safeNormalize(xyz(view.world.columns[0]), Vec3{1, 0, 0});
+    Vec3 up = safeNormalize(xyz(view.world.columns[1]), Vec3{0, 1, 0});
+    float aspect = std::max(view.aspect, 0.1f);
+    float above = -frame.cameraUnderwater;              // the middle of the glass over the water, meters
+    // Each place of the glass (u across, v down, 0 to 1) is that far over the water: x u + y v + z.
+    Vec3 line{glass * aspect * right.y, -glass * up.y, 0.0f};
+    line.z = above - 0.5f * (line.x + line.y);
+    float reach = std::abs(line.x) + std::abs(line.y);
+    if (std::abs(above) < reach * 0.5f + 0.03f) lensWater_ = Vec4{line.x, line.y, line.z, isUnder ? 2.0f : 1.0f};
+    Vec3 taken = settings.sea.absorption();
+    float wet = time - lensSurfacedAt_ < 8.0 && !isUnder ? float(std::exp(-(time - lensSurfacedAt_) / 1.8)) : 0.0f;
+    lensSea_ = Vec4{taken.x, taken.y, taken.z, wet};
+    float shake = time - lensPlungedAt_ < 3.0 ? float(std::exp(-(time - lensPlungedAt_) / 0.35)) : 0.0f;
+    lensMore_ = Vec4{shake, 0, 0, 0};
+}
+
 void Renderer::swapTargets(size_t slot) {
     if (targetSets_.size() <= slot) targetSets_.resize(slot + 1);
     TargetSet& kept = targetSets_[slot];
@@ -544,6 +575,10 @@ void Renderer::swapTargets(size_t slot) {
     std::swap(kept.cloudViewProjectionBefore, cloudViewProjectionBefore_);
     std::swap(kept.cloudHasHistory, cloudHasHistory_);
     std::swap(kept.cloudTurn, cloudTurn_);
+    std::swap(kept.lensWasUnder, lensWasUnder_);
+    std::swap(kept.lensSurfacedAt, lensSurfacedAt_);
+    std::swap(kept.lensPlungedAt, lensPlungedAt_);
+    std::swap(kept.lensSeenAt, lensSeenAt_);
     std::swap(kept.tracedLight[0], tracedLight_[0]);
     std::swap(kept.tracedLight[1], tracedLight_[1]);
     std::swap(kept.tracedSurface, tracedSurface_);
@@ -885,6 +920,7 @@ void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const
         float surface = settings.sea.level + sea.heightAt(Vec2{view.position.x, view.position.z}, float(time));
         frame.cameraUnderwater = surface - view.position.y;
     }
+    updateLensWater(view, frame, settings, time);
 
     FrameAllocator::Allocation passUniforms = allocator().copy(
         makePassUniforms(view.view, view.projection, view.position, width, height, view.nearPlane, view.farPlane, time));

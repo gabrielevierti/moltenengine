@@ -473,7 +473,7 @@ private:
         ImGui::TextDisabled("%d triangles, %.2f x %.2f x %.2f m", int(mesh.indices.size() / 3), extent.x, extent.y, extent.z);
         ImGui::SameLine();
         if (ImGui::SmallButton("Add to Scene")) {
-            if (!editor.scene.createFromMesh(asset.path, Vec3{0, 0, 0}).isValid()) editor.notify("Cannot load " + asset.path, ConsoleMessage::Level::Error);
+            placeAsset(editor, asset.path, inFrontOfCamera(editor));
         }
         // What it is made of, folded away: the picture is what a small panel is for.
         if (ImGui::TreeNodeEx("##parts", ImGuiTreeNodeFlags_SpanAvailWidth, "Parts (%d)", int(parts_.size()))) {

@@ -4,6 +4,7 @@
 #include "Editor.hpp"
 #include "ImGuiLayer.hpp"
 #include "SoftRender.hpp"
+#include "Assets/Gltf.hpp"
 #include "Assets/ImportSettings.hpp"
 #include "Assets/MeshData.hpp"
 #include "Scene/SceneFile.hpp"
@@ -324,6 +325,13 @@ const Preview& previewOf(EditorContext& editor, const std::string& path, AssetTy
                 if (std::optional<MeshData> mesh = MeshData::parseOBJ(*contents)) {
                     ImportSettings::load(file).apply(*mesh);
                     if (!keepPicture(editor, made, renderModel(*mesh, 192))) made = makeShape(*mesh);
+                }
+            } else if (type == AssetType::Mesh && isModelFile(path)) {
+                // Any other kind of model: as it stands, all its parts together.
+                if (std::optional<GltfModel> model = GltfModel::load(file)) {
+                    MeshData mesh = model->assembled(model->restPose());
+                    ImportSettings::load(file).apply(mesh);
+                    if (!mesh.positions.empty() && !keepPicture(editor, made, renderModel(mesh, 192))) made = makeShape(mesh);
                 }
             } else if (type == AssetType::Scene || type == AssetType::Prefab) {
                 // A picture of it; the plan of dots only if nothing in it has a shape to show.

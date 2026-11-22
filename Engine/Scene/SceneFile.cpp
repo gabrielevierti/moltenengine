@@ -259,7 +259,8 @@ std::string writeScene(Scene& scene, const std::vector<NamedMaterial>& materials
         if (settings.sea.enabled) {
             const SeaSettings& sea = settings.sea;
             Line("sea").flag(true).number(sea.level).vec(sea.color).vec(sea.shallowColor).number(sea.clarity).number(sea.scattering)
-                .number(sea.reflections).number(sea.ripples).number(sea.caustics).number(sea.foam).number(sea.whitecaps).to(out);
+                .number(sea.reflections).number(sea.ripples).number(sea.caustics).number(sea.foam).number(sea.whitecaps)
+                .flag(sea.lensThroughSurface).to(out);
         }
         Line("ambientOcclusion").flag(settings.ambientOcclusionEnabled).number(settings.ambientOcclusionRadius)
             .number(settings.ambientOcclusionIntensity).to(out);
@@ -626,6 +627,7 @@ bool readSceneAsWritten(const std::string& text, Scene& scene, std::vector<Named
                     sea.caustics = std::max(words.number(sea.caustics), 0.0f);
                     sea.foam = std::max(words.number(sea.foam), 0.0f);
                     sea.whitecaps = std::max(words.number(sea.whitecaps), 0.0f);
+                    sea.lensThroughSurface = words.flag(true);
                 }
             } else if (key == "wind") {
                 settings.wind = words.vec3(settings.wind);
@@ -839,6 +841,9 @@ bool readSceneAsWritten(const std::string& text, Scene& scene, std::vector<Named
                 c.offset = words.vec3();
                 c.isTrigger = words.flag();
                 if (c.shape == ColliderShape::Mesh) c.isConvex = words.flag();
+                // A mesh collider is its model where the model is: it has no offset of its own. (Its
+                // first days gave it the model's middle when it was added, which put it beside the model.)
+                if (c.shape == ColliderShape::Mesh) c.offset = Vec3{0, 0, 0};
                 scene.add(entity, c);
             } else if (key == "body") {
                 RigidBody b;

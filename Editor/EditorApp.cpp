@@ -83,7 +83,9 @@ void EditorApp::start(Engine& engine) {
             else if (line.rfind("autosave ", 0) == 0) autosaves_ = line.substr(9) != "0";
             else if (line.rfind("autosaveMinutes ", 0) == 0) autosaveMinutes_ = std::clamp(std::atoi(line.substr(16).c_str()), 1, 60);
             else if (line.rfind("reopenLastProject ", 0) == 0) reopensLastProject_ = line.substr(18) != "0";
+            else if (line.rfind("maximizeOnPlay ", 0) == 0) context_->maximizesOnPlay = line.substr(15) != "0";
         }
+        savedMaximizesOnPlay_ = context_->maximizesOnPlay;
         context_->shortcuts.fromText(shortcutLines);
         if (ImGui::GetCurrentContext()) applyTheme(1.0f);       // otherwise the interface starts with it
     }
@@ -897,6 +899,11 @@ void EditorApp::draw(Engine& engine, Canvas& canvas) {
     if (editor.hasProject && !isWorking() && engine.time.elapsed >= nextAssetScan_) {
         nextAssetScan_ = engine.time.elapsed + 1.0;
         editor.assets.refresh();
+        // A material file deleted in the Finder: what wore it no longer does.
+        if (int count = editor.scene.takeOffMissingMaterials([&](const std::string& name) { return editor.assets.find(name) != nullptr; })) {
+            editor.notify(std::to_string(count) + (count == 1 ? " object's material is gone: it wears the plain one" : " objects' material is gone: they wear the plain one"),
+                          ConsoleMessage::Level::Warning);
+        }
         // Written again (a picture saved in another program, a model exported again): read
         // into what already uses it, so the scene changes without being opened again.
         std::vector<std::pair<std::string, int64_t>> files;
@@ -953,8 +960,31 @@ void EditorApp::draw(Engine& engine, Canvas& canvas) {
     if (editor.hasProject) drawPlayBar();
     if (editor.hasProject) drawStatusBar();       // it speaks of the scene: nothing to say without one
     if (editor.hasProject) {
-        drawDockSpace();
-        drawPanels();
+        // Files dropped from the Finder: the panel under the pointer takes them as it draws.
+        if (Window* window = engine.window()) editor.droppedFiles = window->takeDroppedFiles();
+        // Run maximizes the Game view if asked to, and Stop puts back what Run did.
+        const bool isPlaying = editor.scene.isPlaying();
+        if (isPlaying != wasPlayingForMaximize_) {
+            if (isPlaying && editor.maximizesOnPlay && !editor.gameViewMaximized) editor.gameViewMaximized = maximizedByPlay_ = true;
+            if (!isPlaying && maximizedByPlay_) editor.gameViewMaximized = maximizedByPlay_ = false;
+            wasPlayingForMaximize_ = isPlaying;
+        }
+        if (editor.maximizesOnPlay != savedMaximizesOnPlay_) saveEditorSettings();
+        if (editor.gameViewMaximized) {
+            // Only the game, over the whole editor; the layout of the rest kept as it is, for its return.
+            ImGui::DockSpaceOverViewport(ImGui::GetID("MoltenDockSpace"), ImGui::GetMainViewport(), ImGuiDockNodeFlags_KeepAliveOnly);
+            hideSceneView(editor);
+            drawGameView(editor, splashSeconds_ >= Splash::kDuration);
+            if (!editor.gameViewMaximized) maximizedByPlay_ = false;      // restored by hand
+        } else {
+            drawDockSpace();
+            drawPanels();
+        }
+        // Dropped where no panel takes them: into the folder the Explorer shows, as Unity does.
+        if (!editor.droppedFiles.empty()) {
+            importDropped(editor, editor.droppedFiles, editor.currentFolder);
+            editor.droppedFiles.clear();
+        }
     } else {
         hideSceneAndGameViews(editor);
         drawProjectList();
@@ -1116,6 +1146,8 @@ void EditorApp::saveEditorSettings() {
     out += std::string("autosave ") + (autosaves_ ? "1" : "0") + "\n";
     out += "autosaveMinutes " + std::to_string(autosaveMinutes_) + "\n";
     out += std::string("reopenLastProject ") + (reopensLastProject_ ? "1" : "0") + "\n";
+    out += std::string("maximizeOnPlay ") + (context_->maximizesOnPlay ? "1" : "0") + "\n";
+    savedMaximizesOnPlay_ = context_->maximizesOnPlay;
     std::istringstream changed(context_->shortcuts.toText());
     std::string line;
     while (std::getline(changed, line)) out += "shortcut " + line + "\n";

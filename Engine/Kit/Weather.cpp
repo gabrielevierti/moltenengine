@@ -334,7 +334,11 @@ void updateWeather(World& world, float dt) {
     }
     if (drops && rain > 0.0f && !viewers.empty()) {
         // New drops: born above and round each viewer, falling with the wind, each aimed at what it will hit.
-        Vec3 velocity{wind.x * 0.6f, -kDropSpeed, wind.z * 0.6f};
+        // A drop falls at its own speed (a large one faster) and the air carries it: within a second
+        // of its fall it goes sideways as fast as the wind there, gusts and all, so the rain slants
+        // along the wind, more the harder it blows (the drops are born high: they have that second).
+        const float gusts = world.gusts();
+        Vec3 velocity{wind.x, -kDropSpeed, wind.z};
         // Born upwind of where they will fall, so that the patch of rain stays round the viewer.
         Vec3 lead = Vec3{velocity.x, 0, velocity.z} * (kRainAbove / kDropSpeed);
         float wanted = kDropsPerSecond * rain * rain * dt;
@@ -347,7 +351,9 @@ void updateWeather(World& world, float dt) {
                 Vec3 from = viewer + Vec3{std::cos(a) * r, kRainAbove + random.range(-4.0f, 6.0f), std::sin(a) * r} - lead;
                 Particle drop;
                 drop.position = from;
-                drop.velocity = velocity * random.range(0.92f, 1.08f);
+                float size = random.range(0.9f, 1.12f);                 // its fall: larger drops, faster
+                Vec3 air = windAt(wind, gusts, from, time);
+                drop.velocity = Vec3{air.x, -kDropSpeed * size, air.z};
                 Vec3 at, normal;
                 bool onWater = false;
                 float fall = kRainAbove + 40.0f;
@@ -393,7 +399,9 @@ void updateWeather(World& world, float dt) {
             settled->particles.push_back(rest);
         }
         if (snow > 0.0f && !viewers.empty()) {
-            Vec3 drifting{wind.x * 0.5f, -kFlakeSpeed, wind.z * 0.5f};
+            // A flake is light: it goes wherever the air goes, gusts and all, as it drifts down.
+            Vec3 drifting{wind.x, -kFlakeSpeed, wind.z};
+            const float flakeGusts = world.gusts();
             Vec3 lead = Vec3{drifting.x, 0, drifting.z} * (kSnowAbove / kFlakeSpeed);
             float wanted = kFlakesPerSecond * snow * dt;
             for (Vec3 viewer : viewers) {
@@ -404,7 +412,8 @@ void updateWeather(World& world, float dt) {
                     Vec3 from = viewer + Vec3{std::cos(a) * r, kSnowAbove + random.range(-3.0f, 5.0f), std::sin(a) * r} - lead;
                     Particle flake;
                     flake.position = from;
-                    flake.velocity = drifting * random.range(0.85f, 1.15f);
+                    Vec3 air = windAt(wind, flakeGusts, from, time);
+                    flake.velocity = Vec3{air.x, -kFlakeSpeed, air.z} * random.range(0.85f, 1.15f);
                     flake.sizeScale = random.range(0.6f, 1.4f);
                     Vec3 at, normal;
                     bool onWater = false;

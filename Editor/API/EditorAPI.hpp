@@ -197,6 +197,14 @@ struct EditorContext {
     std::string selectedAsset;
     /// The folder the asset browser shows. New assets are made here.
     std::string currentFolder;
+    /// Files and folders dropped onto the editor from the Finder this frame: the panel under the
+    /// pointer takes them (the Explorer into the folder it shows, the Scene view into the scene too);
+    /// what none takes is imported into the Explorer's folder.
+    std::vector<std::string> droppedFiles;
+    /// The Game view over the whole editor (its Maximize button), and whether Run does that by
+    /// itself and Stop undoes it (Maximize On Play, kept with the editor's own settings).
+    bool gameViewMaximized = false;
+    bool maximizesOnPlay = false;
 
     /// Opens a visual script (a .graph file, as a path relative to Assets) on the drawing board.
     void editGraph(const std::string& path);

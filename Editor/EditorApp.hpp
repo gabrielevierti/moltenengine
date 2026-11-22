@@ -173,6 +173,8 @@ private:
     bool autosaves_ = true;             // the open scene's unsaved changes are kept aside, to recover after a crash
     int autosaveMinutes_ = 2;
     bool reopensLastProject_ = false;   // the editor opens on the project it had, not on the project window
+    bool savedMaximizesOnPlay_ = false; // as the settings file has it: written again when the Game view's toggle changes
+    bool wasPlayingForMaximize_ = false, maximizedByPlay_ = false;
     double nextAutosave_ = 0;           // in seconds of the editor's own clock
     std::string recoverPath_, recoverText_;     // an autosave newer than the scene just opened: asked about
     std::string autosavePathFor(const std::string& sceneFile) const;

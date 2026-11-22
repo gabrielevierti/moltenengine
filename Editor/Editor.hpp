@@ -65,6 +65,17 @@ bool isInterfacePiece(Scene& scene, Entity entity);
 /// Makes an entity as one entry of the Create menu does, under `parent` if it is one, and chooses it.
 Entity createFromEntry(EditorContext& editor, const CreateEntry& entry, Entity parent);
 
+/// What an asset dropped into the scene becomes (PlaceAsset.cpp): a model (any kind isModelFile
+/// names) an entity for each part, with its materials made into files; a prefab, a copy. At
+/// `position`, under `parent` if it is one; chosen. An invalid entity, after saying why, if not.
+Entity placeAsset(EditorContext& editor, const std::string& path, Vec3 position, Entity parent = Entity{});
+Entity placeModel(EditorContext& editor, const std::string& path, Vec3 position, Entity parent = Entity{});
+/// Where the Scene view looks: its pivot, in front of the camera. Where things go that are not dropped onto the view.
+Vec3 inFrontOfCamera(EditorContext& editor);
+/// Copies files and folders from outside the project (dropped from the Finder) into `folder` of
+/// its assets, folders with all they hold. Says what it did. Returns the assets made of the files.
+std::vector<std::string> importDropped(EditorContext& editor, const std::vector<std::string>& files, const std::string& folder);
+
 /// A visual script (a .graph among the assets) as a C++ script in Assets/Scripts, which keeps
 /// the graph so that it can go back; and back again, from C++ made that way. Each returns the
 /// path of the file made (relative to Assets), or an empty text after saying why it could not.
@@ -116,6 +127,8 @@ void drawSceneView(EditorContext& editor);
 void drawGameView(EditorContext& editor, bool takesCanvas);
 /// With no project open there is nothing to show in either.
 void hideSceneAndGameViews(EditorContext& editor);
+/// The Scene view not drawn this frame (the Game view is maximized over it): its picture is not made either.
+void hideSceneView(EditorContext& editor);
 /// What drawing the picture in front of the user took last frame: the Scene view's when it
 /// is on screen, the Game view's otherwise. The two side by side each have their own.
 RenderStats shownRenderStats(EditorContext& editor);

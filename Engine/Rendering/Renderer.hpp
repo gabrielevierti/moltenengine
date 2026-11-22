@@ -108,6 +108,9 @@ struct SeaSettings {
     float caustics = 1.0f;                      // the sun's lines of light on its bottom: 0 none, 1 as real, 3 drawn strong
     float foam = 1.0f;                          // white where it meets the shore and what stands in it
     float whitecaps = 1.0f;                     // white on the crests of waves that break (from a fresh breeze up): 0 never
+    /// The camera going through its surface: the water's edge across the picture as it goes, the
+    /// shake of going in, drops on the glass that slide off after coming out. Off: it just cuts.
+    bool lensThroughSurface = true;
     /// What a meter of it takes of each color of light: its deep color is what is left after a
     /// long way through it (red goes first, then green); its clarity is how far one sees.
     Vec3 absorption() const {
@@ -605,6 +608,8 @@ private:
     /// Exchanges the working textures with those kept for picture number `slot`, so that
     /// pictures of different sizes each keep their own instead of reallocating every frame.
     void swapTargets(size_t slot);
+    /// The camera through the sea's surface: where it crosses the glass, the drops left on it, the shake (for renderFinal).
+    void updateLensWater(const View& view, const gpu::FrameUniforms& frame, const RenderSettings& settings, double time);
     Rect sceneRect(MTL::Texture* target) const;
     void drawFullscreen(MTL::CommandBuffer* commandBuffer, MTL::Texture* target, const char* fragmentFunction, BlendMode blend,
                         bool keepContents, const void* uniforms, size_t uniformsSize, MTL::Texture* source0, MTL::Texture* source1,
@@ -650,6 +655,10 @@ private:
     Mat4 flareViewProjection_ = identity();      // the last view drawn, and the sun then: for the lens flare
     Vec3 flareSunDirection_{0, -1, 0};
     Vec3 flareSunColor_{0, 0, 0};
+    // The camera through the sea's surface, for the last pass (PostUniforms::lensWater...): the last view drawn.
+    Vec4 lensWater_{0, 0, 0, 0}, lensSea_{0, 0, 0, 0}, lensMore_{0, 0, 0, 0};
+    int lensWasUnder_ = -1;                         // the view before: 1 under, 0 above, -1 not known
+    double lensSurfacedAt_ = -100, lensPlungedAt_ = -100, lensSeenAt_ = -100;
     bool hasPreviousView_ = false;
     double lastViewTime_ = -1;
     bool hasDecals_ = false;
@@ -719,6 +728,8 @@ private:
         Mat4 cloudViewProjectionBefore = identity();
         bool cloudHasHistory = false;
         uint32_t cloudTurn = 0;
+        int lensWasUnder = -1;
+        double lensSurfacedAt = -100, lensPlungedAt = -100, lensSeenAt = -100;
         NS::SharedPtr<MTL::Texture> tracedLightGathered, tracedLightGatheredBefore, tracedFrames, tracedFramesBefore, tracedSurfaceBefore;
         Mat4 tracedViewProjectionBefore = identity(), tracedViewBefore = identity();
         bool tracedHasHistory = false;

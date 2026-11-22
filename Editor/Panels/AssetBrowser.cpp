@@ -75,6 +75,11 @@ public:
         // The folder may have been renamed or deleted, here or in the Finder.
         if (!editor.currentFolder.empty() && !assets.find(editor.currentFolder)) editor.currentFolder.clear();
 
+        // Files dropped onto it from the Finder: copied into the folder it shows, as Unity does.
+        if (!editor.droppedFiles.empty() && ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)) {
+            importDropped(editor, editor.droppedFiles, editor.currentFolder);
+            editor.droppedFiles.clear();
+        }
         keepChoiceInStep(editor);
         handleKeys(editor);
         handleRequest(editor);
@@ -743,6 +748,8 @@ private:
             }
             if (moved > 0) editor.notify(moved == 1 ? "Moved " + pendingDelete_.front() + " to the Trash" : "Moved " + std::to_string(moved) + " items to the Trash");
             editor.assets.refresh();
+            // What wore a material that went wears the plain one now: it no longer has it.
+            editor.scene.takeOffMissingMaterials([&](const std::string& name) { return editor.assets.find(name) != nullptr; });
             if (!editor.assets.find(editor.selectedAsset)) editor.selectedAsset.clear();
             chosen_.clear();
             pendingDelete_.clear();

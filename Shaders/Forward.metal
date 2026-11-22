@@ -96,20 +96,32 @@ static MaterialSample sampleMaterial(MeshVertexOut in, bool isFrontFacing,
 // Which way, and how far across for each meter down, the sun's light goes on under the sea's
 // surface where it came through it at `place`: bent by the slope of the waves there.
 static float2 seaRefractedDrift(float2 place, float3 sunWay, constant PassUniforms &pass, float finest, float ripples) {
-    WaterSwell swell = waterSwell(place, pass.time, pass.wind, 1.0, 1.0, finest);
-    float2 slope = swell.slope + waterRipples(place, pass.time, pass.wind, 1.0, 1.0, finest) * ripples;
-    // And the small waves no train of them is: a sea is never as regular as its trains, and its
-    // lines of light would be a grid without this. Two sizes of bumps, carried with the wind.
+    // The swell's longer trains only: the shortest few, nearly square to each other, would bend
+    // the light into a grid of cells all alike. What is smaller is the bumps below, which are not.
+    float longest = waterSeaState(pass.wind, 1.0, 1.0).x;
+    WaterSwell swell = waterSwell(place, pass.time, pass.wind, 1.0, 1.0, max(finest, longest * 0.11));
     float2 along = waterWindDirection(pass.wind);
+    // The wind never ruffles a sea evenly: it comes down on it in patches (cat's paws) that run
+    // downwind, ruffled hard in some, nearly glassy between them. Where it is ruffled the lines
+    // of light are many and sharp; where it is glassy, few, wide and soft, only the swell's.
+    float2 gustAt = (place - along * pass.time * 1.6) * 0.07;
+    float paws = smoothstep(0.18, 0.82, waterNoise(gustAt + float2(5.3, 1.7)) * 0.7 + waterNoise(gustAt * 2.3 + float2(-2.1, 7.4)) * 0.3);
+    float ruffled = mix(0.2, 1.45, paws);
+    float2 slope = swell.slope;
+    // And the small waves no train of them is: a sea is never as regular as its trains, and its
+    // lines of light would be a grid without this. Three sizes of bumps, carried with the wind, each
+    // a little larger here and smaller there, so that no two cells of light are alike.
     float strength = clamp(length(float2(pass.wind.x, pass.wind.z)) / 7.0, 0.35, 1.6);
-    for (int j = 0; j < 2; j++) {
-        float size = j == 0 ? 0.55 : 0.21;
+    float grain = mix(0.7, 1.4, waterNoise(place * 0.045 + float2(11.2, -3.9)));
+    for (int j = 0; j < 3; j++) {
+        float size = (j == 0 ? 1.4 : j == 1 ? 0.55 : 0.21) * grain;
         if (size < finest * 1.5) break;
-        float2 p = (place - along * (pass.time * (j == 0 ? 0.45 : 0.8))) / size + float2(j * 17.3, j * 41.9);
+        float2 p = (place - along * (pass.time * (j == 0 ? 0.3 : j == 1 ? 0.45 : 0.8))) / size + float2(j * 17.3, j * 41.9);
         float2 warp = float2(waterNoise(p * 0.37 + 3.1), waterNoise(p * 0.37 + 9.7)) * 1.8;
         float here = waterNoise(p + warp);
         float2 change = float2(waterNoise(p + warp + float2(0.3, 0.0)) - here, waterNoise(p + warp + float2(0.0, 0.3)) - here);
-        slope += change * ((j == 0 ? 0.38 : 0.24) * strength * ripples);
+        float weight = j == 0 ? 0.34 : j == 1 ? 0.5 : 0.36;
+        slope += change * (weight * strength * ripples * (j == 0 ? 1.0 : ruffled));
     }
     float3 n = normalize(float3(-slope.x, 1.0, -slope.y));
     float3 bent = refract(sunWay, n, 1.0 / 1.333);

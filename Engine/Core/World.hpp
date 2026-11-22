@@ -276,6 +276,8 @@ public:
     /// The scene's wind as it blows now, meters per second (Environment > Weather > Wind): what raises the
     /// waves of water, sways grass and carries particles.
     Vec3 wind();
+    /// How gusty it is now, 0 to 1: the scene's, or more in a storm (Rendering/Particles.hpp: windAt).
+    float gusts();
     /// The scene's weather as it is set now (Environment > Weather): rain, storm (Kit/Weather.hpp).
     const WeatherSettings& weather();
     /// The scene's sea (Environment > Water), as the picture has it: off unless the scene has one.

@@ -981,6 +981,7 @@ void World::removeDestroyed() {
 const RenderSettings& World::effectSettings() { return materials_->settings; }
 
 Vec3 World::wind() { return windWithWeather(effectSettings()); }
+float World::gusts() { return gustsWithWeather(effectSettings()); }
 const SeaSettings& World::sea() { return effectSettings().sea; }
 
 const WeatherSettings& World::weather() { return effectSettings().weather; }
@@ -1057,6 +1058,7 @@ std::optional<MeshData> World::readMeshData(const std::string& name) const {
     if (name == "cube") return MeshData::cube();
     if (name == "plane") return MeshData::plane();
     if (name == "sphere") return MeshData::sphere();
+    if (name == "cylinder") return MeshData::cylinder();
     if (name.empty()) return std::nullopt;
     if (isGltfFile(name)) {
         int part = -1;

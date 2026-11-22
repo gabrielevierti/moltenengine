@@ -327,6 +327,10 @@ typedef struct {
     float sunInView;                 // 1 in front of the camera, 0 behind
     float lensDirt;                  // how much the dirt on the glass (texture 4) lights up under the bloom and the flare; 0 none
     simd_float3 sunColor;            // its light, for the flare's color
+    // The camera going through the sea's surface (SeaSettings::lensThroughSurface).
+    simd_float4 lensWater;           // xyz: how high each place of the glass is over the water, meters, as x * u + y * v + z (u, v the picture's 0 to 1); w 0 off, 1 the picture is of above the water, 2 of under it
+    simd_float4 lensSea;             // xyz what a meter of the sea takes of each color; w how wet the glass still is from coming out, 0 to 1
+    simd_float4 lensMore;            // x how much the picture still shakes from going in, 0 to 1
 } PostUniforms;
 
 // The effects between the scene and the bloom: depth of field, motion blur, how bright the
