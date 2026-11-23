@@ -40,10 +40,16 @@ public:
     InspectorPanel() { title = "Inspector"; }
 
     void draw(EditorContext& editor) override {
+        // What was chosen last: a file of the Explorer (its preview, its import settings, what
+        // can be done with it), or an entity of the scene.
+        if (editor.projectIsActive && !editor.selectedAsset.empty() && editor.assets.find(editor.selectedAsset)) {
+            drawAssetViewer(editor);
+            return;
+        }
         drawScenePart(editor);
     }
 
-    /// What is chosen in the scene: the Inspector proper. Nothing of the Explorer is shown here.
+    /// What is chosen in the scene.
     void drawScenePart(EditorContext& editor) {
         SceneDocument& scene = editor.scene;
         Entity entity = scene.primary();
@@ -518,7 +524,7 @@ private:
                 else if (ImGui::IsKeyPressed(ImGuiKey_Enter, false)) picked = first;
             } else {
                 // The order people look for things in: what is seen, then how it behaves.
-                std::vector<std::string> categories = {"Mesh", "Rendering", "Physics", "Animation", "Audio", "Effects", "Navigation", "Paths", "Vehicles", "UI", "Network", "Scripts", "Miscellaneous"};
+                std::vector<std::string> categories = {"Mesh", "Rendering", "Physics", "Animation", "Audio", "Effects", "Player", "Gameplay", "Navigation", "Paths", "Vehicles", "UI", "Network", "Scripts", "Miscellaneous"};
                 for (const Choice& choice : choices) {
                     if (std::find(categories.begin(), categories.end(), choice.category) == categories.end()) categories.push_back(choice.category);
                 }
@@ -683,7 +689,7 @@ std::vector<MenuEntry> addComponentEntries(EditorContext& editor) {
         choices.push_back({type.category, ComponentRegistry::displayName(type.name), [has, &scene](Entity entity) { return has(scene, entity); },
                            [add, &scene](Entity entity) { add(scene, entity); }});
     }
-    std::vector<std::string> categories = {"Mesh", "Rendering", "Physics", "Animation", "Audio", "Effects", "Navigation", "Paths", "Vehicles", "UI", "Network", "Scripts", "Miscellaneous"};
+    std::vector<std::string> categories = {"Mesh", "Rendering", "Physics", "Animation", "Audio", "Effects", "Player", "Gameplay", "Navigation", "Paths", "Vehicles", "UI", "Network", "Scripts", "Miscellaneous"};
     for (const Choice& choice : choices) {
         if (std::find(categories.begin(), categories.end(), choice.category) == categories.end()) categories.push_back(choice.category);
     }

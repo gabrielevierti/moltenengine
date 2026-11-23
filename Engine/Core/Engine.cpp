@@ -566,16 +566,28 @@ SoundHandle Engine::playSoundAt(const std::shared_ptr<const AudioClip>& clip, Ve
 }
 
 void Engine::loadQuality(const std::string& settingsDirectory) {
-    quality.reset();
-    if (std::optional<std::string> text = text::readFile(settingsDirectory + "/Quality.settings")) quality = GameQuality::parse(*text);
-    // A project that never chose is at High.
-    if (!quality) quality = GameQuality::preset(GameQuality::Level::High);
+    std::optional<QualityLevels> read;
+    if (std::optional<std::string> text = text::readFile(settingsDirectory + "/Quality.settings")) {
+        read = QualityLevels::parse(*text);
+        if (!read) logWarning("Settings/Quality.settings can't be read (a newer Molten's?): the standard levels are used");
+    }
+    // A project that never chose has the standard four, and starts at High.
+    setQualityLevels(read ? *read : QualityLevels::standard());
+}
+
+void Engine::setQualityLevels(const QualityLevels& levels, const std::string& shown) {
+    qualityLevelsAll = levels;
+    const GameQuality* chosen = levels.find(shown.empty() ? (quality ? quality->name : levels.start) : shown);
+    quality = chosen ? *chosen : levels.starting();
     if (renderer_) renderer_->quality = &*quality;
 }
 
-void Engine::setQuality(const GameQuality& wanted) {
-    quality = wanted;
+bool Engine::setQualityLevel(const std::string& name) {
+    const GameQuality* found = qualityLevelsAll.find(name);
+    if (!found) return false;
+    quality = *found;
     if (renderer_) renderer_->quality = &*quality;
+    return true;
 }
 
 bool Engine::writeImage(const std::string& path, int width, int height) {

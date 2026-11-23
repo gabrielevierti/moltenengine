@@ -466,6 +466,13 @@ std::string HudText::filled(const World& world, const std::string& written) {
                 continue;
             }
             // "{lap:time}": seconds as minutes, seconds and tenths; nothing yet as dashes.
+            if (name.compare(colon + 1, std::string::npos, "0") == 0) {
+                char whole[24];
+                std::snprintf(whole, sizeof(whole), "%ld", std::lround(world.value(name.substr(0, colon))));
+                out += whole;
+                i = close + 1;
+                continue;
+            }
             if (name.compare(colon + 1, std::string::npos, "time") == 0) {
                 float seconds = world.value(name.substr(0, colon));
                 char clock[32];
@@ -509,11 +516,12 @@ void HudText::draw(World& world, Entity self, Canvas& canvas) {
     InterfaceFont typeface(world, canvas, font, loadedFont, loadedFontName);
     Vec2 size_ = canvas.size();
     Vec2 position{size_.x * anchor.x + offset.x, size_.y * anchor.y + offset.y};
-    TextAlign align = anchor.x < 0.34f ? TextAlign::Left : anchor.x > 0.66f ? TextAlign::Right : TextAlign::Center;
+    TextAlign runs = align == "Left" ? TextAlign::Left : align == "Center" ? TextAlign::Center : align == "Right" ? TextAlign::Right
+                   : anchor.x < 0.34f ? TextAlign::Left : anchor.x > 0.66f ? TextAlign::Right : TextAlign::Center;
     std::string shown = filled(world, text);
     // A dark copy one point down and right keeps the text readable over a bright scene.
-    canvas.text(shown, Vec2{position.x + 1.5f, position.y + 1.5f}, size, Vec4{0, 0, 0, 0.55f * color.w}, align);
-    canvas.text(shown, position, size, color, align);
+    canvas.text(shown, Vec2{position.x + 1.5f, position.y + 1.5f}, size, Vec4{0, 0, 0, 0.55f * color.w}, runs);
+    canvas.text(shown, position, size, color, runs);
 }
 
 void Goal::update(World& world, Entity, float dt) {
@@ -682,18 +690,22 @@ void registerKit() {
     linkTimeline();
     (void)script::typeNameFor("kit");
     (void)&sharedGltfModel;                 // and the Animator       // and what scripts made from visual scripts are written with         // names something in Vehicles.cpp, so that a program that links the kit gets the vehicles too
-    // Where each is found under Add Component. What is offered is what a game is built of, as in
-    // Unity: what is drawn, what collides, what sounds, the interface, animation, navigation,
-    // paths, vehicles' parts, the network. What a game does with them (a player that moves, a
-    // pickup, a gun, a goal) is its own code: the templates have theirs as scripts to copy and
-    // change. The components that did it are kept, for the scenes that have them, but not offered.
+    // Where each is found under Add Component: everything a game is built of, as in Unity. What is
+    // drawn, what collides, what sounds, the interface, animation, navigation, paths, a vehicle's
+    // parts, the network; and the ready pieces the Entity menu puts together (a player that walks,
+    // its camera, a pickup, health, a goal, a rule). What drives a particular vehicle, and a
+    // camera that chases it, is the game's own code: the templates have theirs as scripts
+    // (Assets/Scripts) to copy and change, and a script takes the place of a component of its name.
+    // Those of the kit are kept for the scenes that have them, but not offered.
     ComponentRegistry& registry = ComponentRegistry::instance();
-    for (const char* name : {"PlayerMover", "Follow", "Spin", "Mover", "Lifetime", "Collectible", "Health", "Damage", "Shooter", "Spawner", "Goal",
-                             "RestartWhenBelow", "ConstantSpeed", "Breakable", "Shuttle", "Explosion", "Flicker", "Guard", "Weapon", "ShootingTarget",
-                             "Hunter", "Supply", "DamageFlash", "Boat", "DriveControls", "FlightControls", "CharacterMover", "OrbitCamera",
-                             "FirstPersonLook", "WhenThen"}) {
+    for (const char* name : {"PlayerMover", "Follow", "Mover", "Spawner", "RestartWhenBelow", "ConstantSpeed", "Breakable", "Flicker", "Guard",
+                             "Weapon", "ShootingTarget", "Hunter", "Supply", "DamageFlash", "Shooter", "Boat", "DriveControls", "FlightControls"}) {
         registry.setCategory(name, "Hidden");
     }
+    for (const char* name : {"Collectible", "Health", "Damage", "Goal", "Spin", "Shuttle", "Lifetime", "WhenThen"}) registry.setCategory(name, "Gameplay");
+    for (const char* name : {"CharacterMover", "OrbitCamera", "FirstPersonLook"}) registry.setCategory(name, "Player");
+    registry.setCategory("Explosion", "Effects");
+    ComponentRegistry::setDisplayName("FirstPersonLook", "First Person Look");
     registry.setCategory("Buoyancy", "Physics");
     registry.setCategory("CharacterController", "Physics");
     ComponentRegistry::setDisplayName("CharacterController", "Character Controller");
@@ -1148,7 +1160,8 @@ MOLTEN_COMPONENT(TouchButton, MOLTEN_FIELD(action).picks("action").help("The but
                  MOLTEN_FIELD(color).color())
 MOLTEN_COMPONENT(HudText, MOLTEN_FIELD(text).help("{name} shows a shared value: Coins: {score}"), MOLTEN_FIELD(anchor), MOLTEN_FIELD(offset),
                  MOLTEN_FIELD(font).picks("font").help("A font of Assets made by Tools/bake_font.py: Fonts/Title. Empty: the game's own"),
-                 MOLTEN_FIELD(size).range(8, 120), MOLTEN_FIELD(color).color())
+                 MOLTEN_FIELD(size).range(8, 120), MOLTEN_FIELD(color).color(),
+                 MOLTEN_FIELD(align).choices({"Auto", "Left", "Center", "Right"}).help("Which way the words run from where it is. Auto: by the side of the screen it is anchored to"))
 MOLTEN_COMPONENT(Goal, MOLTEN_FIELD(counter).picks("value"), MOLTEN_FIELD(target), MOLTEN_FIELD(message), MOLTEN_FIELD(nextScene).picks("scene"), MOLTEN_FIELD(delay))
 MOLTEN_COMPONENT(RestartWhenBelow, MOLTEN_FIELD(height))
 MOLTEN_COMPONENT(ConstantSpeed, MOLTEN_FIELD(speed), MOLTEN_FIELD(startDirection), MOLTEN_FIELD(minimumAlongZ).range(0, 0.9f))

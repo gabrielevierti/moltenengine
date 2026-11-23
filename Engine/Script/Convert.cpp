@@ -230,73 +230,8 @@ std::string graphToCpp(const Graph& graph, const std::string& name, const std::s
     registerStandardNodes();
     // A graph of C++ boxes is the file itself, laid out: written back as it says (Script/CppBoxes.hpp).
     if (hasCppBoxes(graph)) return cppFromBoxes(graph);
-    Writer writer{graph, {}, {}};
-    // Which events the graph has, by the function of a component each belongs in.
-    std::string start, update, collision, trigger, members;
-    for (const Node& node : graph.nodes) {
-        const NodeDef* definition = NodeLibrary::instance().find(node.type);
-        if (!definition || !definition->isEvent || !graph.linkFrom(node.id, "then")) continue;
-        auto typed = [&](const char* pin, PinType type, const std::string& fallback) {
-            auto found = node.values.find(pin);
-            return Value::fromText(type, found != node.values.end() ? found->second : fallback);
-        };
-        writer.out.clear();
-        if (node.type == "OnStart") {
-            writer.flow(node, "then", 2, 0);
-            start += writer.out;
-        } else if (node.type == "OnUpdate") {
-            writer.flow(node, "then", 2, 0);
-            update += writer.out;
-        } else if (node.type == "OnKeyPressed" || node.type == "OnKeyReleased") {
-            std::string key = typed("key", PinType::String, "Space").asString();
-            writer.line(2, std::string("if (world.input.") + (node.type == "OnKeyPressed" ? "wasPressed" : "wasReleased") + "(keyByName(" + quotedText(key) + "))) {");
-            writer.flow(node, "then", 3, 0);
-            writer.line(2, "}");
-            update += writer.out;
-        } else if (node.type == "OnPointerPressed") {
-            writer.line(2, "if (world.input.wasPressed(MouseButton::Left)) {");
-            writer.flow(node, "then", 3, 0);
-            writer.line(2, "}");
-            update += writer.out;
-        } else if (node.type == "OnTimer") {
-            std::string timer = "timer" + std::to_string(node.id);
-            float seconds = std::max(typed("seconds", PinType::Float, "1").asFloat(), 0.001f);
-            members += "    float " + timer + " = 0;                   // seconds since it last rang\n";
-            writer.line(2, timer + " += dt;");
-            writer.line(2, "if (" + timer + " >= " + numberText(seconds) + ") {");
-            writer.line(3, timer + " -= " + numberText(seconds) + ";");
-            writer.flow(node, "then", 3, 0);
-            writer.line(2, "}");
-            update += writer.out;
-        } else if (node.type == "OnCollision") {
-            writer.flow(node, "then", 2, 0);
-            collision += writer.out;
-        } else if (node.type == "OnTriggerEnter") {
-            writer.flow(node, "then", 2, 0);
-            trigger += writer.out;
-        } else {
-            update += "        // An event this conversion has no place for: " + node.type + "\n";
-        }
-    }
-
-    std::string out;
-    out += "// " + name + ".cpp\n";
-    out += "// Made from the visual script " + source + ": the same events and the same steps, as code.\n";
-    out += "// Each call(\"...\") does what the box of that name does. From here it is yours to change:\n";
-    out += "// replace a call with code of your own whenever the game needs more than the box gives.\n";
-    out += "#include \"MoltenMetal.hpp\"\n#include \"Script/Convert.hpp\"\n\nusing namespace molten;\n\n";
-    out += "struct " + name + " {\n";
-    out += "    script::ScriptState state;          // the script's own variables\n" + members;
-    auto function = [&](const std::string& signature, const std::string& open, const std::string& body) {
-        if (body.empty()) return;
-        out += "\n    " + signature + " {\n        " + open + "\n" + body + "    }\n";
-    };
-    function("void start(World& world, Entity self)", "script::Call call(world, self, 0, state);", start);
-    function("void update(World& world, Entity self, float dt)", "script::Call call(world, self, dt, state);", update);
-    function("void onCollision(World& world, Entity self, Entity other)", "script::Call call(world, self, 0, state, other);", collision);
-    function("void onTriggerEnter(World& world, Entity self, Entity other)", "script::Call call(world, self, 0, state, other);", trigger);
-    out += "};\n\nMOLTEN_COMPONENT(" + name + ")\n";
-    return out;
+    // Otherwise, the code a programmer would write: what each box means, line by line.
+    return graphToNaturalCpp(graph, name, source);
 }
 
 // ---------------------------------------------------------------- there and back

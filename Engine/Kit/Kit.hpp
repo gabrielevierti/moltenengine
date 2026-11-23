@@ -192,12 +192,17 @@ struct HudText {
     float size = 26.0f;
     Vec4 color{1, 1, 1, 1};
     std::string font;                   // a font of Assets ("Fonts/Title", made by Tools/bake_font.py); empty for the game's own
+    /// Which way the words run from where it is: "Left", "Center", "Right", or "Auto": by the side
+    /// of the screen it is anchored to (left on the left, right on the right, centered between).
+    std::string align = "Auto";
 
     std::shared_ptr<struct Font> loadedFont;
     std::string loadedFontName = "\n";
 
     void draw(World& world, Entity self, Canvas& canvas);
-    /// The text with the values filled in.
+    /// The text with the values filled in: {name} is a shared value (a whole number as one,
+    /// others with a decimal), {name:0} rounded to a whole number, {name:percent} a share as a
+    /// percentage, {name:time} seconds as a clock, {name:A|B|C} the word the value counts to.
     static std::string filled(const World& world, const std::string& text);
 };
 

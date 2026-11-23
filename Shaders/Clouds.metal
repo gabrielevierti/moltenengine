@@ -283,8 +283,10 @@ fragment float4 fragment_clouds_resolve(FullscreenOut in [[stage_in]],
                                         sampler linearSampler [[sampler(MMSamplerLinearClamp)]]) {
     float2 size = float2(before.get_width(), before.get_height());
     uint2 pixel = uint2(in.position.xy);
-    int2 block = int2(pixel / 2u);
     int2 freshSize = int2(fresh.get_width(), fresh.get_height());
+    // The walked pixel nearest this one, for each pixel its own (not one for each two by two:
+    // the range below would then be the same for all four, and show as squares).
+    int2 block = int2(floor((float2(pixel) - resolve.offset) * 0.5 + 0.5));
     // What was walked round here this frame: the range the clouds now have here.
     float4 lowest = float4(1e9), highest = float4(-1e9), walked = float4(0.0);
     for (int y = -1; y <= 1; y++) {

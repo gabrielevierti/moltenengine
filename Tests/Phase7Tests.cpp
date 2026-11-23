@@ -95,14 +95,14 @@ TEST(a_particle_system_keeps_its_picture_and_its_modules) {
 
 TEST(the_project_quality_is_read_and_put_on_the_settings) {
     GameQuality low = GameQuality::preset(GameQuality::Level::Low);
-    CHECK(low.antiAliasing == 1 && low.renderScale < 1 && low.volumetricClouds && low.cloudSteps < 48);
-    std::optional<GameQuality> again = GameQuality::parse(low.toText());
-    CHECK(again && again->level == GameQuality::Level::Low && again->shadowResolution == low.shadowResolution);
-    CHECK(!GameQuality::parse("level High\n"));
+    CHECK(low.antiAliasing == 2 && low.renderScale < 1 && low.volumetricClouds && low.cloudSteps < 48);
+    std::optional<QualityLevels> again = QualityLevels::parse(QualityLevels::standard().toText());
+    CHECK(again && again->find("Low") && again->find("Low")->shadowResolution == low.shadowResolution);
+    CHECK(!QualityLevels::parse("level High\n"));
     RenderSettings settings;
     settings.sky.cloudsHaveDepth = true;
     low.applyTo(settings);
-    CHECK(settings.sampleCount == 1 && settings.sky.cloudsHaveDepth && settings.sky.cloudSteps == 24 && settings.cascades.resolution == 2048);
+    CHECK(settings.sampleCount == 2 && settings.sky.cloudsHaveDepth && settings.sky.cloudSteps == 24 && settings.cascades.resolution == 2048);
     // The defaults asked for: 2x MSAA, no tone mapping.
     CHECK(RenderSettings{}.sampleCount == 2 && RenderSettings{}.toneMapper == 2);
 }

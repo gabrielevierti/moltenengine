@@ -30,7 +30,7 @@ namespace molten::script {
 struct CppToGraphResult {
     std::optional<Graph> graph;
     std::string name;                           // the component's name: "PlayerController"
-    std::vector<std::string> notConverted;      // (always empty now: what has no box of its own is a C++ box)
+    std::vector<std::string> notConverted;      // what is in C++ boxes, or kept as C++ members: no box says it (yet)
     bool isTheKeptGraph = false;                // the graph the code was made from, unchanged
     bool isCodeAsBoxes = false;                 // the code itself, a statement to a box (Script/CppBoxes.hpp)
     std::string error;                          // why there is no graph (never, now)

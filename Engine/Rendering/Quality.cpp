@@ -11,12 +11,6 @@
 
 namespace molten {
 
-namespace {
-const char* lightingName(LightingQuality most) {
-    return most == LightingQuality::Low ? "Low" : most == LightingQuality::Medium ? "Medium" : most == LightingQuality::Ultra ? "Ultra" : "High";
-}
-}  // namespace
-
 float& detailDistanceScale() {
     static float scale = 1.0f;
     return scale;
@@ -37,6 +31,8 @@ float nextDynamicScale(float scale, float gpuMilliseconds, float targetFrameRate
     return scale;
 }
 
+// ---------------------------------------------------------------- names
+
 const char* GameQuality::levelName(Level level) {
     switch (level) {
         case Level::Low: return "Low";
@@ -50,13 +46,15 @@ const char* GameQuality::levelName(Level level) {
 
 const char* GameQuality::levelPurpose(Level level) {
     switch (level) {
-        case Level::Low: return "For the slowest machines the game should run on: a little smaller and made sharp by MetalFX, shadow maps near the camera, no ray tracing, clouds walked coarsely.";
-        case Level::Medium: return "For most laptops, phones and tablets: the light ray traced where the GPU can, with fewer rays; clouds with depth walked coarsely.";
+        case Level::Low: return "For the slowest machines the game should run on, and still a good picture: a little smaller and made sharp by MetalFX, "
+                                "smooth edges, real shadows, soft clouds with depth; no ray tracing.";
+        case Level::Medium: return "For most laptops, phones and tablets: the light ray traced where the GPU can, with fewer rays.";
         case Level::High: return "For a recent Mac: every pixel drawn, all of the light ray traced.";
-        case Level::Ultra: return "The best there is, at 60 frames a second on a recent Mac: smoothest edges, the most rays, rougher things mirrored, shadows to 250 m, the finest clouds and light shafts. Every pixel while the GPU keeps up.";
+        case Level::Ultra: return "The best there is, at 60 frames a second on a recent Mac: smoothest edges, the most rays, rougher things mirrored, "
+                                  "shadows farther, the finest clouds and light shafts.";
         case Level::Custom: break;
     }
-    return "Each group at a level of its own, or values set one by one.";
+    return "";
 }
 
 const char* GameQuality::groupName(Group group) {
@@ -72,46 +70,64 @@ const char* GameQuality::groupName(Group group) {
     return "";
 }
 
-void GameQuality::setRayTracing(LightingQuality wanted) {
-    if (wanted != LightingQuality::Custom) rayTracing = wanted;
+const char* GameQuality::groupPurpose(Group group) {
+    switch (group) {
+        case Group::Resolution: return "How many pixels the scene is drawn with before the picture is made the screen's size, and whether fewer are drawn "
+                                       "while the GPU cannot keep up. Fewer pixels is the surest way to a faster frame.";
+        case Group::AntiAliasing: return "How smooth the edges of things are.";
+        case Group::Shadows: return "How far from the camera the sun's shadows reach (a share of what each scene asks), how sharp they are, and the "
+                                    "shadows of point and spot lights.";
+        case Group::RayTracing: return "The light found with rays, where the GPU can: the sun's shadows, the light around things and what it bounces, "
+                                       "reflections. Each can be on or off, with its own number of rays.";
+        case Group::Effects: return "The screen's ambient occlusion, bloom, shafts of light through fog, lights that light the air, motion blur and "
+                                    "depth of field, where a scene has them.";
+        case Group::Sky: return "Clouds with depth, where a scene has them, and how finely they are walked through.";
+        case Group::Detail: return "How far the detail of far things lasts (LOD groups, painted foliage), and the light baked into probes.";
+    }
+    return "";
 }
+
+// ---------------------------------------------------------------- the four of a new project
 
 GameQuality GameQuality::preset(Level level) {
     GameQuality q;                      // High: the defaults
-    q.level = level;
+    q.name = levelName(level);
     switch (level) {
         case Level::Low:
-            // Still a good picture: drawn a little smaller and made sharp again by MetalFX, real
-            // shadows near the camera, the screen's ambient occlusion, clouds with depth walked coarsely.
-            q.renderScale = 0.8f;
-            q.antiAliasing = 1;
-            q.shadowReach = 0.5f, q.shadowResolution = 2048, q.shadowCascades = 2;
+            // A good picture still: drawn a little smaller and made sharp again by MetalFX, smooth
+            // edges (2x multisampling costs little on Apple's GPUs), real shadows near the camera, the
+            // screen's ambient occlusion, clouds with depth walked coarsely but at a size that keeps them soft.
+            q.renderScale = 0.85f;
+            q.lowestScale = 0.7f;
+            q.shadowReach = 0.6f, q.shadowResolution = 2048, q.shadowCascades = 2;
             q.lightShadowResolution = 256, q.shadowedLights = 4;
-            q.rayTraced = false, q.setRayTracing(LightingQuality::Low);
+            q.rayTraced = false;
+            q.shadowRays = 4, q.occlusionRays = 1, q.reflectionRoughness = 0.15f;
             q.lightShafts = 8;
-            q.cloudSteps = 24, q.cloudResolution = 0.35f;
+            q.motionBlur = false;
+            q.cloudSteps = 24, q.cloudResolution = 0.4f;
             q.detailDistance = 0.7f;
             break;
         case Level::Medium:
             q.renderScale = 0.9f;
-            q.shadowReach = 0.75f, q.shadowCascades = 3;
+            q.lowestScale = 0.65f;
+            q.shadowReach = 0.8f, q.shadowCascades = 3;
             q.shadowedLights = 6;
-            q.setRayTracing(LightingQuality::Medium);
+            q.shadowRays = 6, q.occlusionRays = 1, q.reflectionRoughness = 0.25f;
             q.lightShafts = 12;
-            q.cloudSteps = 32, q.cloudResolution = 0.4f;
+            q.cloudSteps = 32, q.cloudResolution = 0.45f;
             q.detailDistance = 0.85f;
             break;
         case Level::High: break;
         case Level::Ultra:
-            // The best there is, at 60 frames a second on a recent Mac (an M3): every pixel while
-            // the GPU keeps up, a little fewer, made sharp by MetalFX, while it cannot.
-            q.lowestScale = 0.65f;
+            // Every pixel while the GPU keeps up, a little fewer, made sharp by MetalFX, while it cannot.
+            q.lowestScale = 0.7f;
             q.antiAliasing = 4;
             q.shadowReach = 1.5f, q.shadowResolution = 4096;
             q.lightShadowResolution = 1024, q.shadowedLights = 12;
-            q.setRayTracing(LightingQuality::Ultra);
+            q.shadowRays = 12, q.occlusionRays = 3, q.reflectionRoughness = 0.55f;
             q.lightShafts = 24;
-            q.cloudSteps = 64, q.cloudResolution = 0.5f;
+            q.cloudSteps = 64, q.cloudResolution = 0.6f;
             q.detailDistance = 1.5f;
             break;
         case Level::Custom: break;
@@ -119,9 +135,7 @@ GameQuality GameQuality::preset(Level level) {
     return q;
 }
 
-void GameQuality::setGroup(Group group, Level wanted) {
-    if (wanted == Level::Custom) return;
-    GameQuality from = preset(wanted);
+void GameQuality::copyGroup(Group group, const GameQuality& from) {
     switch (group) {
         case Group::Resolution:
             renderScale = from.renderScale, metalFX = from.metalFX, dynamicResolution = from.dynamicResolution;
@@ -132,58 +146,30 @@ void GameQuality::setGroup(Group group, Level wanted) {
             shadows = from.shadows, shadowReach = from.shadowReach, shadowResolution = from.shadowResolution, shadowCascades = from.shadowCascades;
             lightShadowResolution = from.lightShadowResolution, shadowedLights = from.shadowedLights;
             break;
-        case Group::RayTracing: rayTraced = from.rayTraced, rayTracing = from.rayTracing; break;
-        case Group::Effects: ambientOcclusion = from.ambientOcclusion, bloom = from.bloom, lightShafts = from.lightShafts; break;
+        case Group::RayTracing:
+            rayTraced = from.rayTraced, tracedShadows = from.tracedShadows, shadowRays = from.shadowRays, tracedOcclusion = from.tracedOcclusion;
+            occlusionRays = from.occlusionRays, tracedBounce = from.tracedBounce, tracedReflections = from.tracedReflections;
+            reflectionRoughness = from.reflectionRoughness;
+            break;
+        case Group::Effects:
+            ambientOcclusion = from.ambientOcclusion, bloom = from.bloom, lightShafts = from.lightShafts, lightsInAir = from.lightsInAir;
+            motionBlur = from.motionBlur, depthOfField = from.depthOfField;
+            break;
         case Group::Sky: volumetricClouds = from.volumetricClouds, cloudSteps = from.cloudSteps, cloudResolution = from.cloudResolution; break;
-        case Group::Detail: detailDistance = from.detailDistance; break;
+        case Group::Detail: detailDistance = from.detailDistance, lightProbes = from.lightProbes; break;
     }
-    findLevel();
 }
 
-bool GameQuality::isAt(Group group, Level candidate) const {
-    if (candidate == Level::Custom) return false;
-    GameQuality p = preset(candidate);
-    switch (group) {
-        case Group::Resolution:
-            return renderScale == p.renderScale && metalFX == p.metalFX && dynamicResolution == p.dynamicResolution &&
-                   (!dynamicResolution || (targetFrameRate == p.targetFrameRate && lowestScale == p.lowestScale)) && followsDeviceHeat == p.followsDeviceHeat;
-        case Group::AntiAliasing: return antiAliasing == p.antiAliasing;
-        case Group::Shadows:
-            return shadows == p.shadows && shadowReach == p.shadowReach && shadowResolution == p.shadowResolution && shadowCascades == p.shadowCascades &&
-                   lightShadowResolution == p.lightShadowResolution && shadowedLights == p.shadowedLights;
-        case Group::RayTracing: return rayTraced == p.rayTraced && (!rayTraced || rayTracing == p.rayTracing);
-        case Group::Effects: return ambientOcclusion == p.ambientOcclusion && bloom == p.bloom && lightShafts == p.lightShafts;
-        case Group::Sky: return volumetricClouds == p.volumetricClouds && (!volumetricClouds || (cloudSteps == p.cloudSteps && cloudResolution == p.cloudResolution));
-        case Group::Detail: return detailDistance == p.detailDistance;
-    }
-    return false;
+bool GameQuality::sameGroup(Group group, const GameQuality& other) const {
+    GameQuality copy = *this;
+    copy.copyGroup(group, other);
+    return copy.toLines() == toLines();
 }
 
-GameQuality::Level GameQuality::levelOf(Group group) const {
-    if (isAt(group, level)) return level;
-    for (Level candidate : {Level::Low, Level::Medium, Level::High, Level::Ultra}) {
-        if (isAt(group, candidate)) return candidate;
-    }
-    return Level::Custom;
-}
-
-void GameQuality::findLevel() {
-    // The level every group is at. The one it was said to be at first: of two that fit it stays.
-    Level before = level;
-    level = Level::Custom;
-    for (Level candidate : {before, Level::Low, Level::Medium, Level::High, Level::Ultra}) {
-        if (candidate == Level::Custom) continue;
-        bool all = true;
-        for (int i = 0; i < kGroupCount; i++) all = all && isAt(Group(i), candidate);
-        if (all) {
-            level = candidate;
-            return;
-        }
-    }
-}
+// ---------------------------------------------------------------- in a line
 
 std::string GameQuality::summaryOf(Group group) const {
-    char text[160] = "";
+    char text[200] = "";
     switch (group) {
         case Group::Resolution: {
             char size[48];
@@ -201,27 +187,45 @@ std::string GameQuality::summaryOf(Group group) const {
             else std::snprintf(text, sizeof(text), "%.0f%% as far as each scene asks, %d px, %d slice%s; %d lights", shadowReach * 100.0f, shadowResolution,
                                shadowCascades, shadowCascades == 1 ? "" : "s", shadowedLights);
             break;
-        case Group::RayTracing:
-            if (!rayTraced) std::snprintf(text, sizeof(text), "Off: shadow maps");
-            else std::snprintf(text, sizeof(text), "%s: shadows, light around things, bounced light, reflections", lightingName(rayTracing));
+        case Group::RayTracing: {
+            if (!rayTraced) {
+                std::snprintf(text, sizeof(text), "Off: shadow maps");
+                break;
+            }
+            std::string parts;
+            auto add = [&](const std::string& part) { parts += (parts.empty() ? "" : ", ") + part; };
+            if (tracedShadows) add("shadows (" + std::to_string(shadowRays) + " rays)");
+            if (tracedOcclusion) add("light around things (" + std::to_string(occlusionRays) + ")");
+            if (tracedBounce) add("bounced light");
+            if (tracedReflections) add("reflections");
+            std::snprintf(text, sizeof(text), "%s", parts.empty() ? "On, but nothing traced" : parts.c_str());
             break;
+        }
         case Group::Effects: {
             std::string parts;
             auto add = [&](const std::string& part) { parts += (parts.empty() ? "" : ", ") + part; };
-            if (ambientOcclusion) add("Ambient occlusion");
-            if (bloom) add(parts.empty() ? "Bloom" : "bloom");
-            if (lightShafts > 0) add(std::string(parts.empty() ? "Light" : "light") + " shafts in " + std::to_string(lightShafts) + " steps");
+            if (ambientOcclusion) add("ambient occlusion");
+            if (bloom) add("bloom");
+            if (lightShafts > 0) add("light shafts in " + std::to_string(lightShafts) + " steps");
+            if (lightsInAir) add("lights in the air");
+            if (motionBlur) add("motion blur");
+            if (depthOfField) add("depth of field");
+            if (!parts.empty()) parts[0] = char(std::toupper(static_cast<unsigned char>(parts[0])));
             std::snprintf(text, sizeof(text), "%s", parts.empty() ? "None" : parts.c_str());
             break;
         }
         case Group::Sky:
             if (!volumetricClouds) std::snprintf(text, sizeof(text), "Flat clouds");
-            else std::snprintf(text, sizeof(text), "Clouds with depth: %d steps at %.0f%% of the size", cloudSteps, cloudResolution * 100.0f);
+            else std::snprintf(text, sizeof(text), "Clouds with depth: %d steps at %.0f%% of the size", cloudSteps, std::max(cloudResolution, 0.35f) * 100.0f);
             break;
-        case Group::Detail: std::snprintf(text, sizeof(text), "Lasts %.0f%% as far", detailDistance * 100.0f); break;
+        case Group::Detail:
+            std::snprintf(text, sizeof(text), "Lasts %.0f%% as far%s", detailDistance * 100.0f, lightProbes ? "; baked light probes" : "; no light probes");
+            break;
     }
     return text;
 }
+
+// ---------------------------------------------------------------- on the renderer
 
 void GameQuality::dynamicResolutionFor(bool& isOn, float& target, float& lowest) const {
     if (isOn) return;
@@ -244,114 +248,219 @@ void GameQuality::applyTo(RenderSettings& settings) const {
     settings.cascades.count = std::clamp(shadowCascades, 1, 4);
     settings.lightShadowResolution = std::clamp(lightShadowResolution, 64, 2048);
     settings.shadowedLights = std::clamp(shadowedLights, 0, 48);
-    // Ray tracing is the project's alone: what the scene file says of it (scenes of before) is not
-    // asked. On, all of it, as the level has it, at full strength.
-    if (rayTraced) {
-        applyLightingQuality(settings, rayTracing);
-        settings.bounceIntensity = 1.0f;
-        settings.reflectionStrength = 1.0f;
-    } else {
-        settings.rayTracedShadows = settings.rayTracedOcclusion = settings.rayTracedBounce = settings.rayTracedReflections = false;
-    }
+    // Ray tracing is the project's alone: what the scene file says of it (scenes of before) is not asked.
+    settings.rayTracedShadows = rayTraced && tracedShadows;
+    settings.shadowRayCount = std::clamp(shadowRays, 1, 32);
+    settings.rayTracedOcclusion = rayTraced && tracedOcclusion;
+    settings.occlusionRayCount = std::clamp(occlusionRays, 1, 16);
+    settings.rayTracedBounce = rayTraced && tracedBounce;
+    settings.bounceIntensity = 1.0f;
+    settings.rayTracedReflections = rayTraced && tracedReflections;
+    settings.reflectionMaxRoughness = std::clamp(reflectionRoughness, 0.0f, 1.0f);
+    settings.reflectionStrength = 1.0f;
     settings.ambientOcclusionEnabled = settings.ambientOcclusionEnabled && ambientOcclusion;
     settings.bloomEnabled = settings.bloomEnabled && bloom;
+    settings.motionBlur = settings.motionBlur && motionBlur;
+    settings.depthOfField = settings.depthOfField && depthOfField;
+    settings.volumetricLights = lightsInAir;
+    settings.usesLightProbes = lightProbes;
     settings.sky.cloudsHaveDepth = settings.sky.cloudsHaveDepth && volumetricClouds;
     settings.sky.cloudSteps = std::clamp(cloudSteps, 16, 128);
-    settings.sky.cloudResolution = std::clamp(cloudResolution, 0.2f, 1.0f);
+    settings.sky.cloudResolution = std::clamp(cloudResolution, 0.35f, 1.0f);
     // Shafts of light: the scene says whether it has them, the quality how finely they are drawn.
     settings.fogShaftSteps = settings.fogShaftSteps > 0 ? std::max(lightShafts, 0) : 0;
     detailDistanceScale() = std::max(detailDistance, 0.05f);
 }
 
-std::optional<GameQuality> GameQuality::parse(const std::string& text) {
-    GameQuality q;
-    bool hasHeader = false;
-    int version = 1;
-    Level named = Level::Custom;
-    for (const std::vector<std::string>& words : text::parseLines(text)) {
-        if (words.empty()) continue;
-        const std::string& key = words[0];
-        auto number = [&](float otherwise) { return words.size() > 1 ? std::strtof(words[1].c_str(), nullptr) : otherwise; };
-        auto flag = [&](bool otherwise) { return words.size() > 1 ? words[1] != "0" : otherwise; };
-        auto levelNamed = [&](Level otherwise) {
-            for (Level level : {Level::Low, Level::Medium, Level::High, Level::Ultra}) {
-                if (words.size() > 1 && words[1] == levelName(level)) return level;
-            }
-            return otherwise;
-        };
-        if (key == "molten-quality") {
-            hasHeader = true;
-            version = std::max(int(number(1)), 1);
-        } else if (key == "level") {
-            named = levelNamed(Level::Custom);
-            // The level first, then what the file says of each value: what it leaves out is the level's.
-            if (named != Level::Custom) q = preset(named);
-        }
-        else if (key == "antiAliasing") q.antiAliasing = int(number(2));
-        else if (key == "renderScale") q.renderScale = number(1);
-        else if (key == "metalFX") q.metalFX = flag(true);
-        else if (key == "dynamicResolution") q.dynamicResolution = flag(true);
-        else if (key == "targetFrameRate") q.targetFrameRate = number(60);
-        else if (key == "lowestScale") q.lowestScale = number(0.5f);
-        else if (key == "followsDeviceHeat") q.followsDeviceHeat = flag(true);
-        else if (key == "shadows") q.shadows = flag(true);
-        else if (key == "shadowReach") q.shadowReach = number(1);
-        // Files of before said meters, a limit for every scene: the share of the 150 m it was at High.
-        else if (key == "shadowDistance") q.shadowReach = std::clamp(number(150) / 150.0f, 0.25f, 2.0f);
-        else if (key == "shadowResolution") q.shadowResolution = int(number(2048));
-        else if (key == "shadowCascades") q.shadowCascades = int(number(4));
-        else if (key == "lightShadowResolution") q.lightShadowResolution = int(number(512));
-        else if (key == "shadowedLights") q.shadowedLights = int(number(8));
-        else if (key == "rayTracing") {
-            Level most = levelNamed(Level::High);
-            q.setRayTracing(most == Level::Low ? LightingQuality::Low : most == Level::Medium ? LightingQuality::Medium : most == Level::Ultra ? LightingQuality::Ultra : LightingQuality::High);
-        }
-        else if (key == "rayTraced") q.rayTraced = flag(true);
-        // A file of before, that chose what was traced one by one: off if the sun's shadows were not.
-        else if (key == "tracedShadows") q.rayTraced = flag(true);
-        else if (key == "ambientOcclusion") q.ambientOcclusion = flag(true);
-        else if (key == "bloom") q.bloom = flag(true);
-        else if (key == "volumetricClouds") q.volumetricClouds = flag(true);
-        else if (key == "cloudSteps") q.cloudSteps = int(number(48));
-        else if (key == "cloudResolution") q.cloudResolution = number(0.5f);
-        else if (key == "lightShafts") q.lightShafts = int(number(16));
-        else if (key == "detailDistance") q.detailDistance = number(1);
-    }
-    if (!hasHeader) return std::nullopt;
-    // A file of before the groups, at a level: that level as it is now. (Its values were the
-    // level's own of then: shadows that reached 60 meters and no farther, whatever the scene.)
-    if (version < 2 && named != Level::Custom) return preset(named);
-    q.findLevel();
-    return q;
+// ---------------------------------------------------------------- the file
+
+std::vector<std::string> GameQuality::toLines() const {
+    auto number = [](const char* key, double value) {
+        char line[96];
+        std::snprintf(line, sizeof line, "%s %g", key, value);
+        return std::string(line);
+    };
+    auto flag = [](const char* key, bool value) { return std::string(key) + (value ? " 1" : " 0"); };
+    return {number("renderScale", renderScale), flag("metalFX", metalFX), flag("dynamicResolution", dynamicResolution),
+            number("targetFrameRate", targetFrameRate), number("lowestScale", lowestScale), flag("followsDeviceHeat", followsDeviceHeat),
+            number("antiAliasing", antiAliasing), flag("shadows", shadows), number("shadowReach", shadowReach),
+            number("shadowResolution", shadowResolution), number("shadowCascades", shadowCascades),
+            number("lightShadowResolution", lightShadowResolution), number("shadowedLights", shadowedLights), flag("rayTraced", rayTraced),
+            flag("tracedShadows", tracedShadows), number("shadowRays", shadowRays), flag("tracedOcclusion", tracedOcclusion),
+            number("occlusionRays", occlusionRays), flag("tracedBounce", tracedBounce), flag("tracedReflections", tracedReflections),
+            number("reflectionRoughness", reflectionRoughness), flag("ambientOcclusion", ambientOcclusion), flag("bloom", bloom),
+            number("lightShafts", lightShafts), flag("lightsInAir", lightsInAir), flag("motionBlur", motionBlur),
+            flag("depthOfField", depthOfField), flag("volumetricClouds", volumetricClouds), number("cloudSteps", cloudSteps),
+            number("cloudResolution", cloudResolution), number("detailDistance", detailDistance), flag("lightProbes", lightProbes)};
 }
 
-std::string GameQuality::toText() const {
-    std::ostringstream out;
-    out << "molten-quality 2\n"
-        << "level " << levelName(level) << "\n"
-        << "renderScale " << renderScale << "\n"
-        << "metalFX " << (metalFX ? 1 : 0) << "\n"
-        << "dynamicResolution " << (dynamicResolution ? 1 : 0) << "\n"
-        << "targetFrameRate " << targetFrameRate << "\n"
-        << "lowestScale " << lowestScale << "\n"
-        << "followsDeviceHeat " << (followsDeviceHeat ? 1 : 0) << "\n"
-        << "antiAliasing " << antiAliasing << "\n"
-        << "shadows " << (shadows ? 1 : 0) << "\n"
-        << "shadowReach " << shadowReach << "\n"
-        << "shadowResolution " << shadowResolution << "\n"
-        << "shadowCascades " << shadowCascades << "\n"
-        << "lightShadowResolution " << lightShadowResolution << "\n"
-        << "shadowedLights " << shadowedLights << "\n"
-        << "rayTraced " << (rayTraced ? 1 : 0) << "\n"
-        << "rayTracing " << lightingName(rayTracing) << "\n"
-        << "ambientOcclusion " << (ambientOcclusion ? 1 : 0) << "\n"
-        << "bloom " << (bloom ? 1 : 0) << "\n"
-        << "lightShafts " << lightShafts << "\n"
-        << "volumetricClouds " << (volumetricClouds ? 1 : 0) << "\n"
-        << "cloudSteps " << cloudSteps << "\n"
-        << "cloudResolution " << cloudResolution << "\n"
-        << "detailDistance " << detailDistance << "\n";
-    return out.str();
+bool GameQuality::readLine(const std::vector<std::string>& words) {
+    if (words.size() < 2) return false;
+    const std::string& key = words[0];
+    float n = std::strtof(words[1].c_str(), nullptr);
+    bool on = words[1] != "0";
+    if (key == "renderScale") renderScale = n;
+    else if (key == "metalFX") metalFX = on;
+    else if (key == "dynamicResolution") dynamicResolution = on;
+    else if (key == "targetFrameRate") targetFrameRate = n;
+    else if (key == "lowestScale") lowestScale = n;
+    else if (key == "followsDeviceHeat") followsDeviceHeat = on;
+    else if (key == "antiAliasing") antiAliasing = int(n);
+    else if (key == "shadows") shadows = on;
+    else if (key == "shadowReach") shadowReach = n;
+    // Files of before said meters, a limit for every scene: the share of the 150 m it was at High.
+    else if (key == "shadowDistance") shadowReach = std::clamp(n / 150.0f, 0.25f, 2.0f);
+    else if (key == "shadowResolution") shadowResolution = int(n);
+    else if (key == "shadowCascades") shadowCascades = int(n);
+    else if (key == "lightShadowResolution") lightShadowResolution = int(n);
+    else if (key == "shadowedLights") shadowedLights = int(n);
+    else if (key == "rayTraced") rayTraced = on;
+    else if (key == "tracedShadows") tracedShadows = on;
+    else if (key == "shadowRays") shadowRays = int(n);
+    else if (key == "tracedOcclusion") tracedOcclusion = on;
+    else if (key == "occlusionRays") occlusionRays = int(n);
+    else if (key == "tracedBounce") tracedBounce = on;
+    else if (key == "tracedReflections") tracedReflections = on;
+    else if (key == "reflectionRoughness") reflectionRoughness = n;
+    else if (key == "rayTracing") {
+        // Version 2 said how well in one word: the rays and roughness that level had.
+        static const char* const names[4] = {"Low", "Medium", "High", "Ultra"};
+        static const int edge[4] = {4, 6, 8, 12}, around[4] = {1, 1, 2, 3};
+        static const float roughest[4] = {0.15f, 0.25f, 0.4f, 0.55f};
+        for (int i = 0; i < 4; i++) {
+            if (words[1] == names[i]) shadowRays = edge[i], occlusionRays = around[i], reflectionRoughness = roughest[i];
+        }
+    }
+    else if (key == "ambientOcclusion") ambientOcclusion = on;
+    else if (key == "bloom") bloom = on;
+    else if (key == "lightShafts") lightShafts = int(n);
+    else if (key == "lightsInAir") lightsInAir = on;
+    else if (key == "motionBlur") motionBlur = on;
+    else if (key == "depthOfField") depthOfField = on;
+    else if (key == "volumetricClouds") volumetricClouds = on;
+    else if (key == "cloudSteps") cloudSteps = int(n);
+    else if (key == "cloudResolution") cloudResolution = n;
+    else if (key == "detailDistance") detailDistance = n;
+    else if (key == "lightProbes") lightProbes = on;
+    else return false;                  // from a newer engine: skipped
+    return true;
+}
+
+QualityLevels QualityLevels::standard() {
+    QualityLevels all;
+    for (GameQuality::Level level : {GameQuality::Level::Low, GameQuality::Level::Medium, GameQuality::Level::High, GameQuality::Level::Ultra}) {
+        all.levels.push_back(GameQuality::preset(level));
+    }
+    all.start = "High";
+    return all;
+}
+
+const GameQuality* QualityLevels::find(const std::string& name) const {
+    for (const GameQuality& level : levels)
+        if (level.name == name) return &level;
+    return nullptr;
+}
+
+GameQuality* QualityLevels::find(const std::string& name) {
+    for (GameQuality& level : levels)
+        if (level.name == name) return &level;
+    return nullptr;
+}
+
+int QualityLevels::indexOf(const std::string& name) const {
+    for (size_t i = 0; i < levels.size(); i++)
+        if (levels[i].name == name) return int(i);
+    return -1;
+}
+
+const GameQuality& QualityLevels::starting() const {
+    static const GameQuality fallback = GameQuality::preset(GameQuality::Level::High);
+    if (const GameQuality* found = find(start)) return *found;
+    return levels.empty() ? fallback : levels.front();
+}
+
+std::string QualityLevels::freeName(const std::string& wanted) const {
+    std::string base = wanted.empty() ? std::string("Level") : wanted;
+    if (!find(base)) return base;
+    for (int n = 2;; n++) {
+        std::string name = base + " " + std::to_string(n);
+        if (!find(name)) return name;
+    }
+}
+
+std::vector<std::string> QualityLevels::names() const {
+    std::vector<std::string> out;
+    for (const GameQuality& level : levels) out.push_back(level.name);
+    return out;
+}
+
+std::optional<QualityLevels> QualityLevels::parse(const std::string& text) {
+    std::vector<std::vector<std::string>> lines = text::parseLines(text);
+    if (lines.empty() || lines[0].empty() || lines[0][0] != "molten-quality") return std::nullopt;
+    int version = lines[0].size() > 1 ? std::max(std::atoi(lines[0][1].c_str()), 1) : 1;
+    if (version > text::newestVersion("molten-quality")) return std::nullopt;
+
+    if (version < 3) {
+        // One level of values: the standard four, and that one as the file says it.
+        QualityLevels all = standard();
+        std::string named;
+        GameQuality one = *all.find("High");
+        for (size_t i = 1; i < lines.size(); i++) {
+            const std::vector<std::string>& words = lines[i];
+            if (words.empty()) continue;
+            if (words[0] == "level" && words.size() > 1) {
+                named = words[1];
+                if (const GameQuality* preset = all.find(named)) one = *preset;
+            } else {
+                one.readLine(words);
+            }
+        }
+        // A file of before the groups (version 1) at one of the four: that level as it is now. Any
+        // other (values of its own, "Custom") is those values, as High.
+        bool isOneOfThem = !named.empty() && all.find(named);
+        if (version >= 2 || !isOneOfThem) {
+            if (!isOneOfThem) named = "High";
+            one.name = named;
+            *all.find(named) = one;
+        }
+        all.start = named;
+        return all;
+    }
+
+    QualityLevels all;
+    GameQuality* current = nullptr;
+    for (size_t i = 1; i < lines.size(); i++) {
+        const std::vector<std::string>& words = lines[i];
+        if (words.empty()) continue;
+        if (words[0] == "start" && words.size() > 1) {
+            all.start = words[1];
+        } else if (words[0] == "level" && words.size() > 1) {
+            // A level starts from the one of the standard four of its name (or High), and the
+            // file says the rest: a value a newer engine added is the preset's here.
+            GameQuality level = GameQuality::preset(GameQuality::Level::High);
+            for (GameQuality::Level known : {GameQuality::Level::Low, GameQuality::Level::Medium, GameQuality::Level::Ultra}) {
+                if (words[1] == GameQuality::levelName(known)) level = GameQuality::preset(known);
+            }
+            level.name = all.freeName(words[1]);
+            all.levels.push_back(level);
+            current = &all.levels.back();
+        } else if (current) {
+            current->readLine(words);
+        }
+    }
+    if (all.levels.empty()) return standard();
+    if (!all.find(all.start)) all.start = all.levels.front().name;
+    return all;
+}
+
+std::string QualityLevels::toText() const {
+    std::string out = "molten-quality 3\n";
+    out += "start " + text::quote(start) + "\n";
+    for (const GameQuality& level : levels) {
+        out += "level " + text::quote(level.name) + "\n";
+        for (const std::string& line : level.toLines()) out += "  " + line + "\n";
+    }
+    return out;
 }
 
 }  // namespace molten

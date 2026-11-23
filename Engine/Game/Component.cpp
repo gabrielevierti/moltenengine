@@ -131,8 +131,9 @@ void ComponentRegistry::add(ComponentType type) {
             // The engine's own, declared after the game's (in a program the game's code is
             // linked into): the game's stays, and the engine's waits behind it.
             if (existing.module != nullptr && type.module == nullptr) {
-                // Filed where the engine files its own, unless the game's says otherwise.
-                if (existing.category.empty() || existing.category == "Scripts") existing.category = type.category;
+                // Filed where the engine files its own, unless the game's says otherwise. (One the
+                // engine no longer offers is the game's to offer: it stays with the scripts.)
+                if ((existing.category.empty() || existing.category == "Scripts") && type.category != "Hidden") existing.category = type.category;
                 auto waiting = std::find_if(replaced.begin(), replaced.end(), [&](const ComponentType& r) { return r.name == type.name; });
                 if (waiting != replaced.end()) *waiting = std::move(type);
                 else replaced.push_back(std::move(type));
@@ -141,7 +142,7 @@ void ComponentRegistry::add(ComponentType type) {
             // A game's own Follow takes the place of the one that comes with the engine,
             // which is kept for when the game's code is not there.
             if (existing.module == nullptr && type.module != nullptr) {
-                if (type.category.empty() || type.category == "Scripts") type.category = existing.category;
+                if ((type.category.empty() || type.category == "Scripts") && existing.category != "Hidden") type.category = existing.category;
                 replaced.push_back(existing);
             }
             existing = std::move(type);
@@ -166,6 +167,10 @@ void ComponentRegistry::removeModule(const void* module) {
 
 void ComponentRegistry::setCategory(const std::string& name, const std::string& category) {
     for (ComponentType& type : types_) {
+        // A game's own script of that name is offered, whatever the engine does with its own.
+        if (type.name == name && !(category == "Hidden" && type.module != nullptr)) type.category = category;
+    }
+    for (ComponentType& type : replaced) {
         if (type.name == name) type.category = category;
     }
 }

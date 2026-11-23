@@ -48,7 +48,7 @@ A change to any of it is written in the ROADMAP's release notes with what to do 
 - [Scene/Components.hpp](#scenecomponentshpp): The components the engine itself understands. Rendering, physics and particle
 - [Scene/Scene.hpp](#scenescenehpp): A small entity-component system.
 - [Scene/SceneFile.hpp](#scenescenefilehpp): Scenes as text files: what an editor saves and a game loads.
-- [Script/Convert.hpp](#scriptconverthpp): A visual script written out as C++: the same events, the same steps in the same order,
+- [Script/Convert.hpp](#scriptconverthpp): A visual script written out as C++, and what the C++ made from one runs with.
 - [Script/Graph.hpp](#scriptgraphhpp): A visual script: boxes ("nodes") joined by wires. This file is the script as data;
 - [Script/Runtime.hpp](#scriptruntimehpp): Runs visual scripts (Script/Graph).
 - [UI/Gui.hpp](#uiguihpp): A small immediate-mode user interface for tools: panels, buttons, number fields,
@@ -233,7 +233,8 @@ Every frame does the same things in the same order:
 - `void begin(Game& game);` — run() in three parts, for platforms where the system owns the loop and calls the program once per display refresh (iOS): begin() once, frame() each time until it returns false, end() once.
 - `void frameWhileEventsAreHeld();` — A frame that does not look at the window's events: drawn while the system holds them (a menu of the menu bar is open, the window is being resized), so that nothing stops. Only while a frame waits in the window's events, and never inside another one.
 - `void setDeveloperKeys(bool on);` — F1 statistics and the profiler, F2 colliders, F3 full screen, F4 a screenshot: on in a development build.
-- `void loadQuality(const std::string& settingsDirectory);` — The project's quality: read from its Settings/Quality.settings (none: High). Used by the renderer as each view is drawn.
+- `void loadQuality(const std::string& settingsDirectory);` — The project's quality levels: read from its Settings/Quality.settings (none: the standard four), the game at the one they start at. The level drawn at is `quality`, used by the renderer as each view is drawn.
+- `void setQualityLevels(const QualityLevels& levels, const std::string& shown = {});` — New levels (the editor, as they are changed), drawn at `shown` (or where they start).
 - `bool hasAudio() const;` — false where there is no sound device
 - `bool writeImage(const std::string& path, const std::vector<uint8_t>& pixels, int width, int height);` — Writes pixels (four bytes each: red, green, blue, alpha; rows from the top) as a PNG file.
 - `DebugDraw& debug();` — Lines in 3D for the next frame: engine.debug().line(a, b, color).
@@ -1617,7 +1618,7 @@ Before any of that, the renderer walks the scene once and builds plain lists of 
 
 - `struct SkySettings` — The colors are radiance, in the same units as light intensities. A clear sky is several times darker than a white wall in sunlight; keeping that ratio is what makes shadows read.
 - `struct WeatherSettings` — The weather of a scene (Kit/Weather.hpp): none by default.
-- `struct SeaSettings` — The scene's sea: water everywhere below a level, unless it is turned off (Environment > Water). Its waves are the wind's and the weather's (Environment > Weather): nothing here sets them. Under its level all is under water: seen through it from above, lit through it (dimmer and bluer the deeper, with the sun's light gathered into moving lines by the waves), and seen from inside it when the camera goes under. How it looks is set here, from a real sea to a lagoon in a cartoon. (Water of a game's own, a pond or a pool, is a surface shader: Assets > New > Water Shader.)
+- `struct SeaSettings` — The scene's sea: water everywhere below a level, unless it is turned off (Environment > Water). Its waves are the wind's and the weather's (Environment > Weather): nothing here sets them. Under its level all is under water: seen through it from above, lit through it (dimmer and bluer the deeper, with the sun's light gathered into moving lines by the waves), and seen from inside it when the camera goes under. How it looks is set here, from a real sea to a lagoon in a cartoon. (Water of a game's own, a pond or a pool, is a surface shader: Explorer > + New > Water Shader as Code.)
 - `inline Vec3 sunlightThroughAir(float height);` — What reaches the ground of sunlight that crosses the air, for a sun `height` (the sine of its elevation): white high up, gold, orange and red toward the horizon, none once it has set. Relative to the sun overhead.
 
 ### SkySettings
@@ -1769,23 +1770,20 @@ Meshes and textures are stored by name; the file never contains their data. Line
 
 ## Script/Convert.hpp
 
-A visual script written out as C++: the same events, the same steps in the same order, as a component a programmer can go on from. Each box of the graph becomes one call of the node of that name, so the code does exactly what the graph did.
+A visual script written out as C++, and what the C++ made from one runs with.
 
 ```cpp
-[On Update] ──▶ [Rotate degrees 180]        void update(World& world, Entity self, float dt) {
-                                                script::Call call(world, self, dt, state);
-                                                call("Rotate", {{"degrees", script::Value::number(180)}});
-                                            }
+[On Update] ──▶ [Rotate degrees speed]       void update(World& world, Entity self, float dt) {
+                                                  Transform* transform = world.scene.get<Transform>(self);
+                                                  if (!transform) return;
+                                                  transform->rotation = transform->rotation * axisAngle(Vec3{0, 1, 0}, radians((speed) * dt));
+                                              }
 ```
 
-The other way, from any C++ to a graph, cannot be done: code can say things boxes and wires have no shape for. Code that was made from a graph keeps the graph in a comment at its end, so that it can go back: the graph it was made from.
+Each box is the line of code it means, the script's variables are the component's fields, a box's comment is a comment above its line (Script/GraphToCpp.cpp). A box that has no line of its own (one a plugin added, one that acts on another entity) is called as it is: call("Type", {...}), which runs that very box. Script/CppToGraph reads all of it back to the same boxes. Code made from a graph also keeps the graph in a comment at its end: unchanged, it goes back to that very graph, as it was laid out.
 
 - `struct Call` — Runs single nodes from code: what the C++ made from a graph is written with.
-- `std::string graphToCpp(const Graph& graph, const std::string& name, const std::string& source);` — The C++ of a graph, as a component called `name`. `source` is where the graph came from, for the comment at the top.
-- `std::string graphToCppKeepingGraph(const Graph& graph, const std::string& name, const std::string& source);` — The same, with the graph kept in a comment at the end of the file: what can go back to boxes.
-- `std::optional<Graph> graphKeptIn(const std::string& code, bool* wasChanged = nullptr, std::string* name = nullptr);` — The graph kept in C++ made from one, if there is one. `wasChanged` is set to true if the code was edited after it was made: the graph is then the one it was made from, not what the code does now.
-- `std::string boxAsCppStatement(const Graph& graph, const Node& node);` — One box as a line of C++ that does what it does, for a box wired in among C++ boxes (Script/CppBoxes.hpp): it expects `world` and `self` where it is written, as a component's functions have them.
-- `std::string typeNameFor(const std::string& fileStem);` — A name that can be a C++ type: letters and digits, starting with a capital letter.
+- `inline Value asValue(Vec3 v);` — A point as a script::Value, and back: for a box called from code (call("...")).
 
 ### Call
 
@@ -1808,11 +1806,15 @@ A script is a text file (.graph) in the project's Assets:
 
 ```cpp
 molten-graph 1
+variable "speed" number "90" "How fast it turns, degrees a second"
 node 1 "OnUpdate" 80 80
 node 2 "Rotate" 320 80
   value "degrees" "90"
+  comment "Turns the wheel"
 link 1 "then" 2 "in"
 ```
+
+The variables are the script's own (a C++ component's fields): declared once, with a type, a first value and what they are for, and read and set by the Get and Set Variable boxes. A node's comment is shown when the pointer is on it, and written above its line in C++.
 
 - `enum PinType { Flow, Float, Bool, Vec3, String }`
 - `struct Value` — What travels along a colored wire. A value of one type can be read as another: a number as yes/no (not zero), a number as a point (the same in x, y and z), and so on.
@@ -1820,6 +1822,8 @@ link 1 "then" 2 "in"
 - `struct NodeDef` — A kind of node: what it is called, its pins, and what it does.
 - `class NodeLibrary` — Every kind of node there is. Script/Runtime adds the standard ones; a game or a plugin may add its own.
 - `struct Node`
+- `struct Variable` — A variable of the script: declared with a type and a first value. A C++ component's field.
+- `const char* pinTypeWord(PinType type);` — The words a file uses for a type: "number", "yes-no", "vector", "text".
 - `struct Link`
 - `struct Graph`
 
@@ -1847,6 +1851,12 @@ link 1 "then" 2 "in"
 
 - `float x = 0, y = 0;` — where it is drawn
 - `std::map<std::string, std::string> values;` — Values typed into inputs nothing is wired to, as text, by pin name.
+- `std::string comment;` — What it is for, in words: shown when the pointer is on it; a // comment above it in C++.
+
+### Variable
+
+- `std::string value;` — its first value, as text
+- `bool isShown = true;` — shown in the Inspector, to set for each entity (a C++ field the component declares)
 
 ### Link
 
@@ -1855,6 +1865,7 @@ link 1 "then" 2 "in"
 
 ### Graph
 
+- `std::vector<std::string> code;` — Members of a C++ component no box says (a function of its own, a table, a pointer), kept as they are written and written back the same: the graph runs only as C++ while it has any.
 - `const NodeLibrary* library = nullptr;` — The kinds of node it is made of: null for a visual script's (NodeLibrary::instance()); a shader graph has its own (Rendering/ShaderGraph.hpp). Not saved: whoever reads the file knows.
 - `void removeNode(int id);` — Removes a node and every wire on it.
 - `bool connect(int fromNode, const std::string& fromPin, int toNode, const std::string& toPin);` — Wires an output to an input. Refused (false) if the pins do not exist, if one is flow and the other is not, or if it would wire a node to itself. An input holds one value wire and a flow output leads to one place: an older wire there is replaced.
@@ -1869,6 +1880,8 @@ A script is run once per frame for every entity that has a VisualScript componen
 
 - `struct ScriptState` — What one entity's copy of a script remembers between frames.
 - `struct ExecContext` — What a node sees while it runs.
+- `struct ScriptProblem` — What went wrong as scripts ran, node by node: the Visual Script window marks the node (and the pin) in red with the message, until the script runs without it or is changed.
+- `struct ScriptProblems`
 - `struct Debugger` — Watching scripts as they run, for the editor's Visual Script panel: the last value that went along each colored wire, when each node last ran, and breakpoints. At a breakpoint the flow stops before the node, the game is held (wantsHold), and the node runs when it goes on.
 - `void registerStandardNodes();` — Adds the nodes that come with the engine to the NodeLibrary. Safe to call again.
 - `void runFrame(const Graph& graph, ExecContext context);` — One frame of one script on one entity: fires the events that happened. `context` supplies the scene, the input, the entity, dt and the state.
@@ -1898,6 +1911,17 @@ A script is run once per frame for every entity that has a VisualScript componen
 - `int depth = 0;` — of values asking values: stops a loop of wires
 - `std::string graphName;` — the script's file, for the Debugger
 - `Value input_(const char* pin);` — The value of one of the running node's inputs: from the wire, or what was typed in.
+- `void fail(const std::string& pin, const std::string& message);` — Says what went wrong in the running node, at one of its pins ("" for the node itself): the editor shows it on the node, and the console says it once.
+
+### ScriptProblem
+
+- `std::string graph;` — the script's file
+- `std::string pin;` — empty: the node as a whole
+- `double time = 0;` — the game time it last happened
+
+### ScriptProblems
+
+- `bool report(const ScriptProblem& problem);` — Notes one (once: the same again only moves its time). True if it is new.
 
 ### Debugger
 

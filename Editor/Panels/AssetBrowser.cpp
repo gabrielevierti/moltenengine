@@ -61,7 +61,6 @@ TileLook lookOf(AssetType type) {
 }
 
 class AssetBrowserPanel final : public Panel {
-    float viewerWidth_ = 360;
 
 public:
     AssetBrowserPanel() { title = "Explorer"; }
@@ -102,29 +101,10 @@ public:
         }
         ImGui::EndChild();
         ImGui::SameLine();
-        // What is chosen is shown at the right, in the viewer; nothing chosen, no viewer.
-        const AssetInfo* chosen = editor.selectedAsset.empty() ? nullptr : assets.find(editor.selectedAsset);
-        float room = ImGui::GetContentRegionAvail().x;
-        viewerWidth_ = std::clamp(viewerWidth_, 220.0f, std::max(220.0f, room - 200.0f));
-        ImGui::BeginChild("##contents", ImVec2(chosen ? room - viewerWidth_ - 8 : 0, 0));
+        // What is chosen is shown in the Inspector, as an entity of the scene is.
+        ImGui::BeginChild("##contents", ImVec2(0, 0));
         drawContents(editor);
         ImGui::EndChild();
-        if (chosen) {
-            ImGui::SameLine(0, 0);
-            ImVec2 at = ImGui::GetCursorScreenPos();
-            float height = ImGui::GetContentRegionAvail().y;
-            ImGui::InvisibleButton("##viewer-bar", ImVec2(8, height));
-            bool active = ImGui::IsItemActive(), hovered = ImGui::IsItemHovered();
-            if (hovered || active) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
-            if (active) viewerWidth_ -= ImGui::GetIO().MouseDelta.x;
-            ImGui::GetWindowDrawList()->AddLine(ImVec2(at.x + 4, at.y), ImVec2(at.x + 4, at.y + height),
-                                                ImGui::GetColorU32(active ? ImGuiCol_SeparatorActive : hovered ? ImGuiCol_SeparatorHovered : ImGuiCol_Separator), active || hovered ? 2.0f : 1.0f);
-            ImGui::SameLine(0, 0);
-            ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::GetStyleColorVec4(ImGuiCol_FrameBg));
-            if (ImGui::BeginChild("##viewer", ImVec2(0, 0), ImGuiChildFlags_AlwaysUseWindowPadding)) drawAssetViewer(editor);
-            ImGui::EndChild();
-            ImGui::PopStyleColor();
-        }
 
         drawDeleteConfirmation(editor);
     }
@@ -411,9 +391,19 @@ private:
         entries.push_back(MenuEntry::line());
         add("C++ Script...", [&editor] { editor.wantsNewScript = true; });      // asks for its name, makes it in Scripts and opens it
         add("Visual Script", file("New Script", ".graph", [] { return script::Graph::starter().toText(); }));
-        add("Shader", file("New Shader", ".shader", [] { return newSurfaceShaderText(); }));      // one that works, to change
-        add("Water Shader", file("Water", ".shader", [] { return newWaterShaderText(); }));       // water of the game's own: a pond, a pool, a lagoon
-        add("Shader Graph", file("New Shader Graph", ".shadergraph", [] { return newShaderGraphText(); }));      // a shader drawn: Window > Shader Graph
+        // A shader is drawn in the Shader Graph (opened as it is made); one written as code is for whoever wants to.
+        add("Shader", [this, &editor, folder] {
+            std::string path = editor.assets.uniquePath(folder, "New Shader", ".shader");
+            if (text::writeFile(editor.assets.absolutePath(path), newShaderGraphText())) {
+                editor.assets.refresh();
+                editor.currentFolder = folder;
+                editor.selectedAsset = path;
+                editor.openPanel("Shader Graph");
+                startRenaming(editor, path);
+            }
+        });
+        add("Shader as Code", file("New Shader", ".shader", [] { return newSurfaceShaderText(); }));        // one that works, to change
+        add("Water Shader as Code", file("Water", ".shader", [] { return newWaterShaderText(); }));        // water of the game's own: a pond, a pool, a lagoon
         add("Animator Controller", file("New Controller", ".animator", [] { return AnimatorController{}.toText(); }));
         add("Timeline", file("New Timeline", ".timeline", [] { return Timeline{}.toText(); }));       // a cutscene: Window > Timeline edits it
         // A particle system kept as a file: dropped into the scene it becomes one, as many times as wanted.
@@ -591,8 +581,8 @@ private:
                     editor.openPanel("Animation");
                 } else if (type == AssetType::Timeline) {
                     editor.openPanel("Timeline");
-                } else if (std::filesystem::path(path).extension() == ".shadergraph") {
-                    editor.openPanel("Shader Graph");
+                } else if (type == AssetType::Shader && isShaderGraphFile(editor.assets.absolutePath(path))) {
+                    editor.openPanel("Shader Graph");       // it shows the shader chosen
                 } else {
                     platform::openWithDefaultApplication(editor.assets.absolutePath(path));
                 }

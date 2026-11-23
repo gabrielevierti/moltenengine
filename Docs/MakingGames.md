@@ -6,8 +6,10 @@ This is the shortest way from an empty editor to something you can play: what co
 
 A new project starts empty, or from one of the six small games the editor's New Project page
 offers (**Car Game**, **Plane Game**, **Boat Game**, **Third Person Game**, **Shooter Game**, **Online Game**:
-see [Templates/README.md](../Templates/README.md)). Each is made only of the components that
-come with the engine, so everything in it can be changed in the Inspector.
+see [Templates/README.md](../Templates/README.md)). Each is made only of what the editor offers:
+components from Add Component, and the game's own scripts in its `Assets/Scripts` (the boat, the
+car's driver, the plane's pilot, the camera that chases them), so everything in it can be changed
+in the Inspector, and its code read and changed like any script.
 
 The larger example game is **Driving**: a Fiat 500 on a small circuit, to race four rivals or to lap against the clock.
 
@@ -51,7 +53,9 @@ them is its own code (a script, or a visual script):
 | Physics | Box, Sphere, Capsule and Mesh Collider, Rigidbody, Joint, Character Controller, Buoyancy, Rope, Cloth, Ragdoll |
 | Animation | Animator, Two Bone IK |
 | Audio | Audio Source, Reverb Zone |
-| Effects | Particle System, Liquid |
+| Effects | Particle System, Liquid, Explosion |
+| Player | Character Mover, Orbit Camera, First Person Look |
+| Gameplay | Collectible, Health, Damage, Goal, Spin, Shuttle, Lifetime, When / Then |
 | Navigation | Navigation Area, Nav Agent |
 | Paths | Spline, Spline Follower, Spline Road |
 | Vehicles | Vehicle Body, Wheel, Suspension, Deformable Tire, Bumper, Motor, Wing, Hinge, Propeller |
@@ -59,13 +63,16 @@ them is its own code (a script, or a visual script):
 | Network | Network Session, Networked |
 | Miscellaneous | Saveable |
 
-A player that walks, a camera that follows, a pickup, a gun, a goal: those are the game's own
-scripts. The templates come with theirs (the Shooter Game's gun, plates, hunters and supplies are
-in its `Assets/Scripts`), to read, copy and change. The engine's components that once did such
-things (PlayerMover, Follow, Spin, Mover, Lifetime, Collectible, Health, Damage, Shooter, Spawner,
-Goal, Shuttle, Explosion, Flicker, Character Mover, Orbit Camera, First Person Look, Weapon,
-Boat and the vehicles' controls, When / Then...) still work in the scenes that have them, and
-their code is in `Engine/Kit` to copy from, but Add Component does not offer them any more.
+The Player and Gameplay pieces are what **Entity > Characters** and **Entity > Gameplay** put
+together (a player that walks with its camera, a coin, a trigger zone, a goal). Anything more
+particular is the game's own scripts: what drives a boat, a car or a plane, a camera that chases
+it, a gun. The templates come with theirs in `Assets/Scripts` (the Boat Game's `Boat` and
+`Follow`, the Car Game's `DriveControls`, the Plane Game's `FlightControls`, the Shooter Game's
+gun, plates, hunters and supplies), to read, copy and change. A script takes the place of an
+engine component of the same name, and is offered under Add Component with the other scripts.
+The engine's components that once did such things (PlayerMover, Follow, Mover, Shooter, Spawner,
+Flicker, Weapon, Boat and the vehicles' controls...) still work in the scenes that have them, and
+their code is in `Engine/Kit` to copy from, but Add Component does not offer them.
 
 ### Shared values
 
@@ -184,7 +191,7 @@ no longer names the file.
 
 **Project** shows the assets with pictures made from the files: a model as its shape, a material as a lit ball, a sound as its wave, a scene or a prefab as a plan from above, a visual script as its boxes, code as its first lines. **Add Component** in the inspector is sorted as Unity's is (Mesh, Rendering, Physics, Audio, Effects, UI, Vehicles, Gameplay, Scripts) and can be searched; each component's menu has Reset, Copy Values, Paste Values and Remove.
 
-**Inspector and Viewer.** The Inspector is for the things of the scene: what is chosen in the view or the Hierarchy, and nothing else. Each component has an icon by its name (a cube for a mesh, a bulb for a light, a speaker for a sound, braces for a script), so they are told apart at a glance; titles inside one (a material's Surface, Textures) are lines, not more folding headers. With nothing chosen, the Inspector shows the scene at a glance, what was chosen lately, and tiles to make the usual things. The Viewer is for the things of the Explorer, and it is part of the Explorer: choose an asset (or a folder) and it opens at the Explorer's right, as wide as its bar is dragged; close it with its **x** or by clicking empty space. A right click anywhere in the Explorer offers what can be made there. Choosing in one never unchooses the other, so a material in the Viewer can be dragged onto the entity in the Inspector.
+**Inspector.** The Inspector shows what was chosen last: an entity in the view or the Hierarchy, or an asset (or a folder) in the Explorer. Each component has an icon by its name (a cube for a mesh, a bulb for a light, a speaker for a sound, braces for a script), so they are told apart at a glance; titles inside one (a material's Surface, Textures) are lines, not more folding headers. With nothing chosen, the Inspector shows the scene at a glance, what was chosen lately, and tiles to make the usual things. Choose an asset and the Inspector shows it: a model to turn, a picture, a sound to play and trim, a material, a text or script with its words colored by kind and its lines numbered; its **x** goes back to the chosen entity. A right click anywhere in the Explorer offers what can be made there. An asset shown in the Inspector can still be dragged onto an entity in the Hierarchy or the view.
 
 **Menus.** On a Mac they are in the Mac's own menu bar, at the top of the screen, as every program's are, and only there, in full screen too. **Molten Engine v1.3** (the program's own menu, named with its version) has About, **Preferences** (Cmd+,: autosave, the editor's look, and every shortcut, searchable and changed by pressing the new keys) and Quit. **File** has the scenes (new, open, save), the projects (new, open, recent, close, Save Project as Template) and **Build Settings** (Shift+Cmd+B), which makes the game into an application. **Edit** has undo, cut, copy and paste, the selection, Find and **Search Everything** (Cmd+K, which finds any command by name, with the entities and the assets), Play, and **Project Settings**: what the game is (its name, version, icon and first scene), Quality, Input, Physics, Tags and Layers. **Assets** makes and imports files; **Entity** makes things and arranges them (Unity's GameObject); **Component** adds one to what is selected; **Window** opens the windows (the layouts are at the top right), and has **Full Screen** (as the window's green button does): the whole screen but the Mac's menu bar, which stays with the menus in it, and no title bar; the Dock hides until the pointer goes down to it; **Help** has the manuals. Each command is in one place, with its keys beside it. The Scene view's **Gizmos** button chooses what it shows besides the scene, the outline of every collider among it. **Simulate** (in the Scene view and the Game view) lets what moves by itself move while you edit: particles, water's waves, plants swaying in the wind, the clouds. It is off by default, and then all of it stands still except while such a thing is selected (a particle system, a water or swaying material), so that it can be tuned while it is seen moving; the button is lit whenever it moves. The **Profiler** has three pages: the frame's time, what the scene holds (Scene), and what it weighs (Memory). The **Input** page of Project Settings shows a controller and a keyboard, lit as they are pressed (and whether a controller is connected), with what the chosen action is bound to in orange; **Bind by Pressing** takes the next key or button.
 
@@ -206,13 +213,17 @@ if (std::optional<SaveGame> saved = world.loadGame()) level = int(saved->number(
 
 `world.hasSavedGame()`, `world.deleteSavedGame()` and `world.savedGames()` (the slots there are) go with them.
 
-**Phones that heat up.** `world.deviceHeat()` says how hot the device is (0 cool to 3 very hot) and `world.isSavingBattery()` whether Low Power Mode is on. When it is hot the renderer already draws the scene smaller until it cools (Rendering > Quality); a game can do more, such as fewer effects. **Dynamic Resolution** (in the same place) draws the scene smaller whenever the GPU falls behind the frame rate it is given, and **MetalFX Upscaling** makes a smaller picture the screen's size with sharp edges.
+**Phones that heat up.** `world.deviceHeat()` says how hot the device is (0 cool to 3 very hot) and `world.isSavingBattery()` whether Low Power Mode is on. When it is hot the renderer already draws the scene smaller until it cools (Project Settings > Quality > Resolution); a game can do more, such as a lighter quality level. **Dynamic Resolution** (in the same place) draws the scene smaller whenever the GPU falls behind the frame rate it is given, and **MetalFX Upscaling** makes a smaller picture the screen's size with sharp edges.
 
 **Shipping.** In the Build window, **Send to App Store Connect** archives an iPhone and iPad game for release and uploads it: it appears under TestFlight, and from there goes to review. The app must exist in App Store Connect with the project's identifier, and Xcode must be signed in to your account; the build number is the date and time, so each upload is new. For the Mac, **For other Macs** signs the exported game with your Developer ID certificate and has Apple notarize it, so it opens on any Mac; once, in Terminal: `xcrun notarytool store-credentials molten --apple-id <your Apple ID> --team-id <your team>`. **Development** marks an export as a development build, where F1 shows the statistics and the profiler.
 
 **Shaders ahead of time.** With the Metal compiler installed (Xcode > Settings > Components > Metal Toolchain), `build.command` compiles the engine's shaders first: a mistake in them is reported there, and the engine starts without compiling them. Without it, nothing changes: the engine compiles them as it starts.
 
-**What the Scene view shows.** The arrow beside Snap opens its steps and the list of what is drawn over the scene: the grid (1 m squares near the ground, 10 m and 100 m from higher up, so it is there from far away too), the outline of what is selected, the colliders of everything, lights, cameras, particle effects, sounds, and what plugins draw. Each kind can be switched off, and its icons are then not clicked either. **Sound** at the right of the Game view's bar silences the game while you work, without changing its own settings. Pieces of the interface that are switched off (a menu the game opens later) are not chosen or moved by clicks in the Game view; choose them in the Hierarchy and switch them on to lay them out.
+**What the Scene view shows.** The scene as it is, through the editor's own camera: what a game's
+camera does to the picture (drops on the glass coming out of the water, lens distortion, color
+fringes, grain, interference, vignette, dirt on the lens, depth of field, motion blur) is only in
+the Game view. The light is the same in both (exposure, tone mapping, bloom, color grading), so
+what is lit is judged rightly. The arrow beside Snap opens its steps and the list of what is drawn over the scene: the grid (1 m squares near the ground, 10 m and 100 m from higher up, so it is there from far away too), the outline of what is selected, the colliders of everything, lights, cameras, particle effects, sounds, and what plugins draw. Each kind can be switched off, and its icons are then not clicked either. **Sound** at the right of the Game view's bar silences the game while you work, without changing its own settings. Pieces of the interface that are switched off (a menu the game opens later) are not chosen or moved by clicks in the Game view; choose them in the Hierarchy and switch them on to lay them out.
 
 **Explorer.** Right-click anywhere in it (the folder tree, a folder, the empty space, inside any folder) for New with every kind of asset, Import and Reveal. The size slider goes down to a list. **Console** is Unity's: errors, warnings, info and debug messages, each kind shown or hidden by its button with its count; Collapse folds repeats into one row with a count; Clear on Play; a search; click a row for the whole message below, to copy.
 
@@ -316,7 +327,7 @@ Shaders were already read again as they change; code is built again by itself.
 
 ## What uses what
 
-The Viewer says, for the asset chosen in the Explorer, what uses it and what it uses
+The Inspector says, for the asset chosen in the Explorer, what uses it and what it uses
 ("Used by 2, uses 1"): the scenes and prefabs that put a model in, the materials that paint a
 picture on, the scripts that play a sound. Click one to go to it. With nothing chosen, **Find
 Assets Nothing Uses** lists the pictures, models, sounds and materials no scene, prefab,
@@ -514,7 +525,7 @@ joystick is there.
 
 ## A game's own scripts
 
-A project's scripts are in `Assets/Scripts`, where the Explorer shows them: click one to read it in the Viewer, with the component it
+A project's scripts are in `Assets/Scripts`, where the Explorer shows them: click one to read it in the Inspector, with the component it
 declares and a button to add it to the selected object. The templates' own are there: `Follow.cpp`, `DriveControls.cpp`, `Motor.cpp`,
 `FlightControls.cpp`. They are built when the project opens and whenever a file changes. (A `Source` folder beside Assets, where
 scripts were before, is still built.) A script with the name of a component that comes with the engine takes its
@@ -578,32 +589,45 @@ afterwards, as a camera does: exposure and tone mapping (none by default), bloom
 saturation, temperature, tint, grading, sharpen), and the lens and the film: vignette, distortion,
 color fringes, dirt on the glass lit up by the bloom, grain.
 
-**Project Settings > Quality** is how well the game draws as it ships, the same for every scene.
-A scene says what it wants to look like (where its sun is, whether its clouds have depth, how
-far its shadows should reach); the quality says how much of that the machine is asked for, and
-all that a scene has no say in, ray tracing first. Four levels, **Low, Medium, High** (where a project starts) and
-**Ultra**, and under them seven groups that can each be at a level of their own with the
-L M H U buttons at the right of their row, or opened to set their values one by one (Ray Tracing has
-one more button before them, **Off**):
+**Project Settings > Quality** is how well the game draws, the same for every scene. A scene says
+what it wants to look like (where its sun is, whether its clouds have depth, how far its shadows
+should reach); a quality level says how much of that the machine is asked for, and all that a
+scene has no say in, ray tracing first.
+
+The levels are the game's own. A new project has four, **Low, Medium, High** and **Ultra**, and
+every value of each can be changed: choose a level in the row at the top and its values are all
+under it, in seven groups. **+** makes a new level from the one chosen ("Handheld", "Cinematic",
+"Battery Saver"); the name field renames it; the arrows put it earlier or later in the list (the
+game's menu shows them in that order); **Delete** takes it away; **Start Here** makes it the level
+the game starts at (marked with a star). **Copy From...** on a group's row sets that group as
+another level has it, or as Molten's own Low, Medium, High or Ultra. The editor draws at the level
+chosen there, so a change shows at once.
 
 | Group | What it decides |
 |---|---|
-| Resolution | How many pixels are drawn before the picture is made the screen's size (MetalFX keeps it sharp), and **dynamic resolution**: fewer pixels while the GPU cannot keep the frame rate, more again when it can |
+| Resolution | How many pixels are drawn before the picture is made the screen's size (MetalFX keeps it sharp), and **dynamic resolution**: fewer pixels while the GPU cannot keep the frame rate given, down to the smallest share given, more again when it can; smaller when the device is hot |
 | Anti-Aliasing | Multisampling: off, 2x or 4x |
-| Shadows | Shadows on or off; how far the sun's shadows reach, as a share of what each scene asks (Window > Lighting > Shadows > Distance: half at Low, half again at Ultra); the shadow map's size and how many slices; how many point and spot lights may cast shadows at once, and how sharp |
-| Ray Tracing | **Off**, or on at **Low, Medium, High or Ultra**. On, all of the light is found with rays at every level: the sun's **shadows** (sharp where things touch, soft away from them), the **light around things** (the sky's light hidden where it really is, and **bounced light**: a red wall in the sun tints the floor) and **reflections**. A higher level sends more rays along shadows' edges and for the light around things, and mirrors rougher things. Off, or where the GPU cannot trace rays: shadow maps, the screen's ambient occlusion, reflections of the sky. The whole project's Low level has it off |
-| Effects | The screen's ambient occlusion, bloom, the steps of light shafts |
-| Sky | Clouds with depth or flat, in how many steps, into how large a picture |
-| Detail | How far the far levels of LOD groups and painted foliage last |
+| Shadows | Shadows on or off; how far the sun's shadows reach, as a share of what each scene asks (Window > Lighting > Shadows > Distance); the shadow map's size and how many slices; how many point and spot lights may cast shadows at once, and how sharp |
+| Ray Tracing | On or off, and each part on its own: the sun's **shadows** (and how many rays along their edges), the **light around things** (and how many rays a pixel), **bounced light** (a red wall in the sun tints the floor), **reflections** (and the roughest surface that still mirrors). Off, or where the GPU cannot trace rays: shadow maps, the screen's ambient occlusion, reflections of the sky |
+| Effects | The screen's ambient occlusion, bloom, the steps of light shafts, lights that light the air, motion blur, depth of field |
+| Sky | Clouds with depth or flat, in how many steps, into how large a picture (a share of the screen's size, never under 35%, however small the scene is drawn) |
+| Detail | How far the far levels of LOD groups and painted foliage last; whether the baked light probes are used |
 
-**Low** is meant to still look good on the slowest machine the game runs on: a little smaller and
-made sharp by MetalFX, shadow maps half as far as each scene asks, the screen's ambient occlusion, light shafts and
-clouds with depth, walked coarsely; only ray tracing is off. **Ultra** is the best the engine
-draws at 60 frames a second on a recent Mac (an M3): 4x multisampling, shadows half again as far as a scene asks, at 4096,
-the most rays (twelve along a shadow's edge, three for the light around things, mirrors on
-rougher things), clouds with depth in 64 steps, the finest light shafts, and detail that lasts
-half as far again; every pixel while the GPU keeps up, a few fewer, made sharp by MetalFX, while
-it cannot. Every level keeps its frame rate that way.
+The game's own settings menu lists the levels and lets the player choose: `world.qualityLevels()`
+gives their names, `world.qualityLevel()` the one in use, `world.setQualityLevel("Low")` changes
+it from the next frame. In a visual script, **Set Quality Level**, **Next Quality Level** (a button
+that goes round them) and **Quality Level**. The choice is not kept by itself: keep it in a
+SaveGame and set it again when the game starts.
+
+Molten's **Low** is meant to still look good on the slowest machine the game runs on: a little
+smaller and made sharp by MetalFX, 2x multisampling, shadow maps not quite as far as each scene
+asks, the screen's ambient occlusion, light shafts and clouds with depth, walked coarsely but into a
+picture large enough to stay soft; only ray tracing is off. **Ultra** is the best the engine draws
+at 60 frames a second on a recent Mac (an M3): 4x multisampling, shadows half again as far as a
+scene asks, at 4096, the most rays (twelve along a shadow's edge, three for the light around things,
+mirrors on rougher things), clouds with depth in 64 steps, the finest light shafts, and detail that
+lasts half as far again. Every level keeps its frame rate by drawing fewer pixels while the GPU
+cannot keep up.
 
 What makes it cheap: the clouds are walked for one pixel in four each frame, in turn, and the rest
 kept from the frames before, moved to where they are now seen (a quarter of the cost, and smoother
@@ -721,12 +745,12 @@ are not used.
 
 ## Water, mist and traced light
 
-- **Water** is the scene's sea (Environment > Water; its waves are the wind's and the weather's), or a shader of the game's own (Assets > New > Water Shader). `Buoyancy` on a body makes it float on the sea.
+- **Water** is the scene's sea (Environment > Water; its waves are the wind's and the weather's), or a shader of the game's own (Explorer > + New > Water Shader as Code). `Buoyancy` on a body makes it float on the sea.
 - **Fog** has *Thins With Height* (it lies low, as mist does), *Glow Toward Sun* and *Light Shafts*, in Environment > Fog:
   with shafts the fog glows only where the sun reaches it, and what stands in the sun's way casts beams of shadow through the mist
   (with shadow maps, not with ray traced sun shadows).
 - **Clouds Have Depth** (Environment > Clouds) makes the clouds volumes one looks through, lit from the sun's side.
-- **Ray tracing** is in Project Settings > Quality: off, or on at Low, Medium, High or Ultra, and on it traces all of
+- **Ray tracing** is in Project Settings > Quality, each part of it on or off for each quality level; on, it traces
   the light: the sun's shadows; the sky's light hidden where something is really in the way; bounced light (global
   illumination, one bounce: the same rays bring back the light of what they hit, so a red wall in the sun tints the
   floor beside it); and reflections of what is around on smooth surfaces (rougher ones keep the sky's soft
@@ -962,7 +986,7 @@ folder it shows (onto the Scene view, they are copied and a model or a prefab is
 anywhere else, into the Explorer's folder). **Import...** does the same from a list.
 
 **Into the scene**: drag a model from the Explorer onto the Scene view (where the pointer is on the ground), onto the
-Hierarchy (in front of the Scene view's camera; onto a row, under that entity), or **Add to Scene** in the Viewer. It
+Hierarchy (in front of the Scene view's camera; onto a row, under that entity), or **Add to Scene** in the Inspector. It
 becomes an entity for the model, with one under it for each of its parts, in its place, each with its material. Its
 materials become files in Materials (`Materials/<model> <material>.material`), made once: change them as any other; its
 pictures are found beside the model as it names them, or by their name anywhere in the project (pictures are often moved
@@ -1009,7 +1033,7 @@ world is seen from inside the water: hazy, blue, its surface overhead a mirror b
 window where the sky shows through, bent.
 
 **Water of a game's own** (a pond, a pool, a lake above the sea, a cartoon lagoon) is a surface
-shader, as in Unity: **Assets > New > Water Shader** (or New Water Shader... in a material's Shader)
+shader, as in Unity: **Explorer > + New > Water Shader as Code** (or New Water Shader... in a material's Shader)
 makes one that already works, to change: it is told how deep the water is at each pixel
 (`in.behind`), the scene's wind (`in.wind`) and the time, and says the color, how much shows
 through, the ripples, the foam. Put it on a plane. (Scenes of before, whose water was a material,
@@ -1071,12 +1095,12 @@ body shell (`Body Paint`): it touches the walls, and lands on its roof, with its
 
 ## What the editor shows of an asset
 
-Thumbnails in the Explorer and the Viewer's pictures are computed on the processor
+Thumbnails in the Explorer and the Inspector's pictures are computed on the processor
 (`Editor/SoftRender.cpp`): a material is shown on a ball under a sun and a sky with the
 renderer's surface model and its own pictures; a scene or a prefab as what is in it, in its
 materials' colors and under its own sun, around where its camera is; a model turned a little.
 
-A sound in the Viewer can be changed and saved: louder or quieter, normalized, faded in and
+A sound in the Inspector can be changed and saved: louder or quieter, normalized, faded in and
 out, silenced, cut down or cut out, reversed, filtered low or high, made to loop without a
 click, mono or stereo, with a few steps of undo. The same operations are in
 `Audio/AudioEdit.hpp` (`molten::audio`) for a game's own clips.
@@ -1092,9 +1116,12 @@ a scene full of them costs nothing to build. In the game they all run.
 
 ## Shaders of your own
 
-**+ New > Shader** in the Explorer (or **New Shader...** in a material's Shader list) makes a
-`.shader` file: a surface shader, written by hand in Metal's shading language. It says what
-the surface is at each pixel; the engine lights it, shadows it and fogs it like any other.
+A shader says what a surface is at each pixel; the engine lights it, shadows it and fogs it like
+any other. **+ New > Shader** in the Explorer (or **New Shader...** in a material's Shader list)
+makes one drawn as a graph, and opens it in the Shader Graph (below). **+ New > Shader as Code**
+makes one written by hand in Metal's shading language, as here. Both are `.shader` files, and a
+material chooses either the same way; the Shader Graph's **Save as Code** turns a graph into code
+to go on from.
 
 ```
 properties {
@@ -1128,9 +1155,9 @@ the rest of the picture. In code: `material.shader = "Shaders/Lava.shader"` and
 
 ### Shader graphs
 
-**+ New > Shader Graph** in the Explorer (or **New** in **Window > Shader Graph**) makes a
-`.shadergraph`: the same kind of shader, drawn as boxes and wires on the board the visual
-scripts use, instead of written. Space (or a right click) adds a node; drag from a pin to wire it.
+**+ New > Shader** in the Explorer (or **+ New** in **Window > Shader Graph**) makes a shader
+drawn as boxes and wires on the board the visual scripts use, instead of written; a double click
+on it in the Explorer opens it there. Space (or a right click) adds a node; drag from a pin to wire it.
 
 - **Input**: UV, Position, Normal, View Direction, Time, Entity Tint, Wind, and **Material**: what
   the material's own settings and pictures made of the surface, before the graph.
@@ -1146,11 +1173,12 @@ scripts use, instead of written. Space (or a right click) adds a node; drag from
 
 It is saved as soon as the hand is off and every material using it changes at once; the window
 says what is wrong, if anything, and **Show Code** shows the surface shader the engine makes of
-it. A material chooses it under **Shader** exactly as it chooses a `.shader`.
+it, and **Save as Code** writes that code as a shader of its own. A material chooses it under
+**Shader** as it chooses any. (Graphs saved before 1.3 as `.shadergraph` files still work.)
 
 ## Import settings
 
-A picture, a model or a sound has **Import Settings** at the top of the Viewer: how the file
+A picture, a model or a sound has **Import Settings** at the top of the Inspector: how the file
 becomes what the game uses. The file is never changed; the settings are kept in its `.meta`
 (beside its identifier, so they follow it when it is renamed) and applied each time it loads.
 
@@ -1202,7 +1230,14 @@ it would be had it been born there: it leaves a smooth line, not a clump every f
 **Entity > UI** (the + of the Hierarchy) makes a basic piece of interface: a Panel, an Image, a
 Text, a Button, a Toggle, a Slider, a Text Field, a Bar, an Arc, a Layout, a Touch Stick. Anything
 more (a gauge, a menu, a health bar with a frame) is made of these, put under one another: each is
-an entity with one component.
+an entity with one component. The templates' dial is one: a full Arc as its face, an Arc for its
+track and one that fills with the value, and two Texts (`{speed:0}`, the value as a whole number,
+and the unit).
+
+A Text shows shared values in braces: `{score}`, `{speed:0}` rounded to a whole number,
+`{loading:percent}`, `{lap:time}` as a clock, `{weather:SUN|RAIN}` the word the value counts to.
+Its **Align** says which way the words run from where it is (Left, Center, Right); Auto runs
+them by the side of the screen it is anchored to.
 They are laid out in the **Game** view, where they are seen as the player will see them:
 click a piece to choose it, drag it into place, pull its lower right corner to resize it.
 

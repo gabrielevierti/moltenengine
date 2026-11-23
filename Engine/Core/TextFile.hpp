@@ -111,7 +111,7 @@ inline constexpr FileFormat kFileFormats[] = {
     {"molten-animator", 1, "an animator controller"},
     {"molten-timeline", 1, "a timeline"},
     {"molten-input", 1, "the input actions"},
-    {"molten-quality", 2, "the quality levels"},
+    {"molten-quality", 3, "the quality levels"},
     {"molten-game-settings", 1, "the game's settings"},
     {"molten-save", 1, "a saved game"},
     {"molten-lighting", 1, "a scene's baked light probes"},

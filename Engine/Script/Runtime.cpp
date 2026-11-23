@@ -165,6 +165,22 @@ Transform* transformOf(ExecContext& context) {
     return context.scene ? context.scene->get<Transform>(subject(context)) : nullptr;
 }
 
+/// A value made the type a variable is declared as.
+Value asType(const Value& value, PinType type) {
+    switch (type) {
+        case PinType::Float: return Value::number(value.asFloat());
+        case PinType::Bool: return Value::boolean(value.asBool());
+        case PinType::String: return Value::string(value.asString());
+        case PinType::Vec3: {
+            float x, y, z;
+            value.asVector(x, y, z);
+            return Value::vector(x, y, z);
+        }
+        case PinType::Flow: break;
+    }
+    return value;
+}
+
 /// What a node keeps between two runs (the index of a loop, when a cooldown ends), under a name no script would choose.
 Value& kept(ExecContext& context, const char* what) {
     static Value none;
@@ -212,6 +228,43 @@ Value ExecContext::input_(const char* pin) {
     auto typed = node->values.find(pin);
     if (typed != node->values.end()) return Value::fromText(definitionPin ? definitionPin->type : PinType::Float, typed->second);
     return definitionPin ? definitionPin->defaultValue : Value{};
+}
+
+void ExecContext::fail(const std::string& pin, const std::string& message) {
+    ScriptProblem problem{graphName, node ? node->id : 0, pin, message, time};
+    if (ScriptProblems::instance().report(problem)) {
+        const NodeDef* kind = node ? NodeLibrary::instance().find(node->type) : nullptr;
+        logWarning("%s, box %s%s%s: %s", graphName.empty() ? "a visual script" : graphName.c_str(), kind ? kind->title.c_str() : "?",
+                   pin.empty() ? "" : ", at ", pin.c_str(), message.c_str());
+    }
+}
+
+ScriptProblems& ScriptProblems::instance() {
+    static ScriptProblems problems;
+    return problems;
+}
+
+bool ScriptProblems::report(const ScriptProblem& problem) {
+    for (ScriptProblem& known : list) {
+        if (known.graph == problem.graph && known.node == problem.node && known.pin == problem.pin && known.message == problem.message) {
+            known.time = problem.time;
+            return false;
+        }
+    }
+    if (list.size() > 500) list.erase(list.begin());
+    list.push_back(problem);
+    return true;
+}
+
+void ScriptProblems::clear(const std::string& graph) {
+    list.erase(std::remove_if(list.begin(), list.end(), [&](const ScriptProblem& p) { return p.graph == graph; }), list.end());
+}
+
+std::vector<ScriptProblem> ScriptProblems::of(const std::string& graph) const {
+    std::vector<ScriptProblem> out;
+    for (const ScriptProblem& p : list)
+        if (p.graph == graph) out.push_back(p);
+    return out;
 }
 
 Vec3 ExecContext::vector(const char* pin) {
@@ -441,6 +494,25 @@ void registerStandardNodes() {
            });
     value("GetValue", "Game", "Value", "A number the whole game shares; zero if nobody set it.", {string("name", "score", "value")}, {number("value")},
           [](ExecContext& context, int) { return Value::number(context.world ? context.world->value(context.string("name")) : 0.0f); });
+    // The quality levels the game's maker made (Project Settings > Quality), for a settings menu.
+    action("SetQualityLevel", "Game", "Set Quality Level", "Draws the game at one of its quality levels from the next frame (Project Settings > Quality).",
+           {string("level", "High")}, [](ExecContext& context) {
+               if (context.world) context.world->setQualityLevel(context.string("level"));
+           });
+    action("NextQualityLevel", "Game", "Next Quality Level", "The quality level after the one the game is drawn at, back to the first after the last: a button of a settings menu.",
+           {}, [](ExecContext& context) {
+               if (!context.world) return;
+               std::vector<std::string> levels = context.world->qualityLevels();
+               if (levels.empty()) return;
+               auto at = std::find(levels.begin(), levels.end(), context.world->qualityLevel());
+               size_t next = at == levels.end() ? 0 : (size_t(at - levels.begin()) + 1) % levels.size();
+               context.world->setQualityLevel(levels[next]);
+           });
+    value("QualityLevel", "Game", "Quality Level", "The quality level the game is drawn at, and how many levels there are.", {},
+          {string("level"), number("count")}, [](ExecContext& context, int output) {
+              if (output == 1) return Value::number(context.world ? float(context.world->qualityLevels().size()) : 0.0f);
+              return Value::string(context.world ? context.world->qualityLevel() : std::string());
+          });
     action("LoadScene", "Game", "Load Scene", "Goes to another scene: the next level, the menu.", {string("scene", "Scenes/Main.scene", "scene")},
            [](ExecContext& context) {
                if (context.world) context.world->loadScene(context.string("scene"));
@@ -645,10 +717,75 @@ void registerStandardNodes() {
           {number("result")},
           [](ExecContext& context, int) { return Value::number(context.flag("condition") ? context.number("ifYes") : context.number("ifNo")); });
 
+    value("GreaterOrEqual", "Logic", "At Least", "Yes if the first number is greater than the second, or the same.", {number("a"), number("b")}, {flag("result")},
+          [](ExecContext& context, int) { return Value::boolean(context.number("a") >= context.number("b")); });
+    value("LessOrEqual", "Logic", "At Most", "Yes if the first number is less than the second, or the same.", {number("a"), number("b")}, {flag("result")},
+          [](ExecContext& context, int) { return Value::boolean(context.number("a") <= context.number("b")); });
+    value("NotEqual", "Logic", "Not Equal", "Yes if the two numbers are not the same.", {number("a"), number("b")}, {flag("result")},
+          [](ExecContext& context, int) { return Value::boolean(context.number("a") != context.number("b")); });
+    value("Negate", "Math", "Negate", "The number with its sign turned: 3 becomes -3.", {number("value")}, {number("result")},
+          [](ExecContext& context, int) { return Value::number(-context.number("value")); });
+    value("Floor", "Math", "Floor", "The whole number at or below: 2.7 becomes 2, -2.7 becomes -3.", {number("value")}, {number("result")},
+          [](ExecContext& context, int) { return Value::number(std::floor(context.number("value"))); });
+
+    // ---- any component's fields, the game's own too, by name
+    auto componentNamed = [](ExecContext& context, const ComponentType*& type) -> void* {
+        type = ComponentRegistry::instance().find(context.string("component"));
+        if (!type) {
+            context.fail("component", "there is no component \"" + context.string("component") + "\"");
+            return nullptr;
+        }
+        Entity entity = subject(context);
+        void* component = type->get && context.scene ? type->get(*context.scene, entity) : nullptr;
+        if (!component) context.fail("on", "it has no " + type->name);
+        return component;
+    };
+    value("GetField", "Components", "Get Field", "A field of one of the entity's components, by name: a number, yes-no, vector or text.",
+          {string("component", "", "component"), string("field", ""), string("on", "self", "target")}, {number("value")},
+          [componentNamed](ExecContext& context, int) {
+              const ComponentType* type = nullptr;
+              void* component = componentNamed(context, type);
+              if (!component) return Value::number(0);
+              const Field* field = type->findField(context.string("field"));
+              if (!field) {
+                  context.fail("field", type->name + " has no field \"" + context.string("field") + "\"");
+                  return Value::number(0);
+              }
+              std::string text = field->valueText(component);
+              if (field->type == FieldType::Bool) return Value::boolean(text == "1" || text == "true");
+              if (field->type == FieldType::Vec3) return Value::fromText(PinType::Vec3, text);
+              if (field->type == FieldType::Float || field->type == FieldType::Int) return Value::number(std::strtof(text.c_str(), nullptr));
+              return Value::string(text);
+          });
+    action("SetField", "Components", "Set Field", "Sets a field of one of the entity's components, by name: the game's own components too.",
+           {string("component", "", "component"), string("field", ""), number("value"), string("on", "self", "target")},
+           [componentNamed](ExecContext& context) {
+               const ComponentType* type = nullptr;
+               void* component = componentNamed(context, type);
+               if (!component) return;
+               const Field* field = type->findField(context.string("field"));
+               if (!field) {
+                   context.fail("field", type->name + " has no field \"" + context.string("field") + "\"");
+                   return;
+               }
+               Value value = context.input_("value");
+               std::string text = field->type == FieldType::Bool ? (value.asBool() ? "1" : "0") : value.toText();
+               field->setValueText(component, text);
+           });
+
     // ---- memory
-    action("SetVariable", "Variables", "Set Variable", "Remembers a number under a name, for this entity.", {string("name", "score", "variable"), number("value")},
-           [](ExecContext& context) {
-               if (context.state) context.state->variables[context.string("name")] = Value::number(context.number("value"));
+    action("SetVariable", "Variables", "Set Variable", "Sets one of the script's variables (declared at the left of the window), for this entity.",
+           {string("name", "score", "variable"), number("value")}, [](ExecContext& context) {
+               if (!context.state) return;
+               std::string name = context.string("name");
+               Value value = context.input_("value");
+               // As the variable is declared: a vector stays a vector, a text a text.
+               if (const Variable* declared = context.graph ? context.graph->variable(name) : nullptr) {
+                   value = asType(value, declared->type);
+               } else if (context.graph && !context.graph->variables.empty()) {
+                   context.fail("name", "there is no variable \"" + name + "\": declare it at the left (+)");
+               }
+               context.state->variables[name] = value;
            });
     action("AddToVariable", "Variables", "Change Variable", "Adds to the number remembered under a name (a negative amount takes away): one more coin, one life less.",
            {string("name", "score", "variable"), number("amount", 1)}, [](ExecContext& context) {
@@ -656,11 +793,17 @@ void registerStandardNodes() {
                Value& kept = context.state->variables[context.string("name")];
                kept = Value::number(kept.asFloat() + context.number("amount"));
            });
-    value("GetVariable", "Variables", "Get Variable", "The number remembered under a name; zero if there is none.", {string("name", "score", "variable")},
-          {number("value")}, [](ExecContext& context, int) {
-              if (!context.state) return Value::number(0);
-              auto found = context.state->variables.find(context.string("name"));
-              return found == context.state->variables.end() ? Value::number(0) : found->second;
+    value("GetVariable", "Variables", "Get Variable", "One of the script's variables: what it was last set to, or its first value.",
+          {string("name", "score", "variable")}, {number("value")}, [](ExecContext& context, int) {
+              std::string name = context.string("name");
+              const Variable* declared = context.graph ? context.graph->variable(name) : nullptr;
+              if (context.state) {
+                  auto found = context.state->variables.find(name);
+                  if (found != context.state->variables.end()) return found->second;
+              }
+              if (declared) return Value::fromText(declared->type, declared->value);
+              if (context.graph && !context.graph->variables.empty()) context.fail("name", "there is no variable \"" + name + "\"");
+              return Value::number(0);
           });
 
     // ---- animation: the entity's Animator, as code drives it (setFloat, setBool, setTrigger,
@@ -730,6 +873,89 @@ void registerStandardNodes() {
           [](ExecContext& context, int) { return kept(context, "point"); });
     event("OnValueChanged", "On Value Changed", "When a shared value changes: the score, the lives, the keys collected.", {string("value", "score", "value")},
           {number("now")}, [](ExecContext& context, int) { return Value::number(context.world ? context.world->value(context.string("value")) : 0.0f); });
+
+    // ---- loops: again while something holds, or for each number of a range
+    {
+        NodeDef loop;
+        loop.type = "While";
+        loop.category = "Flow";
+        loop.title = "While";
+        loop.help = "Does what follows \"do\" again and again while the condition holds, then goes on from \"done\". (At most 10000 times a frame.)";
+        loop.inputs = {flow("in"), flag("condition")};
+        loop.outputs = {flow("do"), flow("done")};
+        loop.execute = [](ExecContext& context) -> const char* {
+            const Node* here = context.node;
+            const NodeDef* definition = context.definition;
+            int turns = 0;
+            for (; turns < kMaximumSteps; turns++) {
+                context.node = here;
+                context.definition = definition;
+                if (!context.flag("condition")) break;
+                runFlow(context, here, "do");
+                if (!context.scene->isAlive(context.self)) return nullptr;
+            }
+            context.node = here;
+            context.definition = definition;
+            if (turns == kMaximumSteps) context.fail("condition", "it still held after 10000 turns: the loop was stopped");
+            return "done";
+        };
+        NodeLibrary::instance().add(std::move(loop));
+
+        NodeDef count;
+        count.type = "For";
+        count.category = "Flow";
+        count.title = "For";
+        count.help = "Does what follows \"do\" once for each number from \"from\" up to (not including) \"to\", a step at a time; "
+                     "\"index\" is the number of the turn. Then goes on from \"done\".";
+        count.inputs = {flow("in"), number("from", 0), number("to", 10), number("step", 1)};
+        count.outputs = {flow("do"), flow("done"), number("index")};
+        count.execute = [](ExecContext& context) -> const char* {
+            const Node* here = context.node;
+            const NodeDef* definition = context.definition;
+            float from = context.number("from"), to = context.number("to"), step = context.number("step");
+            if (step == 0) {
+                context.fail("step", "a step of 0 never gets there");
+                return "done";
+            }
+            int turns = 0;
+            for (float i = from; (step > 0 ? i < to : i > to) && turns < kMaximumSteps; i += step, turns++) {
+                context.node = here;
+                kept(context, "index") = Value::number(i);
+                runFlow(context, here, "do");
+                if (!context.scene->isAlive(context.self)) return nullptr;
+            }
+            context.node = here;
+            context.definition = definition;
+            return "done";
+        };
+        count.evaluate = [](ExecContext& context, int) { return kept(context, "index"); };
+        NodeLibrary::instance().add(std::move(count));
+
+        NodeDef stop;
+        stop.type = "Return";
+        stop.category = "Flow";
+        stop.title = "Return";
+        stop.help = "Stops here: nothing after it in this flow is done (C++'s return).";
+        stop.inputs = {flow("in")};
+        stop.execute = [](ExecContext&) -> const char* { return nullptr; };
+        NodeLibrary::instance().add(std::move(stop));
+
+        // A line of C++ that no box says yet. It is kept as written, and written back as it is;
+        // run as a visual script it does nothing, and says so on the box.
+        NodeDef code;
+        code.type = "Code";
+        code.category = "C++";
+        code.title = "C++";
+        code.help = "A line of C++ that no box says yet: kept as it is written, and written back the same. A visual script does not run it: "
+                    "convert the script to C++ to run it, or replace it with boxes.";
+        code.inputs = {flow("in"), string("code", "")};
+        code.outputs = {flow("then")};
+        code.execute = [](ExecContext& context) -> const char* {
+            context.fail("", "C++ that no box says: it runs only as C++ (Convert to C++)");
+            return "then";
+        };
+        NodeLibrary::instance().add(std::move(code));
+    }
 
     // ---- more flow: one after the other, again and again, only so often
     {

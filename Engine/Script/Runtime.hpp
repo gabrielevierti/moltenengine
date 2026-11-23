@@ -61,6 +61,29 @@ struct ExecContext {
     bool flag(const char* pin) { return input_(pin).asBool(); }
     std::string string(const char* pin) { return input_(pin).asString(); }
     Vec3 vector(const char* pin);
+    /// Says what went wrong in the running node, at one of its pins ("" for the node itself): the
+    /// editor shows it on the node, and the console says it once.
+    void fail(const std::string& pin, const std::string& message);
+};
+
+/// What went wrong as scripts ran, node by node: the Visual Script window marks the node (and
+/// the pin) in red with the message, until the script runs without it or is changed.
+struct ScriptProblem {
+    std::string graph;                  // the script's file
+    int node = 0;
+    std::string pin;                    // empty: the node as a whole
+    std::string message;
+    double time = 0;                    // the game time it last happened
+};
+
+struct ScriptProblems {
+    static ScriptProblems& instance();
+    std::vector<ScriptProblem> list;
+    /// Notes one (once: the same again only moves its time). True if it is new.
+    bool report(const ScriptProblem& problem);
+    void clear(const std::string& graph);
+    void clear() { list.clear(); }
+    std::vector<ScriptProblem> of(const std::string& graph) const;
 };
 
 /// Watching scripts as they run, for the editor's Visual Script panel: the last value that went

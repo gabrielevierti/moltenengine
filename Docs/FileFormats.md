@@ -51,7 +51,7 @@ The versions this engine reads and writes are in one table, `kFileFormats` in
 | `molten-animator 1` | `.animator` | An Animator Controller: parameters, states, transitions |
 | `molten-timeline 1` | `.timeline` | A timeline: tracks of keys and marks in time |
 | `molten-input 1` | `Assets/Input.actions` | The game's input actions |
-| `molten-quality 2` | `Settings/Quality.settings` | How well the game draws, as it ships |
+| `molten-quality 3` | `Settings/Quality.settings` | The game's quality levels, and the one it starts at |
 | `molten-game-settings 1` | `Settings/Game.settings` | Gravity, physics steps, tags and layers |
 | `molten-save 1` | the player's save files | What a game saved with SaveGame |
 | `molten-lighting 1` | `.lighting`, beside its scene | A scene's baked light probes |
@@ -217,13 +217,22 @@ button "Fire" keys LeftControl mouse Left
 ## Quality and game settings
 
 ```
-molten-quality 2
-level High
-renderScale 1
-metalFX 1
-shadows 1
-shadowReach 120
+molten-quality 3
+start "High"
+level "Low"
+  renderScale 0.85
+  antiAliasing 2
+  rayTraced 0
+  cloudSteps 24
+level "High"
+  renderScale 1
+  rayTraced 1
+  shadowRays 8
 ```
+
+The game's quality levels, in the order its menu shows them, and the one it starts at. Each level
+lists every value it has (Rendering/Quality.hpp); one it leaves out is that of Molten's level of
+the same name, or High's. Version 2 held one level of values: it is read as that level of the four.
 
 ```
 molten-game-settings 1

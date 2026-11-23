@@ -1,7 +1,7 @@
 // Water.hpp
 // Water in a scene is its sea (Environment > Water): everywhere below a level, with the waves
 // the wind and the weather raise (RenderSettings::sea, Water/Waves.hpp). Water of a game's own,
-// a pond or a pool, is a surface shader it writes (Assets > New > Water Shader).
+// a pond or a pool, is a surface shader it writes (Explorer > + New > Water Shader as Code).
 //
 // Scenes of before said water other ways, and still read: a material whose shader was Water on
 // a plane, and before that a Water component beside it, which gave the sheet its size and the

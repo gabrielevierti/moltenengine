@@ -1,24 +1,36 @@
 // ShaderGraphPanel.cpp
-// The Shader Graph window: a `.shadergraph` on the same drawing board as the visual scripts,
-// made of the shader nodes (Rendering/ShaderGraph.hpp). Saved as soon as the hand is off; the
-// engine makes the shader's code from it, and every material that uses it changes at once.
-// Under the board, what is wrong (if anything) and the code it makes, to read.
+// The Shader Graph window: a shader (a `.shader` that is a graph) on the same drawing board as the
+// visual scripts, made of the shader nodes (Rendering/ShaderGraph.hpp). Saved as soon as the hand
+// is off; the engine makes the shader's code from it, and every material that uses it changes at
+// once. Under the board, what is wrong (if anything) and the code it makes, to read, or to keep
+// as a shader written as code.
 #include "Editor.hpp"
 #include "GraphEditor.hpp"
 #include "Panels/Pickers.hpp"
 #include "Panels/Widgets.hpp"
+#include "Panels/TextHighlight.hpp"
 
 #include "Core/TextFile.hpp"
 #include "Rendering/ShaderGraph.hpp"
 
 #include <filesystem>
+#include <unordered_map>
 
 namespace molten::editor {
 
 namespace {
 
-bool isShaderGraph(const std::string& path) {
-    return std::filesystem::path(path).extension() == ".shadergraph";
+/// Whether an asset is a shader drawn as a graph. Its first line is read once for each time the
+/// file is written.
+bool isShaderGraph(EditorContext& editor, const std::string& path) {
+    const AssetInfo* asset = path.empty() ? nullptr : editor.assets.find(path);
+    if (!asset || asset->type != AssetType::Shader) return false;
+    static std::unordered_map<std::string, std::pair<int64_t, bool>> known;
+    auto found = known.find(path);
+    if (found != known.end() && found->second.first == int64_t(asset->modified)) return found->second.second;
+    bool isGraph = isShaderGraphFile(editor.assets.absolutePath(path));
+    known[path] = {int64_t(asset->modified), isGraph};
+    return isGraph;
 }
 
 class ShaderGraphPanel final : public Panel {
@@ -35,8 +47,8 @@ public:
             ImGui::TextDisabled("Open a project to make shader graphs.");
             return;
         }
-        // A shader graph chosen in the Explorer is the one shown.
-        if (isShaderGraph(editor.selectedAsset) && editor.selectedAsset != path_) open(editor, editor.selectedAsset);
+        // A shader drawn as a graph, chosen in the Explorer, is the one shown.
+        if (editor.selectedAsset != path_ && isShaderGraph(editor, editor.selectedAsset)) open(editor, editor.selectedAsset);
         if (!path_.empty() && !editor.assets.find(path_)) {
             save(editor);
             path_.clear();
@@ -68,20 +80,18 @@ public:
             ImGui::TextDisabled("%s  The shader is made: materials using it show it now.", icon::Check);
         }
         if (showsCode_) {
-            ImGui::BeginChild("##code", ImVec2(0, codeHeight), ImGuiChildFlags_Borders);
-            ImGui::TextUnformatted(code_.c_str());
-            ImGui::EndChild();
+            codeView_.draw(code_, TextKind::Code, codeHeight);
         }
     }
 
 private:
     void drawToolbar(EditorContext& editor) {
         if (ImGui::Button("+ New")) createNew(editor);
-        ui::tooltip("A new shader graph in Assets/Shaders, ready to change");
+        ui::tooltip("A new shader in Assets/Shaders, ready to change");
         ImGui::SameLine();
         std::vector<std::string> graphs;
         for (const AssetInfo& asset : editor.assets.assets()) {
-            if (!asset.isFolder() && isShaderGraph(asset.path)) graphs.push_back(asset.path);
+            if (!asset.isFolder() && isShaderGraph(editor, asset.path)) graphs.push_back(asset.path);
         }
         std::string chosen = path_;
         if (pickFromList("##graph", chosen, graphs, false, 260) && chosen != path_) {
@@ -92,6 +102,9 @@ private:
         ImGui::SameLine(0, 16);
         if (ImGui::Button(showsCode_ ? "Hide Code" : "Show Code")) showsCode_ = !showsCode_;
         ui::tooltip("The surface shader the graph makes: what the engine compiles");
+        ImGui::SameLine();
+        if (ImGui::Button("Save as Code")) saveAsCode(editor);
+        ui::tooltip("Writes the code this graph makes as a shader of its own, to go on from by hand. The graph stays as it is");
         ImGui::SameLine();
         if (ImGui::Button("Fit")) board_.fitView();
         ImGui::SameLine();
@@ -130,7 +143,7 @@ private:
 
     void createNew(EditorContext& editor) {
         std::string folder = editor.assets.find("Shaders") ? "Shaders" : editor.assets.createFolder("", "Shaders");
-        std::string path = editor.assets.uniquePath(folder, "New Shader Graph", ".shadergraph");
+        std::string path = editor.assets.uniquePath(folder, "New Shader", ".shader");
         if (!text::writeFile(editor.assets.absolutePath(path), newShaderGraphText())) {
             editor.notify("Cannot create " + path, ConsoleMessage::Level::Error);
             return;
@@ -140,9 +153,26 @@ private:
         open(editor, path);
     }
 
+    void saveAsCode(EditorContext& editor) {
+        if (code_.empty()) {
+            editor.notify("The graph makes no code yet: " + error_, ConsoleMessage::Level::Warning);
+            return;
+        }
+        std::filesystem::path made(path_);
+        std::string folder = made.parent_path().generic_string();
+        std::string path = editor.assets.uniquePath(folder, made.stem().string() + " (Code)", ".shader");
+        if (!text::writeFile(editor.assets.absolutePath(path), code_)) {
+            editor.notify("Cannot write " + path, ConsoleMessage::Level::Error);
+            return;
+        }
+        editor.assets.refresh();
+        editor.notify("Wrote " + path + ": a material can use it as it uses the graph", ConsoleMessage::Level::Info);
+    }
+
     std::string path_, error_, code_;
     script::Graph graph_;
     GraphEditor board_;
+    HighlightedText codeView_;
     bool isUnsaved_ = false, showsCode_ = false;
 };
 

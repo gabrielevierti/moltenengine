@@ -296,6 +296,16 @@ public:
     /// Low Power Mode is on: a game may lower its frame rate or its quality.
     virtual bool isSavingBattery() const { return false; }
 
+    // ---- quality: the levels the game's maker made (Project Settings > Quality), for its settings menu
+
+    /// Their names, in the order they were made ("Low", "Medium", "High", "Ultra" in a new project).
+    virtual std::vector<std::string> qualityLevels() const { return {}; }
+    /// The one the game is drawn at now.
+    virtual std::string qualityLevel() const { return {}; }
+    /// Draws the game at another from the next frame. False if there is none of that name. The
+    /// choice is not kept by itself: keep it in a SaveGame, and set it again when the game starts.
+    virtual bool setQualityLevel(const std::string& name) { return false; }
+
     /// Plays a sound file from Assets ("Audio/coin.wav").
     /// `group`: "Effects" (also for ""), "Music", "Voices", "Interface", or one of the game's own.
     virtual void playSound(const std::string& name, float volume = 1.0f, const std::string& group = "") {}

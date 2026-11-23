@@ -595,12 +595,13 @@ link 6 "then" 7 "in"
     std::optional<script::Graph> graph = script::Graph::fromText(*text);
     CHECK(graph.has_value());
     std::string code = script::graphToCpp(*graph, script::typeNameFor("star pickup"), "Scripts/Star.graph");
+    if (std::getenv("SHOW_CPP")) text::writeFile("/tmp/star.cpp", code);
     CHECK(code.find("struct StarPickup {") != std::string::npos && code.find("MOLTEN_COMPONENT(StarPickup)") != std::string::npos);
     CHECK(code.find("void update(World& world, Entity self, float dt)") != std::string::npos);
-    CHECK(code.find("call(\"Rotate\", {{\"axis\", script::Value::vector(0, 1, 0)}, {\"degrees\", script::Value::number(180)}});") != std::string::npos);
+    CHECK(code.find("transform->rotation = transform->rotation * axisAngle(Vec3{0, 1, 0}, radians((180) * dt));") != std::string::npos);
     CHECK(code.find("void onTriggerEnter(World& world, Entity self, Entity other)") != std::string::npos);
     CHECK(code.find("if (call.value(\"OtherIs\", {{\"name\", script::Value::string(\"Player\")}}, \"result\").asBool()) {") != std::string::npos);
-    CHECK(code.find("call(\"DestroySelf\", {});") != std::string::npos);
+    CHECK(code.find("world.scene.destroy(self);") != std::string::npos);
     // Code made from a graph keeps it, and goes back to the same graph; edited, it says so.
     std::string kept = script::graphToCppKeepingGraph(*graph, "StarPickup", "Scripts/Star.graph");
     bool wasChanged = true;
@@ -1567,4 +1568,62 @@ TEST(the_shooter_templates_game_is_its_own_scripts) {
     // The scene names them as it named the engine's: a project's code takes their place.
     std::optional<std::string> scene = text::readFile((game / "Scenes/Main.scene").string());
     CHECK(scene && scene->find("component \"Weapon\"") != std::string::npos && scene->find("component \"Hunter\"") != std::string::npos);
+}
+
+#include "Game/Component.hpp"
+
+#include <regex>
+#include <sstream>
+#include <set>
+
+TEST(templates_are_made_only_of_what_the_editor_offers) {
+    // A game started from a template is made of what anyone can put in a game with the editor:
+    // components offered under Add Component, and the template's own scripts (Assets/Scripts),
+    // which a project can change. Nothing the engine keeps only for old scenes.
+    kit::registerKit();
+    namespace fs = std::filesystem;
+    fs::path root = fs::path(findRootDirectory()) / "Templates";
+    CHECK(fs::exists(root));
+    int templates = 0;
+    for (const fs::directory_entry& folder : fs::directory_iterator(root)) {
+        if (!folder.is_directory()) continue;
+        fs::path assets = folder.path() / "Assets";
+        if (!fs::exists(assets)) continue;
+        templates++;
+        // What its scripts declare.
+        std::set<std::string> scripted;
+        static const std::regex declared(R"(MOLTEN_COMPONENT\(\s*(\w+))");
+        if (fs::exists(assets / "Scripts")) {
+            for (const fs::directory_entry& file : fs::directory_iterator(assets / "Scripts")) {
+                std::optional<std::string> code = text::readFile(file.path().string());
+                if (!code) continue;
+                for (std::sregex_iterator it(code->begin(), code->end(), declared), end; it != end; ++it) scripted.insert((*it)[1].str());
+            }
+        }
+        // What its scenes and prefabs are made of.
+        static const std::regex used(R"re(^\s*component "(\w+)")re");
+        for (const fs::directory_entry& file : fs::recursive_directory_iterator(assets)) {
+            std::string extension = file.path().extension().string();
+            if (extension != ".scene" && extension != ".prefab") continue;
+            std::optional<std::string> text = text::readFile(file.path().string());
+            if (!text) continue;
+            std::istringstream lines(*text);
+            std::string line;
+            std::set<std::string> reported;
+            while (std::getline(lines, line)) {
+                std::smatch match;
+                if (!std::regex_search(line, match, used)) continue;
+                std::string name = match[1].str();
+                const ComponentType* type = ComponentRegistry::instance().find(name);
+                bool isOffered = type && type->category != "Hidden";
+                bool isFine = scripted.count(name) > 0 || isOffered;
+                if (!isFine && reported.insert(name).second) {
+                    std::fprintf(stderr, "    %s: %s uses %s, which the editor does not offer\n", folder.path().filename().string().c_str(),
+                                 file.path().filename().string().c_str(), name.c_str());
+                }
+                CHECK(isFine);
+            }
+        }
+    }
+    CHECK(templates >= 6);
 }

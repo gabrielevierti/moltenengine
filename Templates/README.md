@@ -4,15 +4,18 @@ A project folder put here is offered as a starting point in the editor's New Pro
 beside the empty project.
 
 The engine comes with six, each a small game that can be played the moment it opens and
-taken apart in the Inspector. None has code of its own: they are made of the kit's parts.
+taken apart in the Inspector. They are made only of what the editor offers: components from Add
+Component, and, for what drives a vehicle and the camera that chases it, a few scripts of their
+own in `Assets/Scripts` (Boat, Follow, DriveControls, FlightControls; the Shooter Game's gun and
+targets), which a project made from them can change.
 
 | Template | What it is | Made of |
 |---|---|---|
-| **Car Game** | A car, a circuit through a park, eight stars to collect, a yard with a ramp and crates to knock about | Vehicle Body, Wheel, Suspension, Motor, Drive Controls; Follow; Collectible, Goal; UI Gauge |
-| **Plane Game** | A light aeroplane, a runway, eight rings in the sky | Vehicle Body, Wing, Hinge, Propeller, Flight Controls (with the flying actions in Assets/Input.actions) |
-| **Boat Game** | A speedboat on a sea with waves, islands, ten buoys that float | a Water material, Rigidbody, Buoyancy, Boat |
+| **Car Game** | A car, a circuit through a park, eight stars to collect, a yard with a ramp and crates to knock about | Vehicle Body, Wheel, Suspension, Motor; the scripts DriveControls and Follow; Collectible, Goal; a dial of Arcs and Texts |
+| **Plane Game** | A light aeroplane, a runway, eight rings in the sky | Vehicle Body, Wing, Hinge, Propeller; the scripts FlightControls and Follow (with the flying actions in Assets/Input.actions) |
+| **Boat Game** | A speedboat on a sea with waves, islands, ten buoys that float | the scene's sea, Rigidbody, Buoyancy; the scripts Boat and Follow |
 | **Third Person Game** | A figure that walks, runs and jumps, with its animations, a camera the mouse turns, ten gems about a garden of stone | Character Controller, Character Mover, Orbit Camera; Animator with a controller (Animations/Player.animator) on a model with bones (Models/Figure.glb) |
-| **Shooter Game** | Seen from your own eyes: a rifle with a magazine to load, twelve plates to shoot down, four machines that hunt you about a training yard | Character Mover, First Person Look, Weapon; Shooting Target, Shuttle; Hunter, Health; Supply, Damage Flash; prefabs for what a shot and a machine leave (with its own keys in Assets/Input.actions) |
+| **Shooter Game** | Seen from your own eyes: a rifle with a magazine to load, twelve plates to shoot down, four machines that hunt you about a training yard | Character Mover, First Person Look, Shuttle, Health; the scripts Weapon, ShootingTarget, Hunter, Supply, DamageFlash; prefabs for what a shot and a machine leave (with its own keys in Assets/Input.actions) |
 
 | **Online Game** | The garden of the Third Person Game for several players: one hosts, the others join at its address, everyone has a figure of their own and the gems are counted for all | Network Session (its menu, its player prefab, its spawn points, its shared values), Networked on the player prefab, the gems and the crates |
 
@@ -22,7 +25,7 @@ is a When/Then) and the same rule: collect, or shoot down, everything and the Go
 ## How they are made
 
 In code, by the engine's own tests (`Tests/StarterGames.cpp`): each game is built from the
-kit's parts, written to a folder as a project, read back the way the player reads it and
+kit's parts (whose scripts in `Assets/Scripts` are the same code, written to be changed), written to a folder as a project, read back the way the player reads it and
 played without a screen with the keys a person would press. The car is driven round to every
 star, the aeroplane takes off and flies through its rings, the boat rounds its buoys, the
 figure is walked up the stairs and jumped from block to block to every gem, the yard is

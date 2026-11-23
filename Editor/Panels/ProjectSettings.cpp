@@ -171,253 +171,313 @@ private:
         }
     }
 
-    /// How well the game draws, as it ships: the same for every scene. Settings/Quality.settings.
+    /// How well the game draws: the same for every scene. Settings/Quality.settings.
     ///
-    /// The level of the whole at the top; under it the seven groups, each a row that says in a
-    /// line what it comes to and can be put at a level of its own with the four small buttons
-    /// at its right, or opened to set its values one by one.
+    /// The levels are the game's own: a row of them at the top (choose one to set it, + to add
+    /// one), what is done with the one chosen under it (its name, whether the game starts at it,
+    /// copy, move, delete), and then every value it has, in its seven groups. The editor draws at
+    /// the level chosen here, so a change is seen at once.
     static void drawQuality(EditorContext& editor) {
-        using Level = GameQuality::Level;
         using Group = GameQuality::Group;
-        GameQuality quality = editor.engine.quality ? *editor.engine.quality : GameQuality{};
-        bool changed = false;
-        ImDrawList* draw = ImGui::GetWindowDrawList();
-        const ImU32 accent = ImGui::GetColorU32(ImGuiCol_ButtonActive);
+        QualityLevels levels = editor.engine.qualityLevelsAll;
+        if (levels.levels.empty()) levels = QualityLevels::standard();
+        static std::string chosenName;
+        if (!levels.find(chosenName)) chosenName = editor.engine.quality && levels.find(editor.engine.quality->name) ? editor.engine.quality->name : levels.start;
+        int chosen = std::max(levels.indexOf(chosenName), 0);
+        bool changed = false, rechosen = false;
 
-        // ---- the level of the whole
-        float width = (ImGui::GetContentRegionAvail().x - 3 * 6) / 4;
-        for (int level = 0; level < 4; level++) {
-            if (level > 0) ImGui::SameLine(0, 6);
-            bool isOn = int(quality.level) == level;
+        // ---- the levels
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6);
+        float room = ImGui::GetContentRegionAvail().x - 36;
+        float width = std::clamp(room / float(levels.levels.size()) - 6, 70.0f, 170.0f);
+        for (size_t i = 0; i < levels.levels.size(); i++) {
+            const GameQuality& level = levels.levels[i];
+            if (i > 0) {
+                if (ImGui::GetCursorPosX() + width > room + 30) ImGui::NewLine();
+                else ImGui::SameLine(0, 6);
+            }
+            ImGui::PushID(int(i));
+            bool isOn = int(i) == chosen;
             ImGui::PushStyleColor(ImGuiCol_Button, isOn ? ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive) : ImGui::GetStyleColorVec4(ImGuiCol_Button));
-            if (ImGui::Button(GameQuality::levelName(Level(level)), ImVec2(width, 30))) {
-                quality = GameQuality::preset(Level(level));
-                changed = true;
+            std::string label = level.name == levels.start ? level.name + "  " + icon::Star : level.name;
+            if (ImGui::Button(label.c_str(), ImVec2(width, 30))) {
+                chosenName = level.name;
+                rechosen = true;
             }
             ImGui::PopStyleColor();
-            if (ImGui::IsItemHovered()) ui::tooltip(GameQuality::levelPurpose(Level(level)));
-        }
-        ImGui::Spacing();
-        ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextDisabled("%s", GameQuality::levelPurpose(quality.level));
-        ImGui::PopTextWrapPos();
-        ImGui::Spacing();
-
-        // ---- the groups
-        static const char* const icons[GameQuality::kGroupCount] = {"scaling", "grid-3x3", "sun-medium", "orbit", "sparkles", "cloud-sun", "trees"};
-        static const char* const about[GameQuality::kGroupCount] = {
-            "How many pixels the scene is drawn with before the picture is made the screen's size. Fewer is the surest way to a faster frame.",
-            "How smooth the edges of things are.",
-            "How far from the camera the sun's shadows reach, and how sharp they are. A scene may ask for less far.",
-            "All of the light found with rays, where the GPU can: the sun's shadows, the light around things and what it bounces, reflections. Off, or how well. For every scene.",
-            "The screen's ambient occlusion, bloom, and shafts of light through fog, where a scene has them.",
-            "Clouds with depth, where a scene has them, and how finely they are walked through.",
-            "How far the detail of far things lasts: the levels of LOD groups, painted foliage.",
-        };
-        static bool isOpen[GameQuality::kGroupCount] = {};
-        const float rowHeight = 44, levelWidth = 30, levelsWidth = levelWidth * 4 + 3;
-        for (int index = 0; index < GameQuality::kGroupCount; index++) {
-            Group group = Group(index);
-            Level at = quality.levelOf(group);
-            ImGui::PushID(index);
-            ImVec2 corner = ImGui::GetCursorScreenPos();
-            float rowWidth = ImGui::GetContentRegionAvail().x;
-            // Ray tracing has one more choice before its levels: none at all.
-            const bool isRayTracing = group == Group::RayTracing;
-            const float offWidth = isRayTracing ? 38.0f : 0.0f;
-            // The row: a click opens it.
-            if (ImGui::InvisibleButton("##row", ImVec2(rowWidth - levelsWidth - offWidth - 14, rowHeight))) isOpen[index] = !isOpen[index];
-            bool isHovered = ImGui::IsItemHovered();
-            if (isHovered) ui::tooltip(about[index]);
-            draw->AddRectFilled(corner, ImVec2(corner.x + rowWidth, corner.y + rowHeight), ImGui::GetColorU32(isHovered ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg), 6);
-            // An arrow, the group's icon, its name, and what it comes to.
-            float middle = corner.y + rowHeight * 0.5f;
-            ImVec2 arrow(corner.x + 14, middle);
-            ImU32 dim = ImGui::GetColorU32(ImGuiCol_TextDisabled), text = ImGui::GetColorU32(ImGuiCol_Text);
-            if (isOpen[index]) draw->AddTriangleFilled(ImVec2(arrow.x - 4, arrow.y - 2.5f), ImVec2(arrow.x + 4, arrow.y - 2.5f), ImVec2(arrow.x, arrow.y + 3.5f), dim);
-            else draw->AddTriangleFilled(ImVec2(arrow.x - 2.5f, arrow.y - 4), ImVec2(arrow.x + 3.5f, arrow.y), ImVec2(arrow.x - 2.5f, arrow.y + 4), dim);
-            ui::drawIcon(draw, ImVec2(corner.x + 38, middle), 15, icons[index], at == Level::Custom ? accent : dim);
-            float lineHeight = ImGui::GetTextLineHeight();
-            draw->AddText(ImVec2(corner.x + 58, middle - lineHeight - 1), text, GameQuality::groupName(group));
-            std::string summary = quality.summaryOf(group);
-            ImGui::PushClipRect(corner, ImVec2(corner.x + rowWidth - levelsWidth - offWidth - 18, corner.y + rowHeight), true);
-            draw->AddText(ImVec2(corner.x + 58, middle + 2), dim, summary.c_str());
-            ImGui::PopClipRect();
-
-            // Its level: four small buttons, joined, the one it is at lit (two, where two levels
-            // have the same values for it). None lit: its values are no level's.
-            static const char* const letters[4] = {"L", "M", "H", "U"};
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4);
-            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 4));
-            if (isRayTracing) {
-                // Off, and then how well: each of the four traces all of the light.
-                ImGui::SetCursorScreenPos(ImVec2(corner.x + rowWidth - levelsWidth - 8 - offWidth - 1, middle - 12));
-                ImGui::PushStyleColor(ImGuiCol_Button, !quality.rayTraced ? ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive) : ImGui::GetStyleColorVec4(ImGuiCol_WindowBg));
-                if (ImGui::Button("Off", ImVec2(offWidth, 24))) {
-                    quality.rayTraced = false;
-                    quality.findLevel();
-                    changed = true;
+            if (ImGui::IsItemHovered()) {
+                std::string about = level.name == levels.start ? "The game starts at this level. " : "";
+                for (GameQuality::Level known : {GameQuality::Level::Low, GameQuality::Level::Medium, GameQuality::Level::High, GameQuality::Level::Ultra}) {
+                    if (level.name == GameQuality::levelName(known)) about += GameQuality::levelPurpose(known);
                 }
-                ImGui::PopStyleColor();
-                ui::tooltip("No ray tracing: shadow maps (the Shadows group), the screen's ambient occlusion, reflections of the sky");
-            }
-            for (int level = 0; level < 4; level++) {
-                ImGui::SetCursorScreenPos(ImVec2(corner.x + rowWidth - levelsWidth - 8 + float(level) * (levelWidth + 1), middle - 12));
-                bool isOn = isRayTracing ? quality.rayTraced && quality.rayTracing == LightingQuality(level) : quality.isAt(group, Level(level));
-                ImGui::PushStyleColor(ImGuiCol_Button, isOn ? ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive) : ImGui::GetStyleColorVec4(ImGuiCol_WindowBg));
-                ImGui::PushID(level);
-                if (ImGui::Button(letters[level], ImVec2(levelWidth, 24))) {
-                    if (isRayTracing) {
-                        quality.rayTraced = true;
-                        quality.setRayTracing(LightingQuality(level));
-                        quality.findLevel();
-                    } else {
-                        quality.setGroup(group, Level(level));
-                    }
-                    changed = true;
-                }
-                ImGui::PopID();
-                ImGui::PopStyleColor();
-                if (ImGui::IsItemHovered()) {
-                    GameQuality shown = quality;
-                    if (isRayTracing) shown.rayTraced = true, shown.setRayTracing(LightingQuality(level));
-                    else shown.setGroup(group, Level(level));
-                    ui::tooltip((isRayTracing ? shown.summaryOf(group) : std::string(GameQuality::levelName(Level(level))) + ": " + shown.summaryOf(group)).c_str());
-                }
-            }
-            ImGui::PopStyleVar(2);
-            ImGui::SetCursorScreenPos(ImVec2(corner.x, corner.y + rowHeight + 4));
-            ImGui::Dummy(ImVec2(0, 0));
-
-            // ---- opened: its values, one by one
-            if (isOpen[index]) {
-                ImGui::Indent(18);
-                ImGui::Spacing();
-                bool edited = false;
-                switch (group) {
-                    case Group::Resolution: {
-                        edited |= ui::sliderFloat("Render Scale", quality.renderScale, 0.25f, 2.0f);
-                        ui::tooltip("Below 1 the scene is drawn smaller and made the screen's size: faster, a little softer");
-                        edited |= ui::checkbox("MetalFX Upscaling", quality.metalFX);
-                        ui::tooltip("A smaller picture is made the screen's size by MetalFX, which keeps it sharp, instead of being stretched");
-                        if (quality.metalFX && quality.renderScale >= 0.999f && !quality.dynamicResolution && !quality.followsDeviceHeat) {
-                            ignoredNote("At a Render Scale of 1, never drawn smaller: nothing to make larger.");
-                        }
-                        edited |= ui::checkbox("Dynamic Resolution", quality.dynamicResolution);
-                        ui::tooltip("While the GPU cannot keep up with the frame rate below, the scene is drawn smaller, and larger again when it can. A scene that traces rays is the first to need it");
-                        if (quality.dynamicResolution) {
-                            edited |= ui::dragFloat("Frame Rate to Keep", quality.targetFrameRate, 1.0f, 20.0f, 240.0f, "%.0f fps");
-                            edited |= ui::sliderFloat("Smallest", quality.lowestScale, 0.25f, 1.0f);
-                            ui::tooltip("Never smaller than this share of the render scale above");
-                        }
-                        edited |= ui::checkbox("Smaller When Hot", quality.followsDeviceHeat);
-                        ui::tooltip("On a phone or a laptop that gets hot, the scene is drawn smaller until it cools");
-                        break;
-                    }
-                    case Group::AntiAliasing: {
-                        int aa = quality.antiAliasing >= 4 ? 2 : quality.antiAliasing >= 2 ? 1 : 0;
-                        if (ui::combo("Multisampling", aa, {"Off", "2x", "4x"})) {
-                            quality.antiAliasing = aa == 2 ? 4 : aa == 1 ? 2 : 1;
-                            edited = true;
-                        }
-                        break;
-                    }
-                    case Group::Shadows: {
-                        edited |= ui::checkbox("Shadows", quality.shadows);
-                        {
-                            float percent = quality.shadowReach * 100.0f;
-                            if (ui::dragFloat("Reach##q", percent, 1.0f, 25.0f, 200.0f, "%.0f%%")) {
-                                quality.shadowReach = percent / 100.0f;
-                                edited = true;
-                            }
-                        }
-                        ui::tooltip("How far the sun's shadows reach, as a share of how far each scene asks (Lighting > Shadows > Distance): "
-                                    "50% half as far, which costs less; 150% farther, sharper far away");
-                        int resolution = quality.shadowResolution >= 4096 ? 2 : quality.shadowResolution >= 2048 ? 1 : 0;
-                        if (ui::combo("Resolution", resolution, {"1024", "2048", "4096"})) {
-                            quality.shadowResolution = resolution == 2 ? 4096 : resolution == 1 ? 2048 : 1024;
-                            edited = true;
-                        }
-                        edited |= ui::dragInt("Slices", quality.shadowCascades, 0.05f, 1, 4);
-                        ui::tooltip("Slices of the view, each with its shadow map: more keeps shadows sharp both near and far");
-                        if (quality.rayTraced && editor.engine.renderer().canTraceRays()) {
-                            ignoredNote("Ray Tracing is on: the sun's shadow is traced. Its maps (Resolution, Slices) are drawn only for the light shafts in the fog.");
-                        }
-                        edited |= ui::dragInt("Lights", quality.shadowedLights, 0.05f, 0, 48);
-                        ui::tooltip("Point and spot lights that cast shadows (those with Casts Shadows on): at most this many at once, "
-                                    "the nearest and brightest first. A spot light draws one shadow map, a point light six");
-                        int lightResolution = quality.lightShadowResolution >= 1024 ? 2 : quality.lightShadowResolution >= 512 ? 1 : 0;
-                        if (ui::combo("Light Resolution", lightResolution, {"256", "512", "1024"})) {
-                            quality.lightShadowResolution = lightResolution == 2 ? 1024 : lightResolution == 1 ? 512 : 256;
-                            edited = true;
-                        }
-                        break;
-                    }
-                    case Group::RayTracing: {
-                        // All of it here, for every scene: what is found with rays, and how many.
-                        const bool canTrace = editor.engine.renderer().canTraceRays();
-                        if (!canTrace) {
-                            ImGui::PushTextWrapPos(0.0f);
-                            ImGui::TextDisabled("%s", editor.engine.renderer().device().supportsRayTracing()
-                                                          ? "The ray tracing shaders did not compile here (see the console): shadow maps are used."
-                                                          : "This GPU does not trace rays: shadow maps are used here, whatever is chosen. Games keep the choice for the GPUs that can.");
-                            ImGui::PopTextWrapPos();
-                        }
-                        ImGui::PushTextWrapPos(0.0f);
-                        ImGui::TextDisabled("%s", quality.rayTraced
-                                                      ? "On, all of the light is found with rays: the sun's shadows, sharp where things touch and soft away from them; the light around things, hidden under a car or in a corner, and the light a sunlit wall throws on the floor; reflections of what is around. A higher level sends more rays along shadows' edges and for the light around things, and mirrors rougher things."
-                                                      : "Off: shadow maps (the Shadows group), the screen's own ambient occlusion, and reflections of the sky.");
-                        ImGui::PopTextWrapPos();
-                        ImGui::PushTextWrapPos(0.0f);
-                        ImGui::TextDisabled("About a ray and a half a pixel. With Dynamic Resolution on (Resolution, above) a GPU that cannot keep up draws fewer pixels, not fewer frames.");
-                        ImGui::PopTextWrapPos();
-                        break;
-                    }
-                    case Group::Effects: {
-                        edited |= ui::checkbox("Ambient Occlusion##q", quality.ambientOcclusion);
-                        if (quality.rayTraced && editor.engine.renderer().canTraceRays()) {
-                            ignoredNote("Ray Tracing is on: the rays find what hides the sky from each pixel. This, the screen's own, is not used.");
-                        }
-                        edited |= ui::checkbox("Bloom##q", quality.bloom);
-                        edited |= ui::dragInt("Light Shaft Steps", quality.lightShafts, 0.2f, 0, 48);
-                        ui::tooltip("The most steps a scene's shafts of light are walked in: 0 none");
-                        break;
-                    }
-                    case Group::Sky: {
-                        edited |= ui::checkbox("Clouds with Depth", quality.volumetricClouds);
-                        ui::tooltip("Off: every scene's clouds are a flat layer");
-                        if (quality.volumetricClouds) {
-                            edited |= ui::dragInt("Steps", quality.cloudSteps, 0.2f, 16, 128);
-                            ui::tooltip("How many steps each line of sight takes through the clouds: more is finer and slower");
-                            edited |= ui::sliderFloat("Size", quality.cloudResolution, 0.25f, 1.0f);
-                            ui::tooltip("The clouds are walked through into a picture this share of the scene's size. They are soft: half shows no loss and costs a quarter");
-                        }
-                        break;
-                    }
-                    case Group::Detail: {
-                        edited |= ui::sliderFloat("Distance", quality.detailDistance, 0.25f, 3.0f);
-                        ui::tooltip("0.5: detail lasts half as far; 2: twice");
-                        break;
-                    }
-                }
-                if (edited) {
-                    quality.findLevel();
-                    changed = true;
-                }
-                ImGui::Spacing();
-                ImGui::Unindent(18);
+                if (!about.empty()) ui::tooltip(about.c_str());
             }
             ImGui::PopID();
         }
-        if (quality.level == Level::Custom) {
-            ImGui::Spacing();
-            ImGui::TextDisabled("L M H U put one group at a level. A group with none lit has values of its own.");
+        ImGui::SameLine(0, 6);
+        if (ImGui::Button("+", ImVec2(30, 30))) {
+            GameQuality made = levels.levels[size_t(chosen)];
+            made.name = levels.freeName("New Level");
+            levels.levels.insert(levels.levels.begin() + chosen + 1, made);
+            chosenName = made.name;
+            changed = rechosen = true;
+        }
+        ui::tooltip("A new level, a copy of the one chosen: then set its values");
+        ImGui::PopStyleVar();
+        chosen = std::max(levels.indexOf(chosenName), 0);
+        GameQuality& level = levels.levels[size_t(chosen)];
+
+        // ---- what is done with the one chosen
+        ImGui::Spacing();
+        {
+            static char name[64];
+            static std::string nameFor;
+            if (nameFor != level.name) {
+                std::snprintf(name, sizeof name, "%s", level.name.c_str());
+                nameFor = level.name;
+            }
+            ImGui::SetNextItemWidth(std::min(ImGui::GetContentRegionAvail().x * 0.4f, 240.0f));
+            if (ImGui::InputText("##name", name, sizeof name, ImGuiInputTextFlags_EnterReturnsTrue) || ImGui::IsItemDeactivatedAfterEdit()) {
+                std::string wanted = name;
+                if (!wanted.empty() && wanted != level.name) {
+                    std::string unique = levels.freeName(wanted);
+                    if (levels.start == level.name) levels.start = unique;
+                    level.name = unique;
+                    chosenName = unique;
+                    nameFor.clear();
+                    changed = true;
+                }
+            }
+            ui::tooltip("Its name, as the game's settings menu shows it");
+            ImGui::SameLine();
+            bool isStart = levels.start == level.name;
+            ImGui::BeginDisabled(isStart);
+            if (ImGui::Button(isStart ? "The Game Starts Here" : "Start Here")) {
+                levels.start = level.name;
+                changed = true;
+            }
+            ImGui::EndDisabled();
+            ui::tooltip("The level a game starts at, until its player chooses another in the game's settings (World::setQualityLevel)");
+            ImGui::SameLine();
+            ImGui::BeginDisabled(chosen == 0);
+            if (ImGui::ArrowButton("##left", ImGuiDir_Left)) {
+                std::swap(levels.levels[size_t(chosen)], levels.levels[size_t(chosen - 1)]);
+                changed = true;
+            }
+            ImGui::EndDisabled();
+            ui::tooltip("Earlier in the list: the game's menu shows them in this order, usually from the lightest");
+            ImGui::SameLine(0, 2);
+            ImGui::BeginDisabled(chosen + 1 >= int(levels.levels.size()));
+            if (ImGui::ArrowButton("##right", ImGuiDir_Right)) {
+                std::swap(levels.levels[size_t(chosen)], levels.levels[size_t(chosen + 1)]);
+                changed = true;
+            }
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            ImGui::BeginDisabled(levels.levels.size() <= 1);
+            if (ImGui::Button("Delete")) {
+                std::string gone = level.name;
+                levels.levels.erase(levels.levels.begin() + chosen);
+                if (levels.start == gone) levels.start = levels.levels.front().name;
+                chosenName = levels.levels[size_t(std::min(chosen, int(levels.levels.size()) - 1))].name;
+                changed = rechosen = true;
+            }
+            ImGui::EndDisabled();
         }
         if (changed) {
-            editor.engine.setQuality(quality);
-            std::error_code code;
-            std::filesystem::create_directories(editor.project.settingsDirectory(), code);
-            if (!text::writeFile(editor.project.settingsDirectory() + "/Quality.settings", quality.toText())) editor.notify("Cannot write Settings/Quality.settings", ConsoleMessage::Level::Error);
+            // (The level chosen may be another now: drawn again next frame.)
+            saveQuality(editor, levels, chosenName);
+            return;
+        }
+        GameQuality& q = levels.levels[size_t(std::max(levels.indexOf(chosenName), 0))];
+        ImGui::Spacing();
+
+        // ---- its values, group by group
+        static const char* const icons[GameQuality::kGroupCount] = {"scaling", "grid-3x3", "sun-medium", "orbit", "sparkles", "cloud-sun", "trees"};
+        bool edited = false;
+        for (int index = 0; index < GameQuality::kGroupCount; index++) {
+            Group group = Group(index);
+            ImGui::PushID(index);
+            std::string header = std::string(GameQuality::groupName(group));
+            bool open = ImGui::CollapsingHeader(("##group" + std::to_string(index)).c_str(), ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+            ImVec2 min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
+            ImDrawList* draw = ImGui::GetWindowDrawList();
+            float middle = (min.y + max.y) * 0.5f;
+            ui::drawIcon(draw, ImVec2(min.x + 34, middle), 14, icons[index], ImGui::GetColorU32(ImGuiCol_Text));
+            draw->AddText(ImVec2(min.x + 50, middle - ImGui::GetTextLineHeight() * 0.5f), ImGui::GetColorU32(ImGuiCol_Text), header.c_str());
+            std::string summary = q.summaryOf(group);
+            float summaryX = min.x + 60 + ImGui::CalcTextSize(header.c_str()).x;
+            ImGui::PushClipRect(ImVec2(summaryX, min.y), ImVec2(max.x - 110, max.y), true);
+            draw->AddText(ImVec2(summaryX, middle - ImGui::GetTextLineHeight() * 0.5f), ImGui::GetColorU32(ImGuiCol_TextDisabled), summary.c_str());
+            ImGui::PopClipRect();
+            // Its values copied from another level, or from one of the four a new project has.
+            ImGui::SameLine(ImGui::GetContentRegionMax().x - 100);
+            if (ImGui::SmallButton("Copy From...")) ImGui::OpenPopup("copy");
+            if (ImGui::BeginPopup("copy")) {
+                ImGui::TextDisabled("%s from:", GameQuality::groupName(group));
+                for (const GameQuality& other : levels.levels) {
+                    if (other.name == q.name) continue;
+                    if (ImGui::MenuItem(other.name.c_str(), nullptr, q.sameGroup(group, other))) {
+                        q.copyGroup(group, other);
+                        edited = true;
+                    }
+                }
+                ImGui::Separator();
+                for (GameQuality::Level known : {GameQuality::Level::Low, GameQuality::Level::Medium, GameQuality::Level::High, GameQuality::Level::Ultra}) {
+                    GameQuality standard = GameQuality::preset(known);
+                    std::string item = std::string("Molten's ") + GameQuality::levelName(known);
+                    if (ImGui::MenuItem(item.c_str(), nullptr, q.sameGroup(group, standard))) {
+                        q.copyGroup(group, standard);
+                        edited = true;
+                    }
+                }
+                ImGui::EndPopup();
+            }
+            if (open) {
+                ImGui::Indent(14);
+                ImGui::PushTextWrapPos(0.0f);
+                ImGui::TextDisabled("%s", GameQuality::groupPurpose(group));
+                ImGui::PopTextWrapPos();
+                edited |= drawQualityGroup(editor, q, group);
+                ImGui::Spacing();
+                ImGui::Unindent(14);
+            }
+            ImGui::PopID();
+        }
+        if (edited) saveQuality(editor, levels, chosenName);
+        else if (rechosen) editor.engine.setQualityLevels(levels, chosenName);      // only drawn at another: nothing to write
+    }
+
+    /// The values of one group of a level. True if one was changed.
+    static bool drawQualityGroup(EditorContext& editor, GameQuality& q, GameQuality::Group group) {
+        using Group = GameQuality::Group;
+        bool edited = false;
+        const bool canTrace = editor.engine.renderer().canTraceRays();
+        switch (group) {
+            case Group::Resolution: {
+                edited |= ui::sliderFloat("Render Scale", q.renderScale, 0.25f, 2.0f);
+                ui::tooltip("Below 1 the scene is drawn smaller and made the screen's size: faster, a little softer. Above 1, drawn larger and made smaller: the finest edges");
+                edited |= ui::checkbox("MetalFX Upscaling", q.metalFX);
+                ui::tooltip("A smaller picture is made the screen's size by MetalFX, which keeps it sharp, instead of being stretched");
+                edited |= ui::checkbox("Dynamic Resolution", q.dynamicResolution);
+                ui::tooltip("While the GPU cannot keep up with the frame rate below, the scene is drawn smaller, and larger again when it can");
+                ImGui::BeginDisabled(!q.dynamicResolution);
+                edited |= ui::dragFloat("Frame Rate to Keep", q.targetFrameRate, 1.0f, 20.0f, 240.0f, "%.0f fps");
+                edited |= ui::sliderFloat("Smallest", q.lowestScale, 0.25f, 1.0f);
+                ui::tooltip("Never smaller than this share of the render scale above");
+                ImGui::EndDisabled();
+                edited |= ui::checkbox("Smaller When Hot", q.followsDeviceHeat);
+                ui::tooltip("On a phone or a laptop that gets hot, the scene is drawn smaller until it cools");
+                break;
+            }
+            case Group::AntiAliasing: {
+                int aa = q.antiAliasing >= 4 ? 2 : q.antiAliasing >= 2 ? 1 : 0;
+                if (ui::combo("Multisampling", aa, {"Off", "2x", "4x"})) {
+                    q.antiAliasing = aa == 2 ? 4 : aa == 1 ? 2 : 1;
+                    edited = true;
+                }
+                ui::tooltip("Each pixel's edges looked at 2 or 4 times. 2x costs little on Apple's GPUs");
+                break;
+            }
+            case Group::Shadows: {
+                edited |= ui::checkbox("Shadows", q.shadows);
+                ImGui::BeginDisabled(!q.shadows);
+                float percent = q.shadowReach * 100.0f;
+                if (ui::dragFloat("Reach##q", percent, 1.0f, 10.0f, 400.0f, "%.0f%%")) {
+                    q.shadowReach = percent / 100.0f;
+                    edited = true;
+                }
+                ui::tooltip("How far the sun's shadows reach, as a share of how far each scene asks (Lighting > Shadows > Distance)");
+                int resolution = q.shadowResolution >= 4096 ? 3 : q.shadowResolution >= 2048 ? 2 : q.shadowResolution >= 1024 ? 1 : 0;
+                if (ui::combo("Resolution", resolution, {"512", "1024", "2048", "4096"})) {
+                    q.shadowResolution = 512 << resolution;
+                    edited = true;
+                }
+                edited |= ui::dragInt("Slices", q.shadowCascades, 0.05f, 1, 4);
+                ui::tooltip("Slices of the view, each with its shadow map: more keeps shadows sharp both near and far");
+                edited |= ui::dragInt("Lights", q.shadowedLights, 0.05f, 0, 48);
+                ui::tooltip("Point and spot lights that cast shadows: at most this many at once, the nearest and brightest first");
+                int lightResolution = q.lightShadowResolution >= 2048 ? 3 : q.lightShadowResolution >= 1024 ? 2 : q.lightShadowResolution >= 512 ? 1 : 0;
+                if (ui::combo("Light Resolution", lightResolution, {"256", "512", "1024", "2048"})) {
+                    q.lightShadowResolution = 256 << lightResolution;
+                    edited = true;
+                }
+                ImGui::EndDisabled();
+                if (q.rayTraced && q.tracedShadows && canTrace) ignoredNote("Ray Tracing traces the sun's shadow: its maps are drawn only for the light shafts in the fog.");
+                break;
+            }
+            case Group::RayTracing: {
+                if (!canTrace) {
+                    ignoredNote(editor.engine.renderer().device().supportsRayTracing()
+                                    ? "The ray tracing shaders did not compile here (see the console): shadow maps are used."
+                                    : "This GPU does not trace rays: shadow maps are used here, whatever is chosen. A game keeps the choice for the GPUs that can.");
+                }
+                edited |= ui::checkbox("Ray Tracing", q.rayTraced);
+                ui::tooltip("Off: shadow maps (Shadows, above), the screen's own ambient occlusion, reflections of the sky");
+                ImGui::BeginDisabled(!q.rayTraced);
+                edited |= ui::checkbox("Sun's Shadows", q.tracedShadows);
+                ImGui::BeginDisabled(!q.tracedShadows);
+                edited |= ui::dragInt("Rays at the Edges", q.shadowRays, 0.1f, 1, 32);
+                ui::tooltip("Rays toward the sun where part of its disk shows: soft edges. One is enough everywhere else");
+                ImGui::EndDisabled();
+                edited |= ui::checkbox("Light Around Things", q.tracedOcclusion);
+                ui::tooltip("How much of the sky each pixel sees: dark under a car, in a corner");
+                ImGui::BeginDisabled(!q.tracedOcclusion);
+                edited |= ui::dragInt("Rays a Pixel", q.occlusionRays, 0.05f, 1, 16);
+                ImGui::EndDisabled();
+                edited |= ui::checkbox("Bounced Light", q.tracedBounce);
+                ui::tooltip("And the light those rays find: a sunlit wall lights the floor beside it");
+                edited |= ui::checkbox("Reflections", q.tracedReflections);
+                ImGui::BeginDisabled(!q.tracedReflections);
+                edited |= ui::sliderFloat("Roughest Mirrored", q.reflectionRoughness, 0.0f, 1.0f);
+                ui::tooltip("Surfaces smoother than this mirror what is around them; rougher ones the sky's blurred light");
+                ImGui::EndDisabled();
+                ImGui::EndDisabled();
+                break;
+            }
+            case Group::Effects: {
+                edited |= ui::checkbox("Ambient Occlusion##q", q.ambientOcclusion);
+                ui::tooltip("The screen's own darkening of corners and creases (traced light, where it is on, does it better)");
+                edited |= ui::checkbox("Bloom##q", q.bloom);
+                edited |= ui::dragInt("Light Shaft Steps", q.lightShafts, 0.2f, 0, 48);
+                ui::tooltip("The most steps a scene's shafts of light are walked in: 0 none");
+                edited |= ui::checkbox("Lights in the Air", q.lightsInAir);
+                ui::tooltip("Point and spot lights that light the fog they pass through (Light > Lights the Air)");
+                edited |= ui::checkbox("Motion Blur##q", q.motionBlur);
+                edited |= ui::checkbox("Depth of Field##q", q.depthOfField);
+                ui::tooltip("Both only where a scene has them (Post Processing)");
+                break;
+            }
+            case Group::Sky: {
+                edited |= ui::checkbox("Clouds with Depth", q.volumetricClouds);
+                ui::tooltip("Off: every scene's clouds are a flat layer");
+                ImGui::BeginDisabled(!q.volumetricClouds);
+                edited |= ui::dragInt("Steps", q.cloudSteps, 0.2f, 16, 128);
+                ui::tooltip("How many steps each line of sight takes through the clouds: more is finer and slower");
+                edited |= ui::sliderFloat("Size", q.cloudResolution, 0.35f, 1.0f);
+                ui::tooltip("The clouds are walked through into a picture this share of the screen's size, however small the scene is drawn. "
+                            "They are soft: half shows no loss and costs a quarter");
+                ImGui::EndDisabled();
+                break;
+            }
+            case Group::Detail: {
+                edited |= ui::sliderFloat("Distance", q.detailDistance, 0.25f, 3.0f);
+                ui::tooltip("How far the detail of far things lasts: 0.5 half as far, 2 twice");
+                edited |= ui::checkbox("Light Probes", q.lightProbes);
+                ui::tooltip("The light baked into a scene's Light Probe Volumes (Lighting > Baked Light)");
+                break;
+            }
+        }
+        return edited;
+    }
+
+    /// The levels, now: drawn by the editor at `shown`, and written to Settings/Quality.settings.
+    static void saveQuality(EditorContext& editor, const QualityLevels& levels, const std::string& shown) {
+        editor.engine.setQualityLevels(levels, shown);
+        std::error_code code;
+        std::filesystem::create_directories(editor.project.settingsDirectory(), code);
+        if (!text::writeFile(editor.project.settingsDirectory() + "/Quality.settings", levels.toText())) {
+            editor.notify("Cannot write Settings/Quality.settings", ConsoleMessage::Level::Error);
         }
     }
 

@@ -141,7 +141,7 @@ bool GraphEditor::drawNode(Graph& graph, Node& node, const NodeDef* definition, 
     bool changed = false;
     const float z = zoom_;
     const ImVec2 size = sizeOf(node, definition);
-    const bool holdsCode = isCppBox(node.type);
+    const bool holdsCode = isCppBox(node.type) || node.type == "Code";
     const float nodeWidth = size.x * z, titleHeight = kTitleHeight * z, rowHeight = kRowHeight * z;
     ImGui::PushID(node.id);
     size_t inputCount = definition ? definition->inputs.size() : 0, outputCount = definition ? definition->outputs.size() : 0;
@@ -182,6 +182,24 @@ bool GraphEditor::drawNode(Graph& graph, Node& node, const NodeDef* definition, 
     }
     std::string title = definition ? definition->title : node.type + " (unknown)";
     drawList->AddText(ImVec2(min.x + 25 * z, min.y + (titleHeight - ImGui::GetFontSize()) * 0.5f + 1.0f * z), IM_COL32(244, 245, 248, 255), title.c_str());
+    // It has a comment: a small mark at the end of its title (the comment itself on the title's tooltip).
+    if (!node.comment.empty() && node.type != "Code") {
+        ImVec2 at(max.x - 30 * z, min.y + titleHeight * 0.5f);
+        drawList->AddRectFilled(ImVec2(at.x - 6 * z, at.y - 5 * z), ImVec2(at.x + 6 * z, at.y + 3 * z), IM_COL32(150, 200, 140, 230), 2.5f * z);
+        drawList->AddTriangleFilled(ImVec2(at.x - 3 * z, at.y + 3 * z), ImVec2(at.x + 1 * z, at.y + 3 * z), ImVec2(at.x - 4 * z, at.y + 7 * z), IM_COL32(150, 200, 140, 230));
+    }
+    // What went wrong at it: a red ring, and the words under it (with the pin, if it was one).
+    if (problems) {
+        float below = max.y + 6 * z;
+        for (const script::ScriptProblem& problem : *problems) {
+            if (problem.node != node.id) continue;
+            drawList->AddRect(ImVec2(min.x - 3, min.y - 3), ImVec2(max.x + 3, max.y + 3), IM_COL32(240, 80, 70, 230), round + 3, 0, 2.5f);
+            std::string words = (problem.pin.empty() ? std::string() : pinLabel(problem.pin) + ": ") + problem.message;
+            drawList->AddText(nullptr, ImGui::GetFontSize(), ImVec2(min.x, below), IM_COL32(255, 120, 110, 255), words.c_str(), nullptr, std::max(nodeWidth, 260.0f * z));
+            below += ImGui::CalcTextSize(words.c_str(), nullptr, false, std::max(nodeWidth, 260.0f * z)).y + 2 * z;
+            problemPins_.insert(key(node.id, problem.pin, false));
+        }
+    }
     if (debug) {
         // Ran just now: lit, fading over half a second. Held before it: a thick yellow ring.
         if (debug->ran) {
@@ -235,7 +253,18 @@ bool GraphEditor::drawNode(Graph& graph, Node& node, const NodeDef* definition, 
         }
         changed = true;
     }
-    if (definition && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) ImGui::SetTooltip("%s", definition->help.c_str());
+    // On the title: its comment (what it is for, written by whoever made it) above what the box does.
+    if (definition && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) {
+        ImGui::BeginTooltip();
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+        if (!node.comment.empty()) {
+            ImGui::TextUnformatted(node.comment.c_str());
+            ImGui::Separator();
+        }
+        ImGui::TextDisabled("%s", definition->help.c_str());
+        ImGui::PopTextWrapPos();
+        ImGui::EndTooltip();
+    }
     if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
         if (!selected) selection_ = {node.id};
         menuNode_ = node.id;
@@ -253,6 +282,7 @@ bool GraphEditor::drawNode(Graph& graph, Node& node, const NodeDef* definition, 
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("While the game runs, it is held when the flow comes to this node, before it runs");
             ImGui::Separator();
         }
+        if (ImGui::MenuItem(node.comment.empty() ? "Add Comment..." : "Edit Comment...")) commentFor_ = node.id;
         if (ImGui::MenuItem(selection_.size() > 1 ? "Delete Nodes" : "Delete Node")) {
             std::set<int> doomed = selection_;
             doomed.insert(node.id);
@@ -359,7 +389,7 @@ bool GraphEditor::drawNode(Graph& graph, Node& node, const NodeDef* definition, 
         };
         std::string comment = cppBoxComment(node), code = cppBoxText(node);
         if (!comment.empty()) lines(comment, IM_COL32(118, 162, 116, 255), "// ");
-        if (!code.empty()) lines(code, IM_COL32(226, 229, 236, 255), "");
+        if (!code.empty()) lines(code, node.type == "Code" ? IM_COL32(244, 204, 140, 255) : IM_COL32(226, 229, 236, 255), "");
         else if (comment.empty()) lines(node.type == "CppFile" ? "(a line end)" : "(nothing yet: double-click to write it)", IM_COL32(120, 126, 138, 255), "");
         drawList->PopClipRect();
         // Double-clicked: its code in a window of its own, to change.
@@ -371,7 +401,11 @@ bool GraphEditor::drawNode(Graph& graph, Node& node, const NodeDef* definition, 
         } else if (ImGui::IsItemActivated() && !ImGui::GetIO().KeyShift && !selected) {
             selection_ = {node.id};
         }
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal) && !ImGui::IsPopupOpen("##code-editor")) ImGui::SetTooltip("Double-click to change the code");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal) && !ImGui::IsPopupOpen("##code-editor")) {
+            ImGui::SetTooltip("%s", node.type == "Code" ? "A line of C++ no box says yet: it runs when the script is converted to C++, not as a visual script.\n"
+                                                         "Double-click to change it, or put boxes in its place."
+                                                       : "Double-click to change the code");
+        }
         ImGui::SetNextWindowSize(ImVec2(720, 0), ImGuiCond_Appearing);
         if (ImGui::BeginPopup("##code-editor")) {
             ImGui::SetWindowFontScale(1.0f);
@@ -391,7 +425,8 @@ bool GraphEditor::drawNode(Graph& graph, Node& node, const NodeDef* definition, 
         bool isWired = drawPin(pin, false, int(i));
         float rowTop = min.y + titleHeight + rowHeight * float(i) + 2 * z;
         std::string label = pin.type == PinType::Flow ? std::string() : pinLabel(pin.name);
-        drawList->AddText(ImVec2(min.x + 14 * z, rowTop + textOffset), kLabel, label.c_str());
+        bool isWrong = problemPins_.count(key(node.id, pin.name, false)) > 0;
+        drawList->AddText(ImVec2(min.x + 14 * z, rowTop + textOffset), isWrong ? IM_COL32(255, 110, 100, 255) : kLabel, label.c_str());
         // An input nothing is wired to shows the value it will use, ready to be changed.
         if (pin.type != PinType::Flow && !isWired) {
             float labelWidth = ImGui::CalcTextSize(label.c_str()).x;
@@ -526,6 +561,7 @@ bool GraphEditor::drawAddMenu(Graph& graph, ImVec2 at) {
 }
 
 bool GraphEditor::draw(Graph& graph, ImVec2 size) {
+    problemPins_.clear();
     bool changed = false;
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::ColorConvertU32ToFloat4(kBoard));
     ImGui::BeginChild("##graph-board", size, ImGuiChildFlags_Borders, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoMove);
@@ -786,6 +822,25 @@ bool GraphEditor::draw(Graph& graph, ImVec2 size) {
         ImGui::EndPopup();
     } else if (!wantsAddMenu) {
         pendingConnect_ = PinRef{};                 // closed without a node: the wire it was for is gone
+    }
+
+    // A node's comment, written: shown on its title, and above its line in C++.
+    if (commentFor_ != 0) {
+        ImGui::OpenPopup("##comment-editor");
+        commentId_ = commentFor_;
+        commentFor_ = 0;
+    }
+    ImGui::SetNextWindowSize(ImVec2(460, 0), ImGuiCond_Appearing);
+    if (ImGui::BeginPopup("##comment-editor")) {
+        if (Node* commented = graph.find(commentId_)) {
+            ImGui::TextDisabled("What this box is for: shown when the pointer is on it, and a comment above its line in C++.");
+            if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+            if (ImGui::InputTextMultiline("##comment", &commented->comment, ImVec2(440, ImGui::GetTextLineHeight() * 5 + 8))) changed = true;
+            if (ImGui::Button("Done")) ImGui::CloseCurrentPopup();
+        } else {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
     }
 
     if (isFocused) {

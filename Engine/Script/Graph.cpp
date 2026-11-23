@@ -159,6 +159,36 @@ const NodeDef* NodeLibrary::find(const std::string& type) const {
 
 // ---------------------------------------------------------------- the graph
 
+const char* pinTypeWord(PinType type) {
+    switch (type) {
+        case PinType::Float: return "number";
+        case PinType::Bool: return "yes-no";
+        case PinType::Vec3: return "vector";
+        case PinType::String: return "text";
+        case PinType::Flow: return "flow";
+    }
+    return "number";
+}
+
+PinType pinTypeOfWord(const std::string& word) {
+    if (word == "yes-no" || word == "bool") return PinType::Bool;
+    if (word == "vector" || word == "Vec3") return PinType::Vec3;
+    if (word == "text" || word == "string") return PinType::String;
+    return PinType::Float;
+}
+
+Variable* Graph::variable(const std::string& name) {
+    for (Variable& v : variables)
+        if (v.name == name) return &v;
+    return nullptr;
+}
+
+const Variable* Graph::variable(const std::string& name) const {
+    for (const Variable& v : variables)
+        if (v.name == name) return &v;
+    return nullptr;
+}
+
 Node* Graph::find(int id) {
     for (Node& node : nodes) {
         if (node.id == id) return &node;
@@ -232,9 +262,15 @@ const Link* Graph::linkFrom(int node, const std::string& outputPin) const {
 
 std::string Graph::toText() const {
     std::string out = "molten-graph 1\n";
+    for (const Variable& v : variables) {
+        out += "variable " + text::quote(v.name) + " " + pinTypeWord(v.type) + " " + text::quote(v.value) + " " + text::quote(v.comment);
+        out += v.isShown ? "\n" : " hidden\n";
+    }
+    for (const std::string& member : code) out += "code " + text::quote(member) + "\n";
     for (const Node& node : nodes) {
         out += "node " + std::to_string(node.id) + " " + text::quote(node.type) + " " + floatText(node.x) + " " + floatText(node.y) + "\n";
         for (const auto& [pin, value] : node.values) out += "  value " + text::quote(pin) + " " + text::quote(value) + "\n";
+        if (!node.comment.empty()) out += "  comment " + text::quote(node.comment) + "\n";
     }
     for (const Link& link : links) {
         out += "link " + std::to_string(link.fromNode) + " " + text::quote(link.fromPin) + " " + std::to_string(link.toNode) + " " +
@@ -262,6 +298,18 @@ std::optional<Graph> Graph::fromText(const std::string& contents) {
             current = &graph.nodes.back();
         } else if (words[0] == "value" && words.size() >= 3 && current) {
             current->values[words[1]] = words[2];
+        } else if (words[0] == "code" && words.size() >= 2) {
+            graph.code.push_back(words[1]);
+        } else if (words[0] == "comment" && words.size() >= 2 && current) {
+            current->comment = words[1];
+        } else if (words[0] == "variable" && words.size() >= 3) {
+            Variable v;
+            v.name = words[1];
+            v.type = pinTypeOfWord(words[2]);
+            if (words.size() > 3) v.value = words[3];
+            if (words.size() > 4) v.comment = words[4];
+            v.isShown = !(words.size() > 5 && words[5] == "hidden");
+            if (!graph.variable(v.name)) graph.variables.push_back(std::move(v));
         } else if (words[0] == "link" && words.size() >= 5) {
             // Kept as written, even if a node's kind is unknown here: a script made with
             // nodes from a plugin must survive being opened without it.

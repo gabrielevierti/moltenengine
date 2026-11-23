@@ -57,7 +57,7 @@ An arrow leads to one place; wiring it somewhere else moves the wire. An input t
 
 **Events** — On Start · On Update (gives *dt*, the length of the frame) · On Key Pressed · On Key Released · On Pointer Pressed (the mouse button, or a finger on iPhone and iPad)
 
-**Flow** — Branch (one way if a condition holds, another if not)
+**Flow** — Branch (one way if a condition holds, another if not) · While (*do* again and again while a condition holds, then *done*) · For (*do* once for each number from *from* to *to*, the number on *index*) · Return (the rest of the event is not run) · C++ (a line of C++ no box says yet: see below)
 
 **Transform** — Move · Rotate · Set Position · Set Scale · Position · Forward
 
@@ -69,9 +69,19 @@ An arrow leads to one place; wiring it somewhere else moves the wire. An input t
 
 **Math** — Number · Add · Subtract · Multiply · Divide · Sine · Random · Time · Vector · Split Vector · Add Vectors · Scale Vector
 
-**Logic** — Greater Than · Less Than · And · Or · Not · Select
+**Logic** — Greater Than · Less Than · Greater or Equal · Less or Equal · Equal · Not Equal · And · Or · Not · Select
 
-**Variables** — Set Variable · Get Variable (numbers remembered by name, separately for each entity)
+**Variables** — Set Variable · Get Variable · Add to Variable · Get Field · Set Field (a field of any of the entity's components, by its name)
+
+### The script's variables
+
+A script's variables are listed at the left of the Visual Script window. **+** makes one; each has a name, a kind (a number, a yes-no, a vector or a text), the value it starts with, what it is for, and **In the Inspector**: shown on each entity that runs the script, to be set there for each one. **−** takes it away. Renaming one renames it in every Get and Set Variable box that uses it, and those boxes choose the name from the list. Each entity running the script has its own values.
+
+### Comments, and what went wrong
+
+A box's comment is written with **Add Comment…** in its right-click menu. A box with one has a small note mark on its title, and the comment shows when the pointer rests on the title, above what the box does. In C++ the comment is the line above the box's line.
+
+When something goes wrong as a script runs (a variable no one declared, a field a component does not have, a line of C++ no box says yet), the box is ringed in red with the words under it, and the input it was about, if it was one, is in red too. It is cleared once the script is changed.
 
 **Animation** (the entity's Animator) — Play Animation (one of its own, by name; with a controller, a state) · Stop Animation · Pause Animation · Resume Animation · Is Animation Playing · Set Animator Float · Set Animator Bool · Set Animator Trigger · Play State (eased over some seconds) · Set Animator Speed · Animator Parameter · Animator State. Names, parameters and states are chosen from lists; the events of animations come as messages to On Message.
 
@@ -129,17 +139,18 @@ that runs. Breakpoints stay while the editor is open, playing or not.
 ## What is not there yet
 
 - Undo on the drawing board (Cmd+Z there does nothing yet; the scene's undo is separate).
-- Nodes that reach other entities (find by name, send a message), collisions as events, loops, timers, sound.
-- Copy and paste, comments.
+- Copy and paste.
 - Functions: a script used as a node in another.
 
 ## To C++ and back
 
-**To C++** in the Visual Script toolbar (or **Convert to C++ Script** in the Viewer, or in the Explorer's right-click menu) writes the same behavior as a C++ component in `Assets/Scripts/<Name>.cpp`: each box becomes one call, in the same order, and it is built with the game's code like any script. The file keeps the graph it was made from in a comment at its end.
+**To C++** in the Visual Script toolbar (or **Convert to C++ Script** in the Inspector when a script is chosen in the Explorer, or in the Explorer's right-click menu) writes the same behavior as a C++ component in `Assets/Scripts/<Name>.cpp`, written as a programmer would write it: the variables are the component's fields (with `MOLTEN_FIELD` for the ones shown in the Inspector, and their comments beside them), each event is its function (`start`, `update`, `onCollision`, `onTriggerEnter`), and each box is the line it means: `transform->rotation = ...`, `if (world.input.isDown(Key::Space)) { ... }`, `for (float i = 0; i < 3; i += 1) { ... }`, `world.playSound(...)`, `lives += -1;`. A box's comment is the comment above its line. The few boxes that have no line of their own in the engine's C++ are written as `call("Box", {...})`, which runs that very box.
 
-The way back is **Convert to Visual Script** (in the Viewer, and in the Explorer's right-click menu on a `.cpp`): it writes the `.graph` beside it and opens it. Code made from a graph and not changed goes back to the very graph it was made from. Any other component (changed code, or code written by hand in the style of a new script) is read: `start`, `update`, `onCollision` and `onTriggerEnter` become their events; the entity's Transform and Rigid Body, its Animator, the keys and the mouse, numbers, points, yes-or-no, `if` and `else`, and the component's own number fields (they become the script's variables) become boxes and wires; a key pressed at the top of `update` becomes On Key Pressed, and a timer (`t += dt; if (t >= 2) { t -= 2; ... }`) On Timer.
+The way back is **Convert to Visual Script** (in the Inspector, and in the Explorer's right-click menu on a `.cpp`): it writes the `.graph` beside it and opens it. A script is read into **the same boxes** the Add menu has, so the same script drawn by hand and the one read from C++ are the same: the fields of a number, `bool`, `Vec3` or `std::string` become the script's variables (with their first values and comments); `start`, `update`, `onCollision` and `onTriggerEnter` their events; `if`/`else`, `while` and counted `for` loops, `return`, comparisons, math, the Transform, the Rigid Body, the Animator, input, sound, scenes, shared values and logging their boxes. The comment above a line goes on its box. Write it to C++ again and the same code comes out.
 
-**Any other C++ becomes its own code as boxes.** Most C++ says things those boxes have no shape for: a loop over the wheels, a table of gears, a function of its own, a lambda. Such a file is not cut down: every function is a **C++ Function** box, and each statement in it a **C++** box holding the statement as it is written, wired one under the other in the order the code runs. An `if` is a **C++ If** box with its *true* and *false* ways to the right; a `for`, a `while`, a `switch`, a `do`, braces, and a function written in place as the last argument (`scene.each<Wheel>([&](Entity e, Wheel& wheel) { ... });`) are **C++ Block** boxes, with what is inside them wired after *body*. What is outside the functions (the `#include`s, a struct's fields, `MOLTEN_COMPONENT(...)`) is in **C++ File** boxes. The comment above a statement shows on its box. Every character of the file is in one box, the spaces and comments between statements too, so **To C++** writes back the file it was made from, byte for byte; change a box (double-click it to edit its code), move one, wire in a new one, and the file says so. What the `.cpp` said before is kept in `Library/Before Conversion`. These boxes are not run on the board: the game runs the C++ they write, compiled with the rest of its code.
+A line no box says yet (a call to a function of your own, a lambda, a container) is kept as a **C++** box, in yellow, holding the line as it is written, in its place in the flow; members of the component that are not variables (a `std::vector`, a function of its own) and `#include`s are kept with the script and written back as they were. A note above the board counts them. These lines run once the script is converted to C++; on the board they are said, not run.
+
+**Code that is not a single component becomes its own code as boxes.** A file with several types, templates or code outside a component is shown as **C++ Function**, **C++**, **C++ If**, **C++ Block** and **C++ File** boxes, one for each function, statement, `if` or block and the text between them, so **To C++** writes back the file it was made from byte for byte. What the `.cpp` said before is kept in `Library/Before Conversion`.
 
 ## Watching one entity's script
 

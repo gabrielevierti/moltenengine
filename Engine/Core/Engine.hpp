@@ -91,11 +91,17 @@ public:
 
 
     Renderer& renderer() { return *renderer_; }
-    /// The project's quality: read from its Settings/Quality.settings (none: High).
-    /// Used by the renderer as each view is drawn.
+    /// The project's quality levels: read from its Settings/Quality.settings (none: the standard
+    /// four), the game at the one they start at. The level drawn at is `quality`, used by the
+    /// renderer as each view is drawn.
     void loadQuality(const std::string& settingsDirectory);
-    void setQuality(const GameQuality& quality);
+    /// New levels (the editor, as they are changed), drawn at `shown` (or where they start).
+    void setQualityLevels(const QualityLevels& levels, const std::string& shown = {});
+    QualityLevels qualityLevelsAll;
     std::optional<GameQuality> quality;
+    std::vector<std::string> qualityLevels() const override { return qualityLevelsAll.names(); }
+    std::string qualityLevel() const override { return quality ? quality->name : std::string(); }
+    bool setQualityLevel(const std::string& name) override;
     Assets& assets() { return *assets_; }
     Audio& audio() { return *audio_; }
     bool hasAudio() const { return audio_ != nullptr; }        // false where there is no sound device

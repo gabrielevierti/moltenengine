@@ -947,7 +947,8 @@ float pixelsPerPoint(Engine& engine) {
 /// Asks the renderer for a picture of the scene the size of a rectangle of the interface,
 /// and puts the picture it made last frame there.
 /// `pixels`: the size the view is drawn at; zero for as many as it takes on screen.
-void showView(Engine& engine, size_t index, ImVec2 position, ImVec2 size, Entity camera, bool showsDebugLines, ImVec2 pixels = ImVec2(0, 0)) {
+void showView(Engine& engine, size_t index, ImVec2 position, ImVec2 size, Entity camera, bool showsDebugLines, ImVec2 pixels = ImVec2(0, 0),
+              bool isEditorCamera = false) {
     Renderer& renderer = engine.renderer();
     if (renderer.views.size() <= index) renderer.views.resize(index + 1);
     float scale = pixelsPerPoint(engine);
@@ -957,6 +958,7 @@ void showView(Engine& engine, size_t index, ImVec2 position, ImVec2 size, Entity
     view.height = !isShown ? 0 : pixels.y > 0 ? int(pixels.y) : int(std::round(size.y * scale));
     view.camera = camera;
     view.showsDebugLines = showsDebugLines;
+    view.isEditorCamera = isEditorCamera;
     if (MTL::Texture* picture = renderer.viewTexture(index); picture && view.width > 0) {
         ImGui::GetWindowDrawList()->AddImage(ImTextureID(reinterpret_cast<uintptr_t>(picture)), position, ImVec2(position.x + size.x, position.y + size.y));
     }
@@ -1907,7 +1909,7 @@ void drawSceneView(EditorContext& editor) {
         ImGui::End();
         return;
     }
-    showView(engine, kSceneView, position, size, document.cameraEntity(), true);
+    showView(engine, kSceneView, position, size, document.cameraEntity(), true, ImVec2(0, 0), true);
     // The tools start a little in from the corner.
     ImGui::SetCursorScreenPos(ImVec2(position.x + 8, position.y + 8));
     viewport.drawList = ImGui::GetWindowDrawList();

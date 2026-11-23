@@ -5,6 +5,8 @@
 #include "Rendering/SurfaceShader.hpp"
 
 #include <cstdlib>
+#include <filesystem>
+#include "Core/TextFile.hpp"
 #include <fstream>
 
 using namespace molten;
@@ -92,4 +94,24 @@ TEST(a_shader_graph_in_a_loop_or_without_a_surface_says_why) {
     error.clear();
     CHECK(shaderTextFromGraph(graph, "x", &error).empty());
     CHECK(error.find("loop") != std::string::npos);
+}
+
+TEST(a_shader_file_can_be_a_graph_or_code) {
+    CHECK(isShaderGraphText(newShaderGraphText()));
+    CHECK(!isShaderGraphText(newSurfaceShaderText()));
+    std::string folder = std::filesystem::temp_directory_path().string() + "/molten-shader-kinds";
+    std::filesystem::create_directories(folder);
+    text::writeFile(folder + "/Drawn.shader", newShaderGraphText());
+    text::writeFile(folder + "/Written.shader", newSurfaceShaderText());
+    text::writeFile(folder + "/Old.shadergraph", newShaderGraphText());
+    CHECK(isShaderGraphFile(folder + "/Drawn.shader"));
+    CHECK(!isShaderGraphFile(folder + "/Written.shader"));
+    CHECK(isShaderGraphFile(folder + "/Old.shadergraph"));
+    CHECK(!isShaderGraphFile(folder + "/Missing.shader"));
+    // A material's shader set reads the graph in a .shader as code made from it.
+    SurfaceShaderSet set;
+    set.pathOf = [folder](const std::string& name) { return folder + "/" + name; };
+    set.use("Drawn.shader");
+    CHECK(set.code().find("Surface surface") != std::string::npos);
+    std::filesystem::remove_all(folder);
 }

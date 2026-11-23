@@ -381,7 +381,7 @@ public:
             // The scene's sea: everywhere below its level. Its waves are the wind's and the weather's.
             SeaSettings& sea = settings.sea;
             changed |= ui::checkbox("Sea", sea.enabled);
-            ui::tooltip("Water everywhere below a level, out to the horizon: things float on it (Buoyancy), its waves rise with the wind and the weather, the sun's light crawls in lines over its bottom, and under its level the camera is under water. Off: no sea. (Water of the game's own, a pond or a pool, is a shader: Assets > New > Water Shader)");
+            ui::tooltip("Water everywhere below a level, out to the horizon: things float on it (Buoyancy), its waves rise with the wind and the weather, the sun's light crawls in lines over its bottom, and under its level the camera is under water. Off: no sea. (Water of the game's own, a pond or a pool, is a shader: Explorer > + New > Water Shader as Code)");
             if (sea.enabled) {
                 changed |= ui::dragFloat("Level", sea.level, 0.05f, -10000.0f, 10000.0f, "%.2f m");
                 ui::tooltip("The height of its surface at rest. Below it all is under water");

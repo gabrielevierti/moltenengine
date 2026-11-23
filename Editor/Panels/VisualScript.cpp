@@ -2,6 +2,7 @@
 // What is drawn is saved as soon as the hand is off, and a game that is playing picks
 // the change up at once: scripts can be rewired while they run.
 #include "Editor.hpp"
+#include <misc/cpp/imgui_stdlib.h>
 #include "Script/CppBoxes.hpp"
 #include "Script/CppToGraph.hpp"
 #include "Platform.hpp"
@@ -71,8 +72,9 @@ public:
         drawWatchedEntity(editor);
         board_.pickText = [this, &editor](const script::PinDef& pin, std::string& value, float width) {
             if (pin.pick == "variable") {
-                // The variables are those of this graph: the names its Set and Get Variable nodes use.
+                // The variables are those of this graph: those declared at the left, and the names its boxes use.
                 std::set<std::string> names;
+                for (const script::Variable& declared : graph_.variables) names.insert(declared.name);
                 for (const script::Node& node : graph_.nodes) {
                     if (node.type != "SetVariable" && node.type != "GetVariable") continue;
                     auto name = node.values.find(pin.name);
@@ -82,6 +84,24 @@ public:
             }
             return pickValueInline(editor, Entity{}, pin.pick, value, width);
         };
+        // What went wrong as it ran: marked on the boxes.
+        problems_ = script::ScriptProblems::instance().of(path_);
+        board_.problems = &problems_;
+        // C++ that no box says (a script made from C++): said once, above the board.
+        int codeBoxes = int(std::count_if(graph_.nodes.begin(), graph_.nodes.end(), [](const script::Node& node) { return node.type == "Code"; }));
+        if (codeBoxes > 0 || !graph_.code.empty()) {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(ImVec4(0.96f, 0.78f, 0.45f, 1.0f), "%s  %d line%s of C++ no box says yet (the yellow boxes)%s: they run when the script is "
+                               "converted to C++, not as a visual script.", icon::CircleAlert, codeBoxes, codeBoxes == 1 ? "" : "s",
+                               graph_.code.empty() ? "" : ", and members of the component kept as C++");
+            ImGui::PopTextWrapPos();
+        }
+        // The script's variables at the left, the board at the right.
+        const float side = std::min(260.0f, ImGui::GetContentRegionAvail().x * 0.3f);
+        ImGui::BeginChild("##variables", ImVec2(side, 0), ImGuiChildFlags_Borders);
+        if (drawVariables()) isUnsaved_ = true;
+        ImGui::EndChild();
+        ImGui::SameLine();
         if (board_.draw(graph_, ImGui::GetContentRegionAvail())) isUnsaved_ = true;
         // Saved once the drag or the typing is over, not sixty times a second during it.
         if (isUnsaved_ && !ImGui::IsAnyItemActive() && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) save(editor);
@@ -103,9 +123,97 @@ private:
         board_.resetView();
     }
 
+    /// The script's variables: + adds one, each with its name, type, first value, whether the
+    /// Inspector shows it (to set for each entity), what it is for, and - to take it away.
+    bool drawVariables() {
+        bool changed = false;
+        ImGui::TextUnformatted("Variables");
+        ImGui::SameLine(ImGui::GetContentRegionAvail().x - 18);
+        if (ImGui::SmallButton("+")) {
+            script::Variable made;
+            std::string name = "value";
+            for (int n = 2; graph_.variable(name); n++) name = "value" + std::to_string(n);
+            made.name = name;
+            made.value = "0";
+            graph_.variables.push_back(made);
+            changed = true;
+        }
+        ui::tooltip("A new variable: a number, a yes-no, a point or a text the script keeps, for each entity that runs it");
+        if (graph_.variables.empty()) {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextDisabled("None yet. + makes one; Get and Set Variable read and change it.");
+            ImGui::PopTextWrapPos();
+        }
+        static const char* const kinds[] = {"number", "yes-no", "vector", "text"};
+        int removed = -1;
+        for (size_t i = 0; i < graph_.variables.size(); i++) {
+            script::Variable& v = graph_.variables[i];
+            ImGui::PushID(int(i));
+            ImGui::Separator();
+            std::string before = v.name;
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 24);
+            if (ImGui::InputText("##name", &v.name, ImGuiInputTextFlags_EnterReturnsTrue) || ImGui::IsItemDeactivatedAfterEdit()) {
+                if (v.name.empty()) v.name = before;
+                // The boxes that name it follow it to its new name.
+                for (script::Node& node : graph_.nodes) {
+                    auto named = node.values.find("name");
+                    if ((node.type == "SetVariable" || node.type == "GetVariable" || node.type == "AddToVariable") && named != node.values.end() && named->second == before) {
+                        named->second = v.name;
+                    }
+                }
+                changed = true;
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("-")) removed = int(i);
+            ui::tooltip("Take this variable away (the boxes that use it stay, and say so when they run)");
+            int kind = v.type == script::PinType::Bool ? 1 : v.type == script::PinType::Vec3 ? 2 : v.type == script::PinType::String ? 3 : 0;
+            ImGui::SetNextItemWidth(80);
+            if (ImGui::Combo("##type", &kind, kinds, 4)) {
+                v.type = kind == 1 ? script::PinType::Bool : kind == 2 ? script::PinType::Vec3 : kind == 3 ? script::PinType::String : script::PinType::Float;
+                v.value = script::Value::fromText(v.type, v.value).toText();
+                changed = true;
+            }
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+            switch (v.type) {
+                case script::PinType::Bool: {
+                    bool on = script::Value::fromText(v.type, v.value).asBool();
+                    if (ImGui::Checkbox("##value", &on)) v.value = on ? "1" : "0", changed = true;
+                    break;
+                }
+                case script::PinType::Vec3: {
+                    float xyz[3];
+                    script::Value::fromText(v.type, v.value).asVector(xyz[0], xyz[1], xyz[2]);
+                    if (ImGui::DragFloat3("##value", xyz, 0.05f)) v.value = script::Value::vector(xyz[0], xyz[1], xyz[2]).toText(), changed = true;
+                    break;
+                }
+                case script::PinType::String:
+                    if (ImGui::InputText("##value", &v.value)) changed = true;
+                    break;
+                default: {
+                    float number = script::Value::fromText(v.type, v.value).asFloat();
+                    if (ImGui::DragFloat("##value", &number, 0.05f)) v.value = script::Value::number(number).toText(), changed = true;
+                    break;
+                }
+            }
+            ui::tooltip("Its first value, when the game starts");
+            if (ImGui::Checkbox("In the Inspector", &v.isShown)) changed = true;
+            ui::tooltip("Shown on each entity that runs the script, to be set for each (a field of the component, in C++)");
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+            if (ImGui::InputTextWithHint("##comment", "What it is for", &v.comment)) changed = true;
+            ImGui::PopID();
+        }
+        if (removed >= 0) {
+            graph_.variables.erase(graph_.variables.begin() + removed);
+            changed = true;
+        }
+        return changed;
+    }
+
     void save(EditorContext& editor) {
         if (!isUnsaved_ || path_.empty()) return;
         isUnsaved_ = false;
+        script::ScriptProblems::instance().clear(path_);        // changed: what went wrong is to be seen again
         if (!text::writeFile(editor.assets.absolutePath(path_), graph_.toText())) {
             editor.notify("Cannot write " + path_, ConsoleMessage::Level::Error);
         }
@@ -323,6 +431,7 @@ private:
     bool wasPlaying_ = false;
     std::string path_;                  // relative to Assets; empty for none
     script::Graph graph_;
+    std::vector<script::ScriptProblem> problems_;
     GraphEditor board_;
     bool isUnsaved_ = false;
 };

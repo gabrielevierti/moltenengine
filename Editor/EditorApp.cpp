@@ -2197,7 +2197,7 @@ void EditorApp::drawPanels() {
     const AssetInfo* asset = editor.selectedAsset.empty() ? nullptr : editor.assets.find(editor.selectedAsset);
     if (editor.selectedAsset != shownAsset) {
         shownAsset = editor.selectedAsset;
-        if (asset) bringForward("Explorer");
+        if (asset) bringForward("Inspector");
     }
     size_t selection = editor.scene.selection().size();
     if (selection != shownSelection) {

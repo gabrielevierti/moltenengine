@@ -325,17 +325,41 @@ Entity addInterface(Game& game, const std::string& counter, const std::string& c
 
     // Bottom right: the dial, in a game that has something to show on one. (In the corner: the
     // middle of the screen's bottom is where the car, the plane or the boat is.)
+    // Made of the pieces anyone can put together from Entity > UI: a dark disc, the track of the
+    // arc, the arc that fills with the value, the value, and what it is in.
     if (!dialValue.empty()) {
-        kit::UIGauge dial;
-        dial.value = dialValue;
-        dial.most = dialMost;
-        dial.numbersEvery = dialEvery;
-        dial.label = dialLabel;
-        dial.anchor = Vec2{1, 1};
-        dial.offset = Vec2{-112, -108};
-        dial.radius = 78;
-        dial.thickness = 7;
-        scene.add(piece("Dial"), dial);
+        (void)dialEvery;
+        const float radius = 78, thickness = 7;
+        const Vec2 corner{1, 1}, middle{-112, -108};
+        auto arc = [&](const std::string& value, float most, float r, float thick, float start, float sweep, Vec4 color) {
+            kit::UIArc made;
+            made.value = value;
+            made.most = most;
+            made.anchor = corner;
+            made.offset = middle;
+            made.radius = r;
+            made.thickness = thick;
+            made.startAngle = start;
+            made.sweep = sweep;
+            made.color = color;
+            return made;
+        };
+        Entity dial = piece("Dial");
+        scene.add(dial, arc("", 100, radius + thickness * 0.6f, radius + thickness * 0.6f, 0, 360, Vec4{0.04f, 0.045f, 0.055f, 0.7f}));
+        scene.add(game.add("Track", dial), arc("", 100, radius, thickness, 135, 270, Vec4{1, 1, 1, 0.1f}));
+        scene.add(game.add("Fill", dial), arc(dialValue, dialMost, radius, thickness, 135, 270, Vec4{1.0f, 0.5f, 0.18f, 1}));
+        auto words = [&](const std::string& text, float below, float size, Vec4 color) {
+            kit::HudText made;
+            made.text = text;
+            made.anchor = corner;
+            made.offset = middle + Vec2{0, below};
+            made.size = size;
+            made.color = color;
+            made.align = "Center";
+            return made;
+        };
+        scene.add(game.add("Reading", dial), words("{" + dialValue + ":0}", radius * 0.22f, radius * 0.36f, Vec4{1, 1, 1, 1}));
+        scene.add(game.add("Unit", dial), words(dialLabel, radius * 0.62f, radius * 0.14f, Vec4{1, 1, 1, 0.55f}));
     }
 
     // Bottom left: what the keys do, on a pane of glass: the keys in one column, what each does in the next.

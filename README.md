@@ -111,7 +111,7 @@ A complete visual editor that makes game development approachable without taking
 </td>
 <td valign="top" width="50%">
 
-**Asset Viewer**
+**Assets in the Inspector**
 
 - 3D models, materials and texture maps
 - Audio with trimming, fading, looping and normalization

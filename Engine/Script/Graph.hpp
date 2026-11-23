@@ -11,10 +11,16 @@
 // A script is a text file (.graph) in the project's Assets:
 //
 //     molten-graph 1
+//     variable "speed" number "90" "How fast it turns, degrees a second"
 //     node 1 "OnUpdate" 80 80
 //     node 2 "Rotate" 320 80
 //       value "degrees" "90"
+//       comment "Turns the wheel"
 //     link 1 "then" 2 "in"
+//
+// The variables are the script's own (a C++ component's fields): declared once, with a type, a
+// first value and what they are for, and read and set by the Get and Set Variable boxes. A
+// node's comment is shown when the pointer is on it, and written above its line in C++.
 #pragma once
 
 #include <cstdint>
@@ -99,7 +105,22 @@ struct Node {
     float x = 0, y = 0;                 // where it is drawn
     /// Values typed into inputs nothing is wired to, as text, by pin name.
     std::map<std::string, std::string> values;
+    /// What it is for, in words: shown when the pointer is on it; a // comment above it in C++.
+    std::string comment;
 };
+
+/// A variable of the script: declared with a type and a first value. A C++ component's field.
+struct Variable {
+    std::string name;
+    PinType type = PinType::Float;
+    std::string value;                  // its first value, as text
+    std::string comment;
+    bool isShown = true;                // shown in the Inspector, to set for each entity (a C++ field the component declares)
+};
+
+/// The words a file uses for a type: "number", "yes-no", "vector", "text".
+const char* pinTypeWord(PinType type);
+PinType pinTypeOfWord(const std::string& word);
 
 struct Link {
     int fromNode = 0;
@@ -111,6 +132,12 @@ struct Link {
 struct Graph {
     std::vector<Node> nodes;
     std::vector<Link> links;
+    std::vector<Variable> variables;
+    /// Members of a C++ component no box says (a function of its own, a table, a pointer), kept as
+    /// they are written and written back the same: the graph runs only as C++ while it has any.
+    std::vector<std::string> code;
+    Variable* variable(const std::string& name);
+    const Variable* variable(const std::string& name) const;
     int nextId = 1;
     /// The kinds of node it is made of: null for a visual script's (NodeLibrary::instance()); a
     /// shader graph has its own (Rendering/ShaderGraph.hpp). Not saved: whoever reads the file knows.

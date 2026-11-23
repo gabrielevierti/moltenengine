@@ -554,10 +554,15 @@ MTL::Texture* Renderer::renderTracedAmbient(MTL::CommandBuffer* commandBuffer, c
 
 bool Renderer::renderClouds(MTL::CommandBuffer* commandBuffer, const View& view, int width, int height, double time,
                             const FrameAllocator::Allocation& frameUniforms) {
-    // A picture of their own, a share of the scene's size: clouds are soft, and the sky smooths it up.
-    // Even, so that it is two by two of the walked one.
-    float share = std::clamp(settings.sky.cloudResolution, 0.2f, 1.0f);
-    int cloudWidth = std::max(8, int(std::lround(float(width) * share))), cloudHeight = std::max(8, int(std::lround(float(height) * share)));
+    // A picture of their own, a share of the size the picture is shown at: clouds are soft, and
+    // the sky smooths it up. Not of the scene's size, which a lower render scale and the dynamic
+    // resolution shrink: under both the clouds would be walked in a quarter of a quarter of the
+    // pixels, and show them. Its size then also stays put while the dynamic resolution moves, so
+    // what was kept from the frames before is not thrown away. Even, so that it is two by two of
+    // the walked one.
+    (void)width, (void)height;
+    float share = std::clamp(settings.sky.cloudResolution, 0.35f, 1.0f);
+    int cloudWidth = std::max(8, int(std::lround(float(outputWidth_) * share))), cloudHeight = std::max(8, int(std::lround(float(outputHeight_) * share)));
     cloudWidth += cloudWidth & 1, cloudHeight += cloudHeight & 1;
     const int freshWidth = cloudWidth / 2, freshHeight = cloudHeight / 2;
     // This frame's picture is drawn over the older of the two: the last frame's is read.
@@ -668,7 +673,8 @@ void Renderer::renderScene(MTL::CommandBuffer* commandBuffer, Scene& scene, cons
     FrameAllocator::Allocation lightShadows = allocator().copy(lightShadowViews_);
     encoder->setFragmentBuffer(lightShadows.buffer, lightShadows.offset, gpu::MMBufferLightShadows);
     // The scene's baked light probes, and the grids they are in (none: the sky lights all as it is).
-    encoder->setFragmentBytes(&probeVolumes_, sizeof(probeVolumes_), gpu::MMBufferProbeVolumes);
+    static const gpu::ProbeVolumes kNoProbes{};
+    encoder->setFragmentBytes(settings.usesLightProbes ? &probeVolumes_ : &kNoProbes, sizeof(probeVolumes_), gpu::MMBufferProbeVolumes);
     encoder->setFragmentBuffer(probes_.get(), 0, gpu::MMBufferProbes);
     // Water reads which way the bottom faces under it (for the sun's lines on it), and what floats on it.
     encoder->setFragmentTexture(wantsDepth() && prepassNormal_ ? prepassNormal_.get() : nullptr, gpu::MMTextureSceneNormal);

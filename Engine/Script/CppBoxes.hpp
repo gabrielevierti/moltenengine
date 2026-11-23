@@ -47,7 +47,8 @@ bool isCppBox(const std::string& nodeType);
 /// and the comment written above it, if any.
 std::string cppBoxText(const Node& node);
 std::string cppBoxComment(const Node& node);
-/// How large a box is drawn, in the board's units, for its code to fit. False for other kinds of node.
+/// How large a box is drawn, in the board's units, for its code to fit (these, and the Code box a
+/// script made from C++ has where no box says a line). False for other kinds of node.
 bool cppBoxSize(const Node& node, float& width, float& height);
 
 }  // namespace molten::script

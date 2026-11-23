@@ -1,5 +1,7 @@
 #include "Script/CppToGraph.hpp"
 
+#include <sstream>
+
 #include "Script/Convert.hpp"
 #include "Script/CppBoxes.hpp"
 #include "Script/Runtime.hpp"
@@ -24,7 +26,20 @@ struct Token {
     TokenKind kind = TokenKind::End;
     std::string text;
     int line = 0;
+    std::string comment;                // the comment just above it (its own lines), without the slashes
+    std::string trailing;               // a comment after it on its line
+    size_t offset = 0, end = 0;         // where it is in the code
 };
+
+/// A comment's words: without // or /* */ and the spaces round them.
+std::string commentWords(const std::string& raw) {
+    std::string text = raw;
+    if (text.rfind("//", 0) == 0) text = text.substr(2);
+    else if (text.rfind("/*", 0) == 0) text = text.substr(2, text.size() >= 4 ? text.size() - 4 : 0);
+    while (!text.empty() && (text[0] == '/' || text[0] == ' ' || text[0] == '\t' || text[0] == '*' || text[0] == '<')) text.erase(0, 1);
+    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back()))) text.pop_back();
+    return text;
+}
 
 /// The code as words: names, numbers, texts and signs, without comments and #lines.
 std::vector<Token> tokenize(const std::string& code) {
@@ -35,6 +50,17 @@ std::vector<Token> tokenize(const std::string& code) {
     size_t i = 0;
     const size_t n = code.size();
     bool atLineStart = true;
+    std::string pending;                // comment lines waiting for the token they are above
+    auto noteComment = [&](size_t from, size_t to, int at) {
+        std::string words = commentWords(code.substr(from, to - from));
+        if (words.empty()) return;
+        // After a token on the same line: that token's. Otherwise: the next one's.
+        if (!tokens.empty() && tokens.back().line == at && pending.empty()) {
+            tokens.back().trailing += (tokens.back().trailing.empty() ? "" : " ") + words;
+        } else {
+            pending += (pending.empty() ? "" : "\n") + words;
+        }
+    };
     while (i < n) {
         char c = code[i];
         if (c == '\n') {
@@ -48,16 +74,21 @@ std::vector<Token> tokenize(const std::string& code) {
             continue;
         }
         if (c == '/' && i + 1 < n && code[i + 1] == '/') {
+            size_t from = i;
             while (i < n && code[i] != '\n') i++;
+            noteComment(from, i, line);
             continue;
         }
         if (c == '/' && i + 1 < n && code[i + 1] == '*') {
+            size_t from = i;
+            int at = line;
             i += 2;
             while (i + 1 < n && !(code[i] == '*' && code[i + 1] == '/')) {
                 if (code[i] == '\n') line++;
                 i++;
             }
             i += 2;
+            noteComment(from, std::min(i, n), at);
             continue;
         }
         if (c == '#' && atLineStart) {
@@ -73,6 +104,7 @@ std::vector<Token> tokenize(const std::string& code) {
         atLineStart = false;
         Token token;
         token.line = line;
+        token.offset = i;
         if (c == '"' || c == '\'') {
             i++;
             while (i < n && code[i] != c) {
@@ -88,8 +120,15 @@ std::vector<Token> tokenize(const std::string& code) {
             i++;
             token.kind = TokenKind::Text;
             // "one" "two" is one text.
-            if (!tokens.empty() && tokens.back().kind == TokenKind::Text) tokens.back().text += token.text;
-            else tokens.push_back(token);
+            if (!tokens.empty() && tokens.back().kind == TokenKind::Text) {
+                tokens.back().text += token.text;
+                tokens.back().end = i;
+            } else {
+                token.end = i;
+                token.comment = std::move(pending);
+                pending.clear();
+                tokens.push_back(token);
+            }
             continue;
         }
         if (std::isdigit(static_cast<unsigned char>(c)) || (c == '.' && i + 1 < n && std::isdigit(static_cast<unsigned char>(code[i + 1])))) {
@@ -103,6 +142,9 @@ std::vector<Token> tokenize(const std::string& code) {
             }
             token.kind = TokenKind::Number;
             token.text = code.substr(start, i - start);
+            token.end = i;
+            token.comment = std::move(pending);
+            pending.clear();
             tokens.push_back(token);
             continue;
         }
@@ -111,6 +153,9 @@ std::vector<Token> tokenize(const std::string& code) {
             while (i < n && (std::isalnum(static_cast<unsigned char>(code[i])) || code[i] == '_')) i++;
             token.kind = TokenKind::Name;
             token.text = code.substr(start, i - start);
+            token.end = i;
+            token.comment = std::move(pending);
+            pending.clear();
             tokens.push_back(token);
             continue;
         }
@@ -124,6 +169,9 @@ std::vector<Token> tokenize(const std::string& code) {
             }
         }
         i += token.text.size();
+        token.end = i;
+        token.comment = std::move(pending);
+        pending.clear();
         tokens.push_back(token);
     }
     return tokens;
@@ -147,7 +195,7 @@ struct Stmt;
 using StmtPtr = std::shared_ptr<Stmt>;
 
 struct Stmt {
-    enum class Kind { Block, If, Declare, Assign, Do, Return, Other };
+    enum class Kind { Block, If, Declare, Assign, Do, Return, While, For, Other };
     Kind kind = Kind::Other;
     std::vector<StmtPtr> body;          // Block: the statements. If: then, and else if there is one.
     ExprPtr condition;                  // If
@@ -155,8 +203,11 @@ struct Stmt {
     ExprPtr value;                      // Declare: the first value. Assign: the right side. Do: the expression.
     ExprPtr target;                     // Assign: the left side
     std::string op;                     // Assign: "=", "+=", "-=", "*=", "/=", "++", "--"
+    StmtPtr init, step;                 // For: what is done before it, and after each turn (While and For: `condition`, and `body[0]`)
     int line = 0;
     std::string source;                 // as written, to say what was not converted
+    std::string comment;                // the comment above it and at the end of its line
+    std::string raw;                    // exactly as written, its own lines: for a statement no box says
 };
 
 struct Method {
@@ -164,12 +215,15 @@ struct Method {
     std::vector<std::string> parameters;        // their names
     StmtPtr body;
     int line = 0;
+    std::string raw;                            // as written
 };
 
 struct Field {
     std::string type, name;
     ExprPtr value;
     int line = 0;
+    std::string comment;
+    std::string raw;
 };
 
 struct Component {
@@ -177,6 +231,9 @@ struct Component {
     std::vector<Field> fields;
     std::vector<Method> methods;
     std::vector<std::string> skipped;           // members that are neither
+    std::vector<std::string> memberSources;     // each member as it is written, for those kept as C++
+    std::vector<std::string> fieldsShown;       // the fields MOLTEN_COMPONENT names (all of them, if it names none)
+    size_t begin = 0, end = 0;                  // where the struct is in the code, from "struct" to its "};"
 };
 
 bool isKeyword(const std::string& word) {
@@ -187,8 +244,27 @@ bool isKeyword(const std::string& word) {
 
 class Parser {
 public:
-    explicit Parser(std::vector<Token> tokens) : tokens_(std::move(tokens)) {
-        tokens_.push_back(Token{TokenKind::End, "", tokens_.empty() ? 0 : tokens_.back().line});
+    Parser(std::vector<Token> tokens, const std::string& code) : tokens_(std::move(tokens)), code_(code) {
+        Token end;
+        end.kind = TokenKind::End;
+        end.line = tokens_.empty() ? 0 : tokens_.back().line;
+        end.offset = end.end = code.size();
+        tokens_.push_back(end);
+    }
+
+    /// The code from token `from` to here, exactly as written.
+    std::string raw(size_t from) const {
+        if (p_ <= from || from >= tokens_.size()) return {};
+        size_t begin = tokens_[from].offset, stop = tokens_[std::min(p_, tokens_.size()) - 1].end;
+        return stop > begin ? code_.substr(begin, stop - begin) : std::string();
+    }
+    /// The comment above token `from`, and the one at the end of the last token read.
+    std::string commentOf(size_t from) const {
+        std::string out = from < tokens_.size() ? tokens_[from].comment : std::string();
+        if (p_ > from && p_ - 1 < tokens_.size() && !tokens_[p_ - 1].trailing.empty()) {
+            out += (out.empty() ? "" : "\n") + tokens_[p_ - 1].trailing;
+        }
+        return out;
     }
 
     /// The first struct or class with a start, an update or a collision in it.
@@ -207,7 +283,11 @@ public:
             }
             Component found;
             found.name = name;
+            found.begin = tokens_[at].offset;
             members(found);
+            accept("}");
+            accept(";");
+            found.end = tokens_[std::max<size_t>(p_, 1) - 1].end;
             bool isComponent = false;
             for (const Method& method : found.methods) {
                 isComponent |= method.name == "start" || method.name == "update" || method.name == "onCollision" || method.name == "onTriggerEnter";
@@ -332,6 +412,7 @@ private:
                 p_ = start;
                 skipStatement();
                 component.skipped.push_back(sourceFrom(start));
+                component.memberSources.push_back(raw(start));
                 continue;
             }
             std::string name = peek().text;
@@ -362,11 +443,13 @@ private:
                 while (!atEnd() && !is("{") && !is(";")) p_++;     // const, override, noexcept
                 if (is("{")) {
                     method.body = block();
+                    accept(";");
+                    method.raw = raw(start);
                     component.methods.push_back(method);
                 } else {
                     accept(";");
+                    component.memberSources.push_back(raw(start));
                 }
-                accept(";");
                 continue;
             }
             Field field;
@@ -379,8 +462,11 @@ private:
                 p_ = start;
                 skipStatement();
                 component.skipped.push_back(sourceFrom(start));
+                component.memberSources.push_back(raw(start));
                 continue;
             }
+            field.comment = commentOf(start);
+            field.raw = raw(start);
             component.fields.push_back(field);
         }
     }
@@ -392,7 +478,13 @@ private:
         out->kind = Stmt::Kind::Block;
         out->line = peek().line;
         accept("{");
-        while (!atEnd() && !is("}")) out->body.push_back(statement());
+        while (!atEnd() && !is("}")) {
+            size_t from = p_;
+            StmtPtr inside = statement();
+            inside->comment = commentOf(from);
+            inside->raw = raw(from);
+            out->body.push_back(inside);
+        }
         accept("}");
         return out;
     }
@@ -500,8 +592,64 @@ private:
             out->source = sourceFrom(start);
             return out;
         }
-        if (is("for") || is("while") || is("do") || is("switch") || is("break") || is("continue") || is("case") || is("default") || is("goto") ||
-            is("try")) {
+        if (accept("while")) {
+            out->kind = Stmt::Kind::While;
+            if (!accept("(")) return fail();
+            out->condition = expression();
+            if (!out->condition || !accept(")")) return fail();
+            out->source = sourceFrom(start) + " ...";
+            out->body.push_back(statement());
+            return out;
+        }
+        if (accept("for")) {
+            // for (init; condition; step) body. A for over a list (for (x : list)) is not one of these.
+            out->kind = Stmt::Kind::For;
+            if (!accept("(")) return fail();
+            if (!is(";")) {
+                size_t from = p_;
+                out->init = statement();          // takes its ;
+                if (!out->init || out->init->kind == Stmt::Kind::Other) return fail();
+                out->init->raw = raw(from);
+            } else {
+                accept(";");
+            }
+            if (!is(";")) out->condition = expression();
+            if (!accept(";")) return fail();
+            if (!is(")")) {
+                ExprPtr step = expression();
+                if (!step) return fail();
+                auto made = std::make_shared<Stmt>();
+                made->line = line;
+                static const char* const kAssignments[] = {"=", "+=", "-=", "*=", "/="};
+                bool assigned = false;
+                for (const char* sign : kAssignments) {
+                    if (accept(sign)) {
+                        made->kind = Stmt::Kind::Assign;
+                        made->target = step;
+                        made->op = sign;
+                        made->value = expression();
+                        assigned = true;
+                        break;
+                    }
+                }
+                if (!assigned) {
+                    if (step->kind == Expr::Kind::Unary && (step->text == "++" || step->text == "--" || step->text == "post++" || step->text == "post--")) {
+                        made->kind = Stmt::Kind::Assign;
+                        made->target = step->parts[0];
+                        made->op = step->text.size() > 2 ? step->text.substr(4) : step->text;
+                    } else {
+                        made->kind = Stmt::Kind::Do;
+                        made->value = step;
+                    }
+                }
+                out->step = made;
+            }
+            if (!accept(")")) return fail();
+            out->source = sourceFrom(start) + " ...";
+            out->body.push_back(statement());
+            return out;
+        }
+        if (is("do") || is("switch") || is("break") || is("continue") || is("case") || is("default") || is("goto") || is("try")) {
             return fail();
         }
         if (looksLikeDeclaration()) {
@@ -693,6 +841,7 @@ private:
     }
 
     std::vector<Token> tokens_;
+    const std::string& code_;
     size_t p_ = 0;
 };
 
@@ -794,19 +943,16 @@ public:
         if (const Method* update = find("update")) findTimers(*update);
         for (const Field& field : component_.fields) declareField(field);
 
-        // On Start: the fields' first values, then start.
+        // On Start: the first values that are not plain values (worked out from others), then start.
         const Method* start = find("start");
-        bool hasFieldValues = std::any_of(component_.fields.begin(), component_.fields.end(), [&](const Field& field) {
-            return variables_.count(field.name) > 0;
-        });
-        if (start || hasFieldValues) {
+        if (start || !startValues_.empty()) {
             beginEvent("OnStart", {});
             if (start) bindParameters(*start, {"", "self"});
-            for (const Field& field : component_.fields) {
-                if (!variables_.count(field.name)) continue;
-                Ref value = field.value ? valueOf(*field.value) : Ref::of(Value::number(0));
-                if (value.isNone()) value = Ref::of(Value::number(0));
-                act("SetVariable", {{"name", Ref::of(Value::string(field.name))}, {"value", value}});
+            for (const Field* field : startValues_) {
+                Ref value = valueOf(*field->value);
+                if (value.isNone()) continue;
+                int node = act("SetVariable", {{"name", Ref::of(Value::string(field->name))}, {"value", value}});
+                if (Node* made = graph.find(node)) made->comment = "The first value of " + field->name;
             }
             if (start) body(*start->body, false);
             endEvent();
@@ -829,12 +975,17 @@ public:
             body(*trigger->body, false);
             endEvent();
         }
+        // What has no box (a function of its own, a table, a pointer) is kept as it is written.
         for (const Method& method : component_.methods) {
             if (method.name != "start" && method.name != "update" && method.name != "onCollision" && method.name != "onTriggerEnter") {
                 notConverted.push_back("line " + std::to_string(method.line) + ": " + method.name + "(...): a function of its own has no event to start it");
+                graph.code.push_back(method.raw);
             }
         }
         for (const std::string& skipped : component_.skipped) notConverted.push_back(skipped);
+        for (const std::string& member : component_.memberSources) {
+            if (!member.empty()) graph.code.push_back(member);
+        }
     }
 
 private:
@@ -859,9 +1010,35 @@ private:
             return;
         }
         if (timers_.count(field.name)) return;
-        if (isNumberType(field.type)) {
+        // A number, a yes-no, a point or a text: one of the script's variables, with its first value and comment.
+        PinType type = PinType::Flow;
+        std::string written;
+        for (char c : field.type) {
+            if (c != ' ') written += c;
+        }
+        if (written == "bool") type = PinType::Bool;
+        else if (written == "Vec3" || written == "float3" || written == "simd::float3") type = PinType::Vec3;
+        else if (written == "std::string" || written == "string") type = PinType::String;
+        else if (isNumberType(field.type)) type = PinType::Float;
+        if (type != PinType::Flow) {
             variables_.insert(field.name);
             names_[field.name] = Binding{Binding::Kind::Variable, {}, 0};
+            Variable declared;
+            declared.name = field.name;
+            declared.type = type;
+            declared.comment = field.comment;
+            declared.isShown = component_.fieldsShown.empty() ||
+                               std::find(component_.fieldsShown.begin(), component_.fieldsShown.end(), field.name) != component_.fieldsShown.end();
+            declared.value = Value::fromText(type, "").toText();
+            if (field.value) {
+                Graph saved = graph;
+                Ref value = valueOf(*field.value);
+                graph = std::move(saved);       // (only a plain value is wanted: any box it made is not)
+                failed_ = false;
+                if (!value.isNone() && value.isLiteral()) declared.value = converted(value.literal, type).toText();
+                else startValues_.push_back(&field);
+            }
+            graph.variables.push_back(declared);
             return;
         }
         // Another kind of field with a value: the value, wherever the field is read.
@@ -873,7 +1050,8 @@ private:
             }
         }
         notConverted.push_back("line " + std::to_string(field.line) + ": " + field.type + " " + field.name +
-                               ": a script's variables are numbers; this field is not one");
+                               ": a script's variables are numbers, yes-no, points and texts; this field is none of them");
+        graph.code.push_back(field.raw);
     }
 
     // ---------------------------------------------------------------- events, and where things go on the board
@@ -989,6 +1167,12 @@ private:
         return {};
     }
 
+    /// The length of the frame, as the code names it.
+    bool isDt(const Expr& expr) const {
+        if (expr.kind == Expr::Kind::Name) return expr.text == dtName_;
+        return expr.kind == Expr::Kind::Member && (expr.text == "delta" || expr.text == "dt") && expr.parts[0]->kind == Expr::Kind::Member && expr.parts[0]->text == "time";
+    }
+
     // ---------------------------------------------------------------- numbers, points and yes-or-no
 
     Ref number(float value) { return Ref::of(Value::number(value)); }
@@ -1058,7 +1242,7 @@ private:
             }
             return number(-a.literal.asFloat());
         }
-        return multiply(a, number(-1));
+        return isVector(a) ? multiply(a, number(-1)) : pure("Negate", {{"value", a}});
     }
 
     Ref logic(const std::string& type, const Ref& a, const Ref& b) {
@@ -1080,10 +1264,13 @@ private:
         if (a.isNone() || b.isNone()) return fail();
         if (sign == ">") return pure("Greater", {{"a", a}, {"b", b}});
         if (sign == "<") return pure("Less", {{"a", a}, {"b", b}});
-        if (sign == ">=") return negation(pure("Less", {{"a", a}, {"b", b}}));
-        if (sign == "<=") return negation(pure("Greater", {{"a", a}, {"b", b}}));
-        Ref differs = logic("Or", pure("Less", {{"a", a}, {"b", b}}), pure("Greater", {{"a", a}, {"b", b}}));
-        return sign == "!=" ? differs : negation(differs);
+        if (sign == ">=") return pure("GreaterOrEqual", {{"a", a}, {"b", b}});
+        if (sign == "<=") return pure("LessOrEqual", {{"a", a}, {"b", b}});
+        if (a.type == PinType::String || b.type == PinType::String) {
+            Ref same = pure("TextEquals", {{"a", a}, {"b", b}});
+            return sign == "==" ? same : negation(same);
+        }
+        return pure(sign == "==" ? "Equal" : "NotEqual", {{"a", a}, {"b", b}});
     }
 
     Ref select(const Ref& condition, const Ref& yes, const Ref& no) {
@@ -1112,7 +1299,12 @@ private:
         return pure("Time", {}, "dt");
     }
 
-    Ref variable(const std::string& name) { return pure("GetVariable", {{"name", text(name)}}); }
+    /// A variable's value: a Get Variable box, of the variable's type (a point is a point).
+    Ref variable(const std::string& name) {
+        Ref got = pure("GetVariable", {{"name", text(name)}});
+        if (const Variable* declared = graph.variable(name); declared && !got.isNone()) got.type = declared->type;
+        return got;
+    }
 
     /// Radians in the code, degrees in the boxes.
     Ref degrees(const Expr& angle) {
@@ -1287,6 +1479,7 @@ private:
             }
             if (method == "axis" && arguments.size() == 1 && arguments[0]->kind == Expr::Kind::Text) return pure("Axis", {{"axis", text(arguments[0]->text)}});
             if (method == "isGrounded") return pure("IsGrounded", {});
+            if (method == "value" && arguments.size() == 1 && arguments[0]->kind == Expr::Kind::Text) return pure("GetValue", {{"name", text(arguments[0]->text)}});
             if (isAlias(object, Binding::Kind::Animator)) {
                 if ((method == "parameter" || method == "getFloat" || method == "getParameter") && arguments.size() == 1) {
                     return pure("GetAnimatorFloat", {{"parameter", argument(0)}});
@@ -1313,10 +1506,11 @@ private:
             if (arguments.empty()) return Ref::of(Value::vector(0, 0, 0));
             return fail();
         }
-        if (name == "static_cast" || name == "float" || name == "double" || name == "int" || name == "bool") return argument(0);
+        if (name == "static_cast" || name == "float" || name == "double" || name == "int" || name == "bool" || name == "asValue" || name == "asVec3") return argument(0);
         if (name == "keyByName" && arguments.size() == 1) return argument(0);
         if ((name == "sin" || name == "sinf") && arguments.size() == 1) return pure("Sin", {{"degrees", degrees(*arguments[0])}});
-        if ((name == "cos" || name == "cosf") && arguments.size() == 1) return pure("Sin", {{"degrees", add(degrees(*arguments[0]), number(90))}});
+        if ((name == "cos" || name == "cosf") && arguments.size() == 1) return pure("Cos", {{"degrees", degrees(*arguments[0])}});
+        if ((name == "floor" || name == "floorf") && arguments.size() == 1) return pure("Floor", {{"value", argument(0)}});
         if (name == "radians" && arguments.size() == 1) return multiply(argument(0), number(0.01745329f));
         if (name == "degrees" && arguments.size() == 1) return multiply(argument(0), number(57.29578f));
         if (name == "distance" && arguments.size() == 2) return pure("Distance", {{"a", argument(0)}, {"b", argument(1)}});
@@ -1354,8 +1548,10 @@ private:
 
     /// One statement; if it has no boxes, everything it made is taken back and it is named.
     void run(const Stmt& statement) {
+        int firstNew = graph.nextId;
         if (statement.kind == Stmt::Kind::Other) {
             notConverted.push_back("line " + std::to_string(statement.line) + ": " + statement.source);
+            keepAsCode(statement);
             return;
         }
         Graph savedGraph = graph;
@@ -1377,8 +1573,32 @@ private:
             bottom_ = savedBottom;
             notConverted.resize(reported);
             notConverted.push_back("line " + std::to_string(statement.line) + ": " + statement.source);
+            failed_ = false;
+            keepAsCode(statement);
+            failed_ = outer;
+            return;
         }
         failed_ = outer;
+        // Its comment goes on the first box it made that does something (or on the first of all).
+        if (!statement.comment.empty() && statement.kind != Stmt::Kind::Block) {
+            Node* chosen = nullptr;
+            for (Node& node : graph.nodes) {
+                if (node.id < firstNew || !node.comment.empty()) continue;
+                const NodeDef* kind = definition(node.type);
+                bool acts = kind && kind->findInput("in");
+                if (!chosen || (acts && !(definition(chosen->type) && definition(chosen->type)->findInput("in")))) chosen = &node;
+                if (acts) break;
+            }
+            if (chosen) chosen->comment = statement.comment;
+        }
+    }
+
+    /// A statement no box says: a C++ box with it as it is written, in its place in the flow.
+    void keepAsCode(const Stmt& statement) {
+        std::string code = statement.raw.empty() ? statement.source : statement.raw;
+        if (code.empty()) return;
+        int node = act("Code", {{"code", text(code)}});
+        if (Node* made = graph.find(node)) made->comment = statement.comment;
     }
 
     void perform(const Stmt& statement) {
@@ -1391,6 +1611,8 @@ private:
             case Stmt::Kind::If: branch(statement); return;
             case Stmt::Kind::Assign: assign(statement); return;
             case Stmt::Kind::Do: perform(*statement.value); return;
+            case Stmt::Kind::While: loop(statement); return;
+            case Stmt::Kind::For: countedLoop(statement); return;
             case Stmt::Kind::Other: failed_ = true; return;
         }
     }
@@ -1427,10 +1649,71 @@ private:
         if (isNumber) {
             variables_.insert(statement.name);
             names_[statement.name] = Binding{Binding::Kind::Variable, {}, 0};
+            // A local of the code: a variable of the script too, not shown in the Inspector.
+            if (!graph.variable(statement.name)) {
+                Variable local;
+                local.name = statement.name;
+                local.value = "0";
+                local.comment = statement.comment;
+                local.isShown = false;
+                graph.variables.push_back(local);
+            }
             act("SetVariable", {{"name", text(statement.name)}, {"value", value}});
             return;
         }
         names_[statement.name] = Binding{Binding::Kind::Value, value, 0};
+    }
+
+    /// while (condition) body: a While box, its body after "do", the rest after "done".
+    void loop(const Stmt& statement, const Stmt* step = nullptr) {
+        Ref test = statement.condition ? valueOf(*statement.condition) : Ref::of(Value::boolean(true));
+        if (test.isNone()) {
+            failed_ = true;
+            return;
+        }
+        int node = act("While", {{"condition", test}});
+        if (!node) return;
+        const float loopY = y_;
+        cursors_ = {{node, "do"}};
+        run(*statement.body[0]);
+        if (step) run(*step);
+        cursors_ = {{node, "done"}};
+        y_ = loopY;
+    }
+
+    /// for (float i = a; i < b; i += s) body: a For box, i its index. Any other for: its first
+    /// statement, then a While with the step at the end of each turn.
+    void countedLoop(const Stmt& statement) {
+        const Stmt* init = statement.init.get();
+        const Expr* condition = statement.condition.get();
+        const Stmt* step = statement.step.get();
+        bool isCounted = init && init->kind == Stmt::Kind::Declare && init->value && condition && step && condition->kind == Expr::Kind::Binary &&
+                         (condition->text == "<" || condition->text == ">") && condition->parts[0]->kind == Expr::Kind::Name &&
+                         condition->parts[0]->text == init->name && step->kind == Stmt::Kind::Assign && step->target->kind == Expr::Kind::Name &&
+                         step->target->text == init->name && (step->op == "++" || step->op == "--" || step->op == "+=" || step->op == "-=");
+        if (isCounted) {
+            Ref from = valueOf(*init->value), to = valueOf(*condition->parts[1]);
+            Ref by = step->op == "++" ? number(1) : step->op == "--" ? number(-1) : step->op == "+=" ? valueOf(*step->value) : negate(valueOf(*step->value));
+            if (from.isNone() || to.isNone() || by.isNone()) {
+                failed_ = true;
+                return;
+            }
+            int node = act("For", {{"from", from}, {"to", to}, {"step", by}});
+            if (!node) return;
+            Binding before = names_.count(init->name) ? names_[init->name] : Binding{Binding::Kind::Ignore, {}, 0};
+            bool had = names_.count(init->name) > 0;
+            names_[init->name] = Binding{Binding::Kind::Value, Ref::wire(node, "index", PinType::Float), 0};
+            const float loopY = y_;
+            cursors_ = {{node, "do"}};
+            run(*statement.body[0]);
+            cursors_ = {{node, "done"}};
+            y_ = loopY;
+            if (had) names_[init->name] = before;
+            else names_.erase(init->name);
+            return;
+        }
+        if (init) run(*init);
+        loop(statement, step);
     }
 
     void branch(const Stmt& statement) {
@@ -1444,6 +1727,15 @@ private:
             return;
         }
         const Expr& condition = *statement.condition;
+        // if (!transform) return;: the component is there in a visual script, which does nothing without it.
+        if (condition.kind == Expr::Kind::Unary && condition.text == "!" && condition.parts[0]->kind == Expr::Kind::Name && statement.body.size() == 1 &&
+            statement.body[0]->kind == Stmt::Kind::Return) {
+            auto found = names_.find(condition.parts[0]->text);
+            if (found != names_.end() && (found->second.kind == Binding::Kind::Transform || found->second.kind == Binding::Kind::Body ||
+                                          found->second.kind == Binding::Kind::Animator)) {
+                return;
+            }
+        }
         // if (taken4 == "then") { ... }: the way out of the box it was taken from.
         if (condition.kind == Expr::Kind::Binary && condition.text == "==" && condition.parts[0]->kind == Expr::Kind::Name &&
             condition.parts[1]->kind == Expr::Kind::Text) {
@@ -1517,6 +1809,11 @@ private:
             }
             if (found->second.kind == Binding::Kind::Variable) {
                 Ref by = right();
+                // score += 1: Change Variable, as a graph says it.
+                if ((op == "+=" || op == "-=" || op == "++" || op == "--") && !by.isNone() && !isVector(by) && by.type != PinType::String) {
+                    act("AddToVariable", {{"name", text(target.text)}, {"amount", op == "+=" || op == "++" ? by : negate(by)}});
+                    return;
+                }
                 Ref value = op == "=" ? by : combined(variable(target.text), by);
                 if (value.isNone()) return;
                 act("SetVariable", {{"name", text(target.text)}, {"value", value}});
@@ -1541,6 +1838,13 @@ private:
         if (isAlias(object, Binding::Kind::Transform)) {
             if (member == "position") {
                 if (op == "+=" || op == "-=") {
+                    // position += offset * dt: so far a second.
+                    const Expr& moved = *statement.value;
+                    if (moved.kind == Expr::Kind::Binary && moved.text == "*" && isDt(*moved.parts[1])) {
+                        Ref by = valueOf(*moved.parts[0]);
+                        act("Translate", {{"offset", op == "+=" ? by : negate(by)}, {"perSecond", Ref::of(Value::boolean(true))}, {"local", Ref::of(Value::boolean(false))}});
+                        return;
+                    }
                     Ref offset = op == "+=" ? right() : negate(right());
                     act("Translate", {{"offset", offset}, {"perSecond", Ref::of(Value::boolean(false))}, {"local", Ref::of(Value::boolean(false))}});
                 } else if (op == "=") {
@@ -1566,7 +1870,18 @@ private:
                     else if (b.kind == Expr::Kind::Member && b.text == "rotation") turn = &a;
                 }
                 if (turn && turn->kind == Expr::Kind::Call && turn->parts.size() == 3 && lastPart(turn->parts[0]->text) == "axisAngle") {
-                    act("Rotate", {{"axis", valueOf(*turn->parts[1])}, {"degrees", degrees(*turn->parts[2])}, {"perSecond", Ref::of(Value::boolean(false))}});
+                    // radians(degrees * dt): so many degrees a second.
+                    const Expr* angle = turn->parts[2].get();
+                    bool perSecond = false;
+                    if (angle->kind == Expr::Kind::Call && angle->parts.size() == 2 && lastPart(angle->parts[0]->text) == "radians") {
+                        const Expr& inside = *angle->parts[1];
+                        if (inside.kind == Expr::Kind::Binary && inside.text == "*" && isDt(*inside.parts[1])) {
+                            perSecond = true;
+                            act("Rotate", {{"axis", valueOf(*turn->parts[1])}, {"degrees", valueOf(*inside.parts[0])}, {"perSecond", Ref::of(Value::boolean(true))}});
+                            return;
+                        }
+                    }
+                    act("Rotate", {{"axis", valueOf(*turn->parts[1])}, {"degrees", degrees(*turn->parts[2])}, {"perSecond", Ref::of(Value::boolean(perSecond))}});
                     return;
                 }
                 failed_ = true;
@@ -1675,6 +1990,10 @@ private:
                 act("ReloadScene", {});
                 return;
             }
+            if (method == "setValue" && arguments.size() == 2) {
+                act("SetValue", {{"name", argument(0)}, {"value", argument(1)}});
+                return;
+            }
             if (method == "playSound" && !arguments.empty()) {
                 act("PlaySound", {{"sound", argument(0)}, {"volume", arguments.size() > 1 ? argument(1) : number(1)}});
                 return;
@@ -1685,7 +2004,10 @@ private:
         std::string name = lastPart(callee.text);
         if ((name == "logInfo" || name == "log" || name == "printf" || name == "puts" || name == "logWarning") && !arguments.empty() &&
             arguments[0]->kind == Expr::Kind::Text) {
-            act("Log", {{"message", text(arguments[0]->text)}});
+            // (printf's %% is one %.)
+            std::string message = arguments[0]->text;
+            for (size_t at = message.find("%%"); at != std::string::npos; at = message.find("%%", at + 1)) message.erase(at, 1);
+            act("Log", {{"message", text(message)}});
             return;
         }
         failed_ = true;
@@ -1803,6 +2125,7 @@ private:
     }
 
     const Component& component_;
+    std::vector<const Field*> startValues_;     // fields whose first value is worked out, set in On Start
     std::map<std::string, Binding> names_;
     std::set<std::string> variables_, timers_;
     std::string selfName_ = "self", dtName_ = "dt", otherName_ = "other";
@@ -1833,14 +2156,73 @@ CppToGraphResult graphFromCpp(const std::string& code) {
     if (size_t kept = readable.rfind("/* molten-graph "); kept != std::string::npos) readable = readable.substr(0, kept);
 
     // The boxes that mean what the code means (Rotate, Set Position...), where every line of it has one.
-    Parser parser(tokenize(readable));
+    Parser parser(tokenize(readable), readable);
     std::optional<Component> component = parser.component();
     if (component) {
         result.name = component->name;
+        // The fields MOLTEN_COMPONENT shows in the Inspector: MOLTEN_FIELD(name) of each.
+        if (size_t declared = readable.find("MOLTEN_COMPONENT(" + component->name); declared != std::string::npos) {
+            int depth = 0;
+            size_t end = declared;
+            for (; end < readable.size(); end++) {
+                if (readable[end] == '(') depth++;
+                else if (readable[end] == ')' && --depth == 0) break;
+            }
+            std::string list = readable.substr(declared, end - declared);
+            for (size_t at = list.find("MOLTEN_FIELD("); at != std::string::npos; at = list.find("MOLTEN_FIELD(", at + 1)) {
+                size_t close = list.find(')', at);
+                if (close != std::string::npos) component->fieldsShown.push_back(list.substr(at + 13, close - at - 13));
+            }
+        }
+        // Only a file that is the component (and its #includes, and MOLTEN_COMPONENT) is the
+        // component's boxes: one with more beside it (functions, tables, other structs) is laid out
+        // whole as code boxes, so that nothing of it is lost.
+        std::vector<std::string> includes;
+        bool isOnlyTheComponent = true;
+        {
+            std::string outside = readable.substr(0, component->begin) + "\n" + (component->end < readable.size() ? readable.substr(component->end) : std::string());
+            std::istringstream lines(outside);
+            std::string line, rest;
+            while (std::getline(lines, line)) {
+                std::string trimmed = line;
+                trimmed.erase(0, trimmed.find_first_not_of(" \t\r"));
+                if (trimmed.rfind("#include", 0) == 0) {
+                    // Those code made from a graph always has are not kept: it writes them again.
+                    bool always = false;
+                    for (const char* written : {"MoltenMetal.hpp", "Script/Convert.hpp", "<algorithm>", "<cmath>", "<string>"}) always |= trimmed.find(written) != std::string::npos;
+                    if (!always) includes.push_back(trimmed);
+                    continue;
+                }
+                if (trimmed.rfind("#pragma", 0) == 0) continue;
+                rest += line + "\n";
+            }
+            // What is left, without comments, `using namespace ...;` and MOLTEN_COMPONENT(...): nothing, or not.
+            std::vector<Token> words = tokenize(rest);
+            for (size_t i = 0; i < words.size(); i++) {
+                if (words[i].text == "using" && i + 1 < words.size() && words[i + 1].text == "namespace") {
+                    while (i < words.size() && words[i].text != ";") i++;
+                    continue;
+                }
+                if (words[i].text == "MOLTEN_COMPONENT") {
+                    int depth = 0;
+                    for (i++; i < words.size(); i++) {
+                        if (words[i].text == "(") depth++;
+                        else if (words[i].text == ")" && --depth == 0) break;
+                    }
+                    continue;
+                }
+                if (words[i].text == ";") continue;
+                isOnlyTheComponent = false;
+                break;
+            }
+        }
         Builder builder(*component);
-        builder.build();
-        if (builder.notConverted.empty() && !builder.graph.nodes.empty()) {
+        if (isOnlyTheComponent) builder.build();
+        builder.graph.code.insert(builder.graph.code.begin(), includes.begin(), includes.end());
+        // Every statement is a box: those with no box of their own a C++ box, in its place.
+        if (isOnlyTheComponent && (!builder.graph.nodes.empty() || !builder.graph.variables.empty())) {
             result.graph = std::move(builder.graph);
+            result.notConverted = std::move(builder.notConverted);
             return result;
         }
     }

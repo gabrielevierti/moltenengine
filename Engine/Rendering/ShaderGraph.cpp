@@ -1,5 +1,8 @@
 #include "Rendering/ShaderGraph.hpp"
 
+#include <filesystem>
+#include <fstream>
+
 #include "Math/Math.hpp"
 
 #include <algorithm>
@@ -326,6 +329,21 @@ std::string newShaderGraphText() {
     graph.connect(color, "color", surface, "color");
     graph.connect(rough, "value", surface, "roughness");
     return graph.toText();
+}
+
+bool isShaderGraphText(const std::string& text) {
+    return text.compare(0, 12, "molten-graph") == 0;
+}
+
+bool isShaderGraphFile(const std::string& absolutePath) {
+    std::filesystem::path path(absolutePath);
+    std::string extension = path.extension().string();
+    if (extension == ".shadergraph") return true;
+    if (extension != ".shader") return false;
+    std::ifstream file(absolutePath, std::ios::binary);
+    char start[12] = {};
+    file.read(start, sizeof start);
+    return file.gcount() == 12 && std::string(start, 12) == "molten-graph";
 }
 
 }  // namespace molten

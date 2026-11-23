@@ -98,12 +98,7 @@ void EditorApp::drawPlayBar() {
             keyX += width;
         }
 
-        // What the scene is doing, at the left: a dot in the color of its state, and the words.
-        const ImU32 stateColor = !isPlaying ? IM_COL32(110, 118, 132, 255) : isPaused ? IM_COL32(110, 180, 255, 255) : IM_COL32(255, 122, 47, 255);
-        const float textY = barTop + (height - ImGui::GetTextLineHeight()) * 0.5f;
-        drawList->AddCircleFilled(ImVec2(ImGui::GetWindowPos().x + 16, barTop + height * 0.5f), 4.0f, stateColor, 12);
-        const char* state = !isPlaying ? "Editing" : isPaused ? "Held: changes are kept until Stop" : "Running: what you change now is undone at Stop";
-        drawList->AddText(ImVec2(ImGui::GetWindowPos().x + 28, textY), ImGui::GetColorU32(ImGuiCol_TextDisabled), state);
+        // (Whether the scene runs is said by the Run button itself, lit while it does.)
         const float layoutWidth = 170;
 
         // The layout of the windows, at the right end.

@@ -322,7 +322,7 @@ int Renderer::collectLights(Scene& scene, gpu::LightData* lights, gpu::FrameUnif
         }
         // Asked for: whether it gets one is chosen with the others (chooseLightShadows).
         if (light.castsShadows && (light.type == LightType::Point || light.type == LightType::Spot)) data.shadow = -1.0f;
-        if (light.isVolumetric && (light.type == LightType::Point || light.type == LightType::Spot) && light.volumetricStrength > 0) {
+        if (settings.volumetricLights && light.isVolumetric && (light.type == LightType::Point || light.type == LightType::Spot) && light.volumetricStrength > 0) {
             data.volumetric = light.volumetricStrength;
             hasLightsInAir_ = true;
         }
@@ -872,6 +872,7 @@ void Renderer::render(Scene& scene, const Canvas& canvas, const RenderTarget& ta
             viewTarget.texture = color.get();
             cameraOverride = wanted.camera;
             drawsDebugLines_ = wanted.showsDebugLines;
+            isEditorCamera_ = wanted.isEditorCamera;
             swapTargets(i + 1);
             renderView(commandBuffer, scene, int(i) == canvasView ? canvas : noCanvas, viewTarget, time, false);
             swapTargets(i + 1);
@@ -880,6 +881,7 @@ void Renderer::render(Scene& scene, const Canvas& canvas, const RenderTarget& ta
         cameraOverride = cameraBefore;
         sceneViewport = viewportBefore;
         drawsDebugLines_ = true;
+        isEditorCamera_ = false;
         bool canvasIsInAView = canvasView >= 0 && size_t(canvasView) < views.size() && views[size_t(canvasView)].width > 0;
         Profiler::Scope timed(profilerOrIdle(), "Windows over the views");
         renderInterface(commandBuffer, canvasIsInAView ? noCanvas : canvas, target);
@@ -901,22 +903,32 @@ void Renderer::render(Scene& scene, const Canvas& canvas, const RenderTarget& ta
 void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const Canvas& canvas, const RenderTarget& target, double time,
                           bool withOverlay) {
     // The project's quality, over what the scene says, for this view only: the scene keeps its own.
+    // And, for the editor's own camera, none of what a camera's lens does to the picture.
     struct QualityScope {
         RenderSettings& settings;
         RenderSettings saved;
         bool isOn;
-        QualityScope(RenderSettings& s, const GameQuality* quality) : settings(s), saved(s), isOn(quality != nullptr) {
+        QualityScope(RenderSettings& s, const GameQuality* quality, bool isEditorCamera) : settings(s), saved(s), isOn(quality != nullptr || isEditorCamera) {
             if (quality) quality->applyTo(settings);
+            if (isEditorCamera) {
+                settings.lensDistortion = settings.chromaticAberration = settings.filmGrain = settings.interference = 0.0f;
+                settings.vignette = 0.0f;
+                settings.lensDirt.clear();
+                settings.depthOfField = settings.motionBlur = false;
+                settings.sea.lensThroughSurface = false;
+            }
         }
         ~QualityScope() {
             if (isOn) settings = saved;
         }
-    } qualityScope(settings, quality);
+    } qualityScope(settings, quality, isEditorCamera_);
 
     Rect area = sceneRect(target.texture);
     float scale = settings.renderScale * dynamicScale_ * (settings.followsDeviceHeat ? heatScale : 1.0f);
     int width = std::max(1, int(float(area.width) * scale));
     int height = std::max(1, int(float(area.height) * scale));
+    outputWidth_ = std::max(1, int(area.width));
+    outputHeight_ = std::max(1, int(area.height));
     ensureTargets(width, height);
     ensureShadowMap();
 

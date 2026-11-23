@@ -16,7 +16,7 @@ using namespace molten;
 TEST(a_header_says_which_versions_can_be_read) {
     CHECK(text::checkHeader("molten-scene 1", "molten-scene").empty());
     CHECK(text::checkHeader("molten-scene", "molten-scene").empty());            // no number: version 1
-    CHECK(text::checkHeader("molten-quality 2", "molten-quality").empty());
+    CHECK(text::checkHeader("molten-quality 3", "molten-quality").empty());
     CHECK(!text::checkHeader("molten-scene 2", "molten-scene").empty());
     CHECK(!text::checkHeader("molten-scene 0", "molten-scene").empty());
     CHECK(!text::checkHeader("molten-material 1", "molten-scene").empty());

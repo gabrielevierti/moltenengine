@@ -10,6 +10,7 @@
 #pragma once
 
 #include "Script/Graph.hpp"
+#include "Script/Runtime.hpp"
 
 #include <imgui.h>
 
@@ -35,6 +36,8 @@ public:
     /// Set by whoever shows the board, for a script that runs: values on the wires, the nodes that
     /// ran lit up, breakpoints (right-click a node, or F9).
     const GraphDebugView* debug = nullptr;
+    /// What went wrong as the script ran, or in reading it from C++: each marked on its node, and its pin, in red.
+    const std::vector<script::ScriptProblem>* problems = nullptr;
     /// The control for a text input that names something (PinDef::pick): set by the editor, which knows the project.
     std::function<bool(const script::PinDef& pin, std::string& value, float width)> pickText;
 
@@ -92,6 +95,8 @@ private:
     PinRef hovered_;                            // the pin under the pointer this frame
     PinRef menuPin_;
     int menuNode_ = 0;
+    int commentFor_ = 0, commentId_ = 0;        // the node whose comment is to be written, and is being written
+    std::set<std::string> problemPins_;         // inputs something went wrong at, this frame
     ImVec2 addAt_{0, 0};                        // where on the board a new node goes
     std::map<std::string, PinPlace> pins_;      // where every pin was drawn this frame
     bool needsCentering_ = true;

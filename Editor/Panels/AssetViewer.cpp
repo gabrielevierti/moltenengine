@@ -1,7 +1,9 @@
-// The viewer: what the asset selected in the Explorer is, shown large. A picture to zoom
-// into, a model to turn around, a material on a ball with its settings, a sound to play,
-// bend, cut and save, a file of text to read.
+// What the asset chosen in the Explorer is, shown in the Inspector: a picture to zoom into, a
+// model to turn around, a material on a ball with its settings, a sound to play, bend, cut and
+// save, a file of text to read (its words in color, for code and the engine's own files).
 #include "Editor.hpp"
+#include "Panels/TextHighlight.hpp"
+#include "Rendering/ShaderGraph.hpp"
 #include "Assets/ImportSettings.hpp"
 #include "Assets/AssetDependencies.hpp"
 #include "Audio/AudioEdit.hpp"
@@ -58,8 +60,8 @@ bool writeWav(const std::string& path, const AudioClip& clip) {
     return bool(file);
 }
 
-/// The viewer of what is chosen in the Explorer: not a window of its own but the right part of
-/// the Explorer, there only while something in it is chosen.
+/// What is chosen in the Explorer, shown in the Inspector (as an entity of the scene is) when it
+/// was chosen last.
 class AssetViewer {
 public:
     void draw(EditorContext& editor) {
@@ -83,15 +85,14 @@ public:
             open(editor, *asset);
             shownTime_ = written;
         }
+        // Its name and kind, then what can be done with the file itself.
         ImGui::TextUnformatted(asset->name.c_str());
-        ImGui::SameLine();
-        ImGui::TextDisabled("%s   %s", AssetDatabase::typeName(asset->type), ui::byteSize(asset->size).c_str());
-        ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - 176);
+        drawCloseButton(editor);
+        ImGui::TextDisabled("%s, %s", AssetDatabase::typeName(asset->type), ui::byteSize(asset->size).c_str());
         if (ImGui::SmallButton("Open Outside")) platform::openWithDefaultApplication(editor.assets.absolutePath(asset->path));
         ui::tooltip("In the program your Mac uses for this kind of file");
         ImGui::SameLine();
-        if (ImGui::SmallButton("Finder")) platform::revealInFinder(editor.assets.absolutePath(asset->path));
-        drawCloseButton(editor);
+        if (ImGui::SmallButton("Show in Finder")) platform::revealInFinder(editor.assets.absolutePath(asset->path));
         ImGui::Separator();
         // What can be done with it, at the top, for the kinds that do something.
         if (asset->type == AssetType::Scene) {
@@ -106,6 +107,10 @@ public:
             ImGui::Spacing();
         } else if (asset->type == AssetType::Timeline) {
             if (ImGui::Button("Open in Timeline")) editor.openPanel("Timeline");
+            ImGui::Spacing();
+        } else if (asset->type == AssetType::Shader && isShaderGraphText(text_)) {
+            if (ImGui::Button("Open in Shader Graph")) editor.openPanel("Shader Graph");
+            ui::tooltip("A shader drawn as a graph. A material chooses it as its Shader");
             ImGui::Spacing();
         } else if (asset->type == AssetType::Effect || asset->type == AssetType::Prefab) {
             // In front of the camera; dragging it into the Scene view puts it where it is let go.
@@ -127,11 +132,11 @@ public:
     }
 
 private:
-    /// Closes the viewer: nothing of the Explorer chosen any more.
+    /// Goes back to the scene: nothing of the Explorer chosen any more.
     void drawCloseButton(EditorContext& editor) {
         ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - ImGui::GetFrameHeight());
         if (ImGui::SmallButton("x")) editor.selectedAsset.clear();
-        ui::tooltip("Close the viewer");
+        ui::tooltip("Show what is chosen in the scene again");
     }
 
     // ---------------------------------------------------------------- what uses what
@@ -497,7 +502,7 @@ private:
         ImGui::InvisibleButton("##model", room);
         bool isTurning = ImGui::IsItemActive();
         if (isTurning) {
-            yaw_ += ImGui::GetIO().MouseDelta.x * 0.01f;
+            yaw_ -= ImGui::GetIO().MouseDelta.x * 0.01f;            // the model turns the way the mouse goes, as if held
             pitch_ = std::clamp(pitch_ + ImGui::GetIO().MouseDelta.y * 0.01f, -1.4f, 1.4f);
         }
         if (ImGui::IsItemHovered() && ImGui::GetIO().MouseWheel != 0) distance_ = std::clamp(distance_ * std::pow(0.88f, ImGui::GetIO().MouseWheel), 1.1f, 12.0f);
@@ -850,7 +855,7 @@ private:
         }
         if (ImGui::BeginTabBar("##forms")) {
             if (ImGui::BeginTabItem("As C++")) {
-                ImGui::InputTextMultiline("##code", code_.data(), code_.size() + 1, ImVec2(-FLT_MIN, -FLT_MIN), ImGuiInputTextFlags_ReadOnly);
+                highlightedCode_.draw(code_, TextKind::Code);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("As Saved")) {
@@ -902,11 +907,13 @@ private:
         }
         int lines = int(std::count(text_.begin(), text_.end(), '\n')) + 1;
         ImGui::TextDisabled("%d lines", lines);
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Copy All")) ImGui::SetClipboardText(text_.c_str());
         drawTextBody();
     }
 
     void drawTextBody() {
-        ImGui::InputTextMultiline("##text", text_.data(), text_.size() + 1, ImVec2(-FLT_MIN, -FLT_MIN), ImGuiInputTextFlags_ReadOnly);
+        highlighted_.draw(text_, textKindOf(loweredExtension(shown_)));
     }
 
     struct Face {
@@ -942,6 +949,7 @@ private:
     double startedAt_ = 0;
     // text
     std::string text_;
+    HighlightedText highlighted_, highlightedCode_;
     std::string code_, shownCodeFor_;
 };
 
@@ -953,7 +961,9 @@ void registerAssetViewerPanel(EditorContext& editor) {
 
 void drawAssetViewer(EditorContext& editor) {
     static AssetViewer viewer;
+    ImGui::PushTextWrapPos(0.0f);           // the Inspector is narrow: its sentences wrap
     viewer.draw(editor);
+    ImGui::PopTextWrapPos();
 }
 
 }  // namespace molten::editor

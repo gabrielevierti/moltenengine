@@ -212,7 +212,7 @@ void SurfaceShaderSet::read(size_t index) {
     }
     std::stringstream text;
     text << file.rdbuf();
-    if (std::filesystem::path(name).extension() == ".shadergraph") {
+    if (std::filesystem::path(name).extension() == ".shadergraph" || isShaderGraphText(text.str())) {
         // Drawn, not written: the code is made from the graph (ShaderGraph.hpp).
         std::string error;
         std::optional<script::Graph> graph = script::Graph::fromText(text.str());

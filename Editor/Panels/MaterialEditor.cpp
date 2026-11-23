@@ -7,6 +7,7 @@
 #include "Platform.hpp"
 #include "SoftRender.hpp"
 #include "Rendering/SurfaceShader.hpp"
+#include "Rendering/ShaderGraph.hpp"
 #include "Core/TextFile.hpp"
 #include "Panels/Widgets.hpp"
 
@@ -225,13 +226,18 @@ bool drawMaterialProperties(EditorContext& editor, Material& material) {
             std::string path = editor.assets.uniquePath("Shaders", isWater ? "Water" : "New Shader", ".shader");
             std::error_code ignored;
             std::filesystem::create_directories(std::filesystem::path(editor.assets.absolutePath(path)).parent_path(), ignored);
-            if (text::writeFile(editor.assets.absolutePath(path), isWater ? newWaterShaderText() : newSurfaceShaderText())) {
+            // A shader is drawn (Shader Graph); water starts as code, which its waves need.
+            if (text::writeFile(editor.assets.absolutePath(path), isWater ? newWaterShaderText() : newShaderGraphText())) {
                 editor.assets.refresh();
                 material.shader = path;
                 material.shaderValues.clear();
                 // Water is seen through: what is under it shows, and its shader says how much.
                 if (isWater) material.alphaMode = AlphaMode::Blend, material.roughness = 0.05f, material.metallic = 0.0f;
-                editor.notify("Made " + path + ": open it from the Explorer to write it");
+                if (isWater) editor.notify("Made " + path + ": open it from the Explorer to write it");
+                else {
+                    editor.selectedAsset = path;
+                    editor.openPanel("Shader Graph");
+                }
             }
             shader = 0;
         } else {
@@ -242,7 +248,7 @@ bool drawMaterialProperties(EditorContext& editor, Material& material) {
         changed = true;
     }
     ui::tooltip("Lit: a surface that light falls on, described by color, metal and roughness.\nUnlit: its own color and nothing else, for signs, glows and flat-shaded art.\n"
-                "Below them, the project's own shaders (.shader files): each is given the surface as the settings here make it, and changes it.\n"
+                "Below them, the project's own shaders (drawn in the Shader Graph, or written as code): each is given the surface as the settings here make it, and changes it.\n"
                 "New Water Shader makes one for water of the game's own (a pond, a pool, a cartoon lagoon), to change as it should look.\n"
                 "The scene's sea is not a material: Environment > Water.");
     if (!material.shader.empty()) changed |= drawShaderProperties(editor, material);

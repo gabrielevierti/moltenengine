@@ -100,7 +100,7 @@ struct WeatherSettings {
 /// (dimmer and bluer the deeper, with the sun's light gathered into moving lines by the waves),
 /// and seen from inside it when the camera goes under. How it looks is set here, from a real
 /// sea to a lagoon in a cartoon. (Water of a game's own, a pond or a pool, is a surface shader:
-/// Assets > New > Water Shader.)
+/// Explorer > + New > Water Shader as Code.)
 struct SeaSettings {
     bool enabled = false;                       // a new scene of the editor has it; a scene of before, or one made in code, not
     float level = 0.0f;                         // meters: where its surface rests
@@ -245,6 +245,9 @@ struct RenderSettings {
     /// The scene's baked light probes: a `.lighting` file in Assets (Lighting > Bake Light Probes
     /// writes it beside the scene), or empty for none. The Engine reads it (Rendering/LightProbes.hpp).
     std::string bakedLighting;
+    // What the project's quality level allows of the above (Rendering/Quality.hpp): never in a scene file.
+    bool volumetricLights = true;               // lights that light the air (Light::isVolumetric)
+    bool usesLightProbes = true;                // the baked light probes
     float colorGradingAmount = 1.0f;
     /// Exposure that adapts, as an eye does: brighter in a tunnel, darker in the sun.
     bool autoExposure = false;
@@ -473,6 +476,12 @@ public:
         int width = 0, height = 0;          // pixels; a view without size is skipped
         Entity camera;                      // looked through whatever the scene says; invalid: the scene's active camera
         bool showsDebugLines = false;       // the editor's grid and outlines belong to its own view
+        /// The editor's own camera (the Scene view): the scene as it is, without what the game's
+        /// camera does to the picture: no drops or shake as it goes through water, no lens
+        /// distortion, color fringes, grain, interference, vignette, dirt on the glass, depth of
+        /// field or motion blur. The light stays as the game shows it (exposure, tone mapping,
+        /// bloom, grading), so what is lit is judged rightly.
+        bool isEditorCamera = false;
     };
     std::vector<SceneView> views;
     /// The view the canvas is drawn into (a game's interface belongs to the picture of the
@@ -705,6 +714,7 @@ private:
     Mat4 previousViewProjection_ = identity();
     // The camera through the sea's surface, for the last pass (PostUniforms::lensWater...): the last view drawn.
     Vec4 lensWater_{0, 0, 0, 0}, lensSea_{0, 0, 0, 0}, lensMore_{0, 0, 0, 0};
+    bool isEditorCamera_ = false;                   // the view being drawn is the editor's own camera (SceneView::isEditorCamera)
     int lensWasUnder_ = -1;                         // the view before: 1 under, 0 above, -1 not known
     double lensSurfacedAt_ = -100, lensPlungedAt_ = -100, lensSeenAt_ = -100;
     bool hasPreviousView_ = false;
@@ -774,6 +784,7 @@ private:
     // Point and spot lights' shadow maps, side by side in one depth texture (chooseLightShadows).
     NS::SharedPtr<MTL::Texture> lightShadowAtlas_;
     gpu::LightShadowViews lightShadowViews_{};
+    int outputWidth_ = 1, outputHeight_ = 1;        // the size the picture is shown at, before the render scale
     gpu::ProbeVolumes probeVolumes_{};
     NS::SharedPtr<MTL::Buffer> probes_;             // six float4 a probe; one probe's worth of nothing when there are none
     size_t lightProbeCount_ = 0;

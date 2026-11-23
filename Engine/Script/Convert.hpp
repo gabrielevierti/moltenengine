@@ -1,16 +1,18 @@
 // Convert.hpp
-// A visual script written out as C++: the same events, the same steps in the same order,
-// as a component a programmer can go on from. Each box of the graph becomes one call of
-// the node of that name, so the code does exactly what the graph did.
+// A visual script written out as C++, and what the C++ made from one runs with.
 //
-//     [On Update] ──▶ [Rotate degrees 180]        void update(World& world, Entity self, float dt) {
-//                                                     script::Call call(world, self, dt, state);
-//                                                     call("Rotate", {{"degrees", script::Value::number(180)}});
-//                                                 }
+//     [On Update] ──▶ [Rotate degrees speed]       void update(World& world, Entity self, float dt) {
+//                                                       Transform* transform = world.scene.get<Transform>(self);
+//                                                       if (!transform) return;
+//                                                       transform->rotation = transform->rotation * axisAngle(Vec3{0, 1, 0}, radians((speed) * dt));
+//                                                   }
 //
-// The other way, from any C++ to a graph, cannot be done: code can say things boxes and
-// wires have no shape for. Code that was made from a graph keeps the graph in a comment at
-// its end, so that it can go back: the graph it was made from.
+// Each box is the line of code it means, the script's variables are the component's fields, a
+// box's comment is a comment above its line (Script/GraphToCpp.cpp). A box that has no line of its
+// own (one a plugin added, one that acts on another entity) is called as it is: call("Type",
+// {...}), which runs that very box. Script/CppToGraph reads all of it back to the same boxes.
+// Code made from a graph also keeps the graph in a comment at its end: unchanged, it goes back
+// to that very graph, as it was laid out.
 #pragma once
 
 #include "Script/Runtime.hpp"
@@ -40,9 +42,20 @@ struct Call {
     ScriptState& state;
 };
 
-/// The C++ of a graph, as a component called `name`. `source` is where the graph came
-/// from, for the comment at the top.
+/// A point as a script::Value, and back: for a box called from code (call("...")).
+inline Value asValue(Vec3 v) { return Value::vector(v.x, v.y, v.z); }
+inline Vec3 asVec3(const Value& value) {
+    float x, y, z;
+    value.asVector(x, y, z);
+    return Vec3{x, y, z};
+}
+
+/// The C++ of a graph, as a component called `name`: the script's variables its fields, each box
+/// the line of code it means (Script/GraphToCpp.cpp). `source` is where the graph came from, for
+/// the comment at the top.
 std::string graphToCpp(const Graph& graph, const std::string& name, const std::string& source);
+/// The same, written so: what graphToCpp gives for a graph of boxes.
+std::string graphToNaturalCpp(const Graph& graph, const std::string& name, const std::string& source);
 
 /// The same, with the graph kept in a comment at the end of the file: what can go back to boxes.
 std::string graphToCppKeepingGraph(const Graph& graph, const std::string& name, const std::string& source);

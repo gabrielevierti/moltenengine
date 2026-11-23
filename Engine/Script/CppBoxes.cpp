@@ -884,6 +884,7 @@ std::string cppBoxText(const Node& node) {
 }
 
 std::string cppBoxComment(const Node& node) {
+    if (node.type == "Code") return node.comment;       // a C++ box among the others: its comment is the box's own
     // The comment lines just above it: the last run of them in what precedes it.
     std::string lead = valueOf(node, "lead"), comment;
     size_t start = 0;
@@ -906,7 +907,7 @@ std::string cppBoxComment(const Node& node) {
 }
 
 bool cppBoxSize(const Node& node, float& width, float& height) {
-    if (!isCppBox(node.type)) return false;
+    if (!isCppBox(node.type) && node.type != "Code") return false;
     std::string text = cppBoxText(node), comment = cppBoxComment(node);
     int lines = 0;
     size_t longest = 0;
