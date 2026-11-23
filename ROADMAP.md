@@ -23,12 +23,12 @@ The base the rest builds on. Each `[~]` says what it still lacks.
 
 **Rendering**
 - [x] Physically based materials (lit, unlit, water) and hand-written surface shaders
-- [x] Cascaded shadow maps; frustum culling
+- [x] Cascaded shadow maps; shadows of point and spot lights (1.3); frustum culling
 - [x] HDR, tone mapping, bloom, vignette, ambient occlusion
-- [~] Hardware ray tracing: sun shadows, reflections, one bounce of light — [ ] denoiser, point and spot light shadows
+- [~] Hardware ray tracing: sun shadows, reflections, one bounce of light; what is seen and what casts shadows chosen apart (1.3) — [ ] denoiser, point and spot light shadows traced
 - [~] Sky and clouds, height fog with shafts of light
 - [~] FFT ocean with foam, floating
-- [~] CPU particles with presets, streaks (rain) — [ ] on the GPU
+- [~] CPU particles made of modules, streaks (rain) — [ ] on the GPU
 - [~] LOD Groups: a near and a far model — [ ] more levels, made automatically, cross-fading
 - [x] Quality levels and render scale
 
@@ -36,6 +36,7 @@ The base the rest builds on. Each `[~]` says what it still lacks.
 - [x] Rigid bodies, contacts, joints (ball, hinge, fixed, distance, rope, breaking)
 - [x] Sphere, box, capsule, mesh and convex colliders (GJK and EPA)
 - [x] Raycasts; buoyancy; liquids made of drops
+- [x] Physics at scale (1.3): bodies at rest fall asleep together and wake when touched, pushed or left without support; the exact tests shared among the cores
 - [x] Vehicles from parts: springs, tyres that slide, engine and gearbox, wings and propellers
 
 **Audio**
@@ -43,7 +44,7 @@ The base the rest builds on. Each `[~]` says what it still lacks.
 - [~] Sounds placed in the world (volume and pan) — [ ] reverb, occlusion, buses
 
 **Animation**
-- [~] glTF skeletons, CPU skinning, clips with easing between them
+- [~] glTF skeletons, skinning on the GPU (on the processor where the kernel is missing), clips with easing between them
 
 **Interface and input**
 - [x] Text, buttons, panels, images, gauges, touch buttons and stick; anchors; scales with the screen
@@ -90,6 +91,26 @@ The base the rest builds on. Each `[~]` says what it still lacks.
 - [x] Quality in seven groups and four levels, which a scene's own settings cannot exceed; dynamic resolution that works
 - [x] Draw calls counted by kind (the scene's own, its shadows, depth, full-screen passes), and fewer of them: the sun's shadow cascades in one pass, and no shadow pass where nothing casts one
 
+## 1.3 — Light, weather, cloth, and an editor that says what it does
+
+- [x] Shadows for point and spot lights: the nearest and brightest of them, in one atlas, as many as the quality allows
+- [x] Spot light cookies (a picture the light shines through) and lights seen in the air: beams in fog and dust
+- [x] Rain that runs down what it falls on, pulled by its weight, pushed by the wind and by the object's own speed; beads on paint, soaking into stone; snow that settles
+- [x] Clouds that drift with the wind without stretching; their height and thickness, and what the quality level does to them, said where they are set
+- [x] Cloth: pinned where chosen, blown by the wind, lying over colliders and meshes, made from the Hierarchy (3D Object > Cloth)
+- [x] Shadow distance as a share of the quality's reach; wherever the quality level overrides a setting, an orange note says so beside it
+- [x] An icon for every window, tool, component, kind of asset and quality group (a font of Lucide icons); a scene's lights, cameras, effects and sounds shown by theirs; tabs in a narrow place shrink to their icons
+- [x] The Scene view's tools as grouped controls: the four tools, where the handles are, snapping, what is shown
+- [x] Opening a project shows each step, how long it took, and the warnings and errors on the way
+- [x] The Timeline window back, for `.timeline` files (Move, Camera, Sound, Value, Show, Trigger, Clip tracks, with a preview that puts everything back); the window that keys an entity's animations is now **Animation**, as in Unity
+- [x] Particle effects as files: Save as Effect on a particle system, + New > Particle Effect, dropped into the scene or the Hierarchy
+- [x] Models with bones posed on the GPU (a compute kernel), and ray tracing that follows what moves (refitted structures)
+- [x] Bodies at rest fall asleep and wake when touched; the narrow phase shared among the cores
+- [x] Shader Graph: shaders drawn as nodes
+- [x] Light Probe Volumes: light baked into probes round a room or a building (how much sky each place sees, and what the walls throw back), so that indoors is as dark as its windows make it
+- [x] Stable formats: every file says its version, a reader skips what is newer within one, and a newer version is refused with a message (Docs/FileFormats.md); an API reference made from the headers (Docs/API.md, Tools/make_api_docs.py)
+- [x] The logo and the icon drawn again as vectors (Tools/make_branding.py), sharp at any size
+
 ## Phase 1 — Fast, and shippable
 
 What the Driving game needs now: it runs at 30–40 fps in the editor with 1000 draw calls, and it cannot yet
@@ -97,7 +118,7 @@ reach the App Store.
 
 - [x] **CPU profiler**: time per part of the frame and per kind of component, five seconds of history, a frame held to
       look at (Window > Profiler); the slowest parts in the F1 overlay of a running game
-- [~] **GPU profiler**: the GPU's time per frame — [ ] per render pass (Metal counters), draw calls and triangles per pass
+- [~] **GPU profiler**: the GPU's time per frame and per render pass (Metal counters, Profiler > Frame) — [ ] draw calls and triangles per pass
 - [x] **GPU instancing**: runs of the same mesh and material are drawn as one instanced draw (it was there already)
 - [~] **Precompiled shaders**: the build compiles them (target `molten-shaders`, Tools/compile_shaders.sh) when the Metal
       compiler is installed; a mistake stops there, not as a magenta screen; the engine loads them when no source is newer.
@@ -132,11 +153,11 @@ The next game after Driving: someone who walks, runs and jumps.
 - [x] **Animator window**: the controller as a graph of states and transitions, parameters and layers, lit while the game runs
 - [x] **Animation from scripts**: Set Animator Float/Bool/Trigger, Play State, Play Clip; events as messages
 - [x] **No typed names**: every field and visual-script box that names something offers a list of what it can be
-- [x] **Animations of an entity's own**, keyed in the Timeline with Record; procedural tracks (wave, wander, a parameter); Time by
+- [x] **Animations of an entity's own**, keyed in the Animation window with Record; procedural tracks (wave, wander, a parameter); Time by
 - [x] **Simulated atmosphere** (Rayleigh, Mie, ozone), flyable volumetric clouds at a height, lens flare, limb-darkened sun
 - [x] **Water on any plane**: waves that rise, depth-tinted shallows, foam round what stands in it
 - [x] **Project quality settings** (Settings/Quality.settings), area lights, particle pictures and collisions, trackball rotation
-- [ ] **GPU skinning**, and **blend shapes** (faces)
+- [~] [x] **GPU skinning** (1.3: a compute kernel poses the vertices before the frame; ray tracing refits to them) — [ ] **blend shapes** (faces)
 - [x] **Two-bone IK**: a foot or a hand on a target, the knee or elbow toward a pole
 - [x] **Navigation**: a Navigation Area finds the walkable ground (slope, steps, room for the agents' size); paths by A*,
       pulled straight; Nav Agents walk them, with their Character Controller if they have one
@@ -149,17 +170,17 @@ The next game after Driving: someone who walks, runs and jumps.
 
 ## Phase 3 — How it looks
 
-- [ ] **Reflection probes and light probes**: lighting for scenes and devices without ray tracing
-- [ ] **Baked lighting** for static scenes
+- [~] [x] **Light probes** (1.3: Light Probe Volumes, baked on the processor: the sky each place sees and the light bounced to it) — [ ] **reflection probes**: what shiny things mirror indoors, for scenes and devices without ray tracing
+- [~] **Baked lighting** for static scenes: [x] into probes (1.3) — [ ] into lightmaps, for sharp baked shadows
 - [ ] **Clustered lights**: many point and spot lights at once
-- [ ] **Decals**: skid marks, puddles, dirt, without extra meshes
-- [ ] **Depth of field, motion blur, colour grading (LUT), auto exposure**
+- [x] **Decals**: skid marks, puddles, dirt, without extra meshes
+- [x] **Depth of field, motion blur, colour grading (LUT), auto exposure**
 - [x] **Day and night**: the sky follows the sun by itself, warms at dawn and dusk, a moon at night; sky and fog follow (the Day and Night component was taken out in 1.2: turning the sun is a script's)
-- [ ] **Physical sky** (scattering in the shader), stars at night
+- [x] **Physical sky** (scattering in the shader), stars at night
 - [ ] **Particles on the GPU**: many more, with textures, trails and collisions
 - [ ] **Ray tracing denoiser**; shadows of point and spot lights traced
-- [ ] **Material graph**: materials made from nodes, beside the hand-written shaders
-- [ ] **Water**: refraction and depth colour, shores
+- [x] **Shader Graph** (1.3): shaders drawn as nodes (`.shadergraph`, Window > Shader Graph), made into surface shaders by the engine, beside the hand-written ones
+- [x] **Water**: refraction and depth colour, shores
 
 ## Phase 4 — Working in the editor
 
@@ -224,7 +245,7 @@ The five above are drawn by the GPU: written and built, to be seen on the Mac.
 ## Later, when a game needs it
 
 - [ ] Audio buses, effects, reverb zones, ducking, adaptive music
-- [ ] Ragdolls, cloth, ropes with links, soft bodies, destruction
+- [~] [x] Ragdolls, [x] cloth (1.3), [x] ropes with links — [ ] soft bodies, destruction
 - [ ] Continuous collision detection (fast bullets)
 - [~] Multiplayer: [x] a host, a server and those who join, on a local network or by address (1.2) — [ ] finding games without typing an address, Game Center matches between friends, taking over when the host leaves; prediction and rollback only for a game made for it
 - [ ] Occlusion culling, HLOD, world streaming, additive scenes — for large worlds

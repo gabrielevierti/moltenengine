@@ -22,7 +22,7 @@ void Splash::draw(Canvas& canvas, float seconds, std::string_view subtitle, cons
     float under = size.y * 0.5f;
     if (logo) {
         // The logo: the mark, the name and what the engine is for, as one picture.
-        float width = std::min(size.x * 0.62f, 760.0f), height = width * 268.0f / 1200.0f;
+        float width = std::min(size.x * 0.62f, 760.0f), height = width * 536.0f / 2400.0f;
         canvas.image(logo, Vec2{(size.x - width) * 0.5f, (size.y - height) * 0.5f + rise}, Vec2{width, height}, Vec4{1, 1, 1, alpha});
         under = (size.y + height) * 0.5f + titleSize * 0.6f + rise;
     } else {

@@ -49,13 +49,13 @@ static float cloudDensity(float3 at, constant FrameUniforms &frame, texture3d<fl
     // Where the wind has carried them: read upwind of here, so that they go the way the wind blows
     // (the way the waves run, Mesh.metal).
     float3 p = at - float3(frame.cloudOffset.x, 0.0, frame.cloudOffset.y) * 2400.0;
-    // The wind draws them out along it, the harder the more (up to twice as long as wide), and
-    // leans their tops downwind: the shapes are read in the wind's own frame.
+    // Their tops lean a little downwind, the more the harder it blows. (Their shapes are fixed to
+    // the sky, not to the wind's direction: a change of wind carries them on from where they are,
+    // it does not turn or stretch the whole sky.)
     float speed = length(frame.cloudWind);
     float2 along = speed > 0.1 ? frame.cloudWind / speed : float2(1.0, 0.0);
-    float stretch = 1.0 + min(speed, 30.0) * 0.033;
-    p.xz -= along * (height * (frame.cloudTop - frame.cloudBase) * min(speed, 30.0) * 0.012);
-    float2 windward = float2(dot(p.xz, along) / stretch, dot(p.xz, float2(-along.y, along.x)));
+    p.xz -= along * (height * (frame.cloudTop - frame.cloudBase) * min(speed, 30.0) * 0.004);
+    float2 windward = p.xz;
 
     // Where the clouds are: the same noise read very large, so that the sky has stretches
     // with many and stretches with few, each several kilometers across; and, the fewer the

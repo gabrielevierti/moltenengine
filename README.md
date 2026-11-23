@@ -23,7 +23,7 @@ You write games with C++ components or visual scripts, build scenes in a full ed
 ![The Molten Engine editor: Hierarchy, Game and Scene views side by side, the Inspector showing the car's Vehicle Body, the Explorer along the bottom](screen.png)
 
 > [!NOTE]
-> **Version 1.0, early development.** Everything described here is implemented and available today. Upcoming work and known limitations are in [ROADMAP.md](ROADMAP.md).
+> **Version 1.3, early development.** Everything described here is implemented and available today. Upcoming work and known limitations are in [ROADMAP.md](ROADMAP.md).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="Docs/readme/features-dark.svg">
@@ -87,6 +87,8 @@ A complete visual editor that makes game development approachable without taking
 
 - Hierarchy, Scene, Game, Inspector, Explorer and Console panels
 - Dockable, rearrangeable tabs; save, export and import layouts
+- An icon for every panel, tool, component and asset type; tabs in a narrow dock shrink to their icons
+- Opening a project shows each loading step, its timing, and any warning or error
 - Console with categories, search and collapsed duplicates
 - Independent Scene and Game cameras
 - Play and Stop, with the scene restored afterwards
@@ -97,6 +99,7 @@ A complete visual editor that makes game development approachable without taking
 - Fly camera (right mouse button + WASD) and Alt-drag orbit
 - **F** frames the selection
 - Collider visualization
+- Lights, cameras, particle systems and sounds shown by their icons in the view
 
 **Asset management**
 
@@ -131,7 +134,7 @@ A complete visual editor that makes game development approachable without taking
 - A dedicated Build window for **macOS, iOS and iPadOS** apps
 - For iOS it generates the Xcode project, builds the app and installs it on a connected device
 
-**Workflow:** undo for editor operations, one log for engine and game, persistent layouts, built-in project management.
+**Workflow:** undo for editor operations, one log for engine and game, persistent layouts, built-in project management, and six templates to start from (car, plane, boat, third person, first-person shooter, online).
 
 </td>
 </tr>
@@ -175,6 +178,8 @@ Its fields appear in the Inspector and are saved with the scene, and `update` ru
 | [Game Code](Docs/GameCode.md) | Writing components in C++ |
 | [Visual Scripting](Docs/VisualScripting.md) | Gameplay without code |
 | [Editor Plugins](Docs/Plugins.md) | Extending the editor |
+| [API Reference](Docs/API.md) | Every class and function a game can use, from the headers |
+| [File Formats](Docs/FileFormats.md) | What each saved file holds, and what stays compatible |
 
 ## Engine features
 
@@ -185,19 +190,20 @@ Its fields appear in the Inspector and are saved with the scene, and `update` ru
 **Rendering**, a Metal pipeline designed for Apple GPUs
 
 - Physically based rendering, HDR and multisampling
-- Cascaded shadow maps; directional, point and spot lights (up to 63 point and spot)
+- Cascaded shadow maps; directional, point and spot lights (up to 63 point and spot), with shadows for the nearest and brightest
+- Spot light cookies, and volumetric lights that show as beams in fog
 - **Hardware ray tracing:** shadows, ambient occlusion, reflections and single-bounce lighting
 - Image-based lighting and normal maps
 - Transparent and cut-out materials
-- Procedural sky, clouds and fog; volumetric light shafts
+- Procedural sky, clouds that drift with the wind, and fog; volumetric light shafts
 - Water rendering
 - Bloom, tone mapping and lens effects
 
 **Particles and effects**
 
-- Shape-based and burst emission
-- Turbulence, wind and collision with floors
-- Nine built-in presets and reusable `.effect` assets
+- Modular particle systems: shape-based and burst emission, turbulence, wind, trails
+- Collision with colliders; soft and lit particles; reusable `.effect` assets
+- Weather: rain that runs down surfaces with the wind and the object's speed, beading on paint and soaking into stone; snow that settles
 
 </td>
 <td valign="top" width="50%">
@@ -208,6 +214,7 @@ Its fields appear in the Inspector and are saved with the scene, and `update` ru
 - Sphere, box, capsule and mesh colliders
 - Joints, triggers, raycasts and collision layers
 - Vehicle physics: wheels, suspension, engines and aerodynamic wings
+- Cloth (flags, sails, curtains) that collides with the scene; ropes and ragdolls
 
 **Core systems**
 
@@ -268,7 +275,7 @@ Shaders/      Metal shaders and shared GPU definitions
 Assets/       engine assets, fonts, logos and icons
 Tests/        automated unit tests
 Templates/    new project templates
-Tools/        asset and example project tools
+Tools/        asset, template, icon font and logo tools
 Website/      the project website
 ```
 

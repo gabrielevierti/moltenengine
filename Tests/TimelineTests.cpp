@@ -39,7 +39,9 @@ TEST(a_timeline_is_read_and_written) {
     CHECK(read->tracks[0].keys.size() == 3 && read->tracks[1].marks[1].text == "Close");
     std::optional<Timeline> again = Timeline::parse(read->toText());
     CHECK(again && again->toText() == read->toText());
-    CHECK(!Timeline::parse("molten-timeline 1\ntrack dance \"X\"\n", &error) && !error.empty());
+    // A kind of track from a newer engine is skipped, not fatal.
+    std::optional<Timeline> later = Timeline::parse("molten-timeline 1\ntrack dance \"X\"\nat 1 \"step\"\n", &error);
+    CHECK(later && later->tracks.empty());
     CHECK(!Timeline::parse("length 3\n"));
     // Through its keys: at them exactly, smoothly between.
     Vec3 position;

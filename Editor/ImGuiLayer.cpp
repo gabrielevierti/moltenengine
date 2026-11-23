@@ -2,6 +2,9 @@
 
 #include "ImGuiLayer.hpp"
 
+#include "Core/Paths.hpp"
+#include "Panels/Widgets.hpp"
+
 #include <ImGuizmo.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_metal.h>
@@ -10,6 +13,8 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 
 namespace molten::editor {
 
@@ -43,6 +48,11 @@ void convertColorsToLinear(ImDrawData* drawData) {
 
 }  // namespace
 
+ImFont*& ImGuiLayer::iconFont() {
+    static ImFont* font = nullptr;
+    return font;
+}
+
 bool ImGuiLayer::start(Engine& engine, const std::string& settingsFile) {
     Window* window = engine.window();
     hasWindow_ = window != nullptr;
@@ -56,12 +66,46 @@ bool ImGuiLayer::start(Engine& engine, const std::string& settingsFile) {
     io.ConfigDragClickToInputText = true;
     settingsFile_ = settingsFile;
     io.IniFilename = hasWindow_ ? settingsFile_.c_str() : nullptr;      // ImGui keeps the pointer: the string lives in this object
+    // Windows remembered from before they had icons on their tabs keep their places (ui::withWindowIds).
+    if (hasWindow_) {
+        std::ifstream in(settingsFile_);
+        if (in) {
+            std::stringstream text;
+            text << in.rdbuf();
+            std::string before = text.str(), after = ui::withWindowIds(before);
+            in.close();
+            if (after != before) std::ofstream(settingsFile_) << after;
+        }
+    }
 
-    // The system font where there is one; ImGui's built-in font otherwise.
+    // The system font where there is one; ImGui's built-in font otherwise. Its private-use letters
+    // are left out: that is where the icons are, and the first font to have a letter is the one drawn.
+    static const ImWchar notTheIcons[] = {0xE000, 0xF8FF, 0};
+    ImFontConfig text;
+    text.GlyphExcludeRanges = notTheIcons;
     const char* chosen = std::getenv("MOLTEN_EDITOR_FONT");
+    bool hasFont = false;
     for (const char* path : {chosen ? chosen : "", "/System/Library/Fonts/SFNS.ttf", "/System/Library/Fonts/Helvetica.ttc"}) {
         std::error_code ignored;
-        if (std::filesystem::exists(path, ignored) && io.Fonts->AddFontFromFileTTF(path, 14.0f)) break;
+        if (std::filesystem::exists(path, ignored) && io.Fonts->AddFontFromFileTTF(path, 14.0f, &text)) {
+            hasFont = true;
+            break;
+        }
+    }
+    if (!hasFont) io.Fonts->AddFontDefault();
+    // The icons: merged into that font, so that a label can hold one ("\uE0xx  Lighting"), and
+    // once more as a font of their own, to draw one at any size (ui::drawIcon). The icons sit on the
+    // baseline in their font; lowered a little, they are centred on the text's capitals.
+    const std::string icons = findRootDirectory() + "/Assets/Fonts/Icons.ttf";
+    std::error_code ignored;
+    if (std::filesystem::exists(icons, ignored)) {
+        ImFontConfig merged;
+        merged.MergeMode = true;
+        merged.GlyphOffset = ImVec2(0.0f, 2.0f);
+        merged.GlyphMinAdvanceX = 15.0f;            // every icon as wide: a column of them lines up
+        io.Fonts->AddFontFromFileTTF(icons.c_str(), 14.0f, &merged);
+        ImFontConfig own;
+        iconFont() = io.Fonts->AddFontFromFileTTF(icons.c_str(), 16.0f, &own);
     }
     applyTheme(1.0f);
 

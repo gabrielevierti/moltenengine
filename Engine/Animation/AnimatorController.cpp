@@ -1,5 +1,7 @@
 #include "Animation/AnimatorController.hpp"
 
+#include "Core/TextFile.hpp"
+
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -82,6 +84,7 @@ std::optional<AnimatorController> AnimatorController::parse(const std::string& t
         if (w.empty()) continue;
         const std::string& key = w[0];
         if (key == "molten-animator") {
+            if (std::string why = text::checkHeader(line, "molten-animator"); !why.empty()) return fail("this animator can't be read: " + why);
             sawHeader = true;
         } else if (key == "parameter" && w.size() >= 3) {
             Parameter parameter;
@@ -175,13 +178,12 @@ std::optional<AnimatorController> AnimatorController::parse(const std::string& t
                     transition.blend = std::max(std::strtof(w[i + 1].c_str(), nullptr), 0.0f);
                     i += 2;
                 } else {
-                    return fail("\"" + w[i] + "\" is not understood in a transition");
+                    i++;            // a word from a newer engine: skipped
                 }
             }
             transitions->push_back(transition);
-        } else {
-            return fail("\"" + key + "\" is not understood");
         }
+        // Any other line is from a newer engine of the same version: skipped.
     }
     if (!sawHeader) return fail("not an animator file: the first line must be \"molten-animator 1\"");
     // Triggers are tested as triggers, whatever the line said; and every state named is there.

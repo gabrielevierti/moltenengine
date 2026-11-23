@@ -13,9 +13,13 @@
 
 namespace molten {
 
+struct SkinSource;
+
 class Mesh {
 public:
-    Mesh(GraphicsDevice& device, const MeshData& data);
+    /// `moves`: its vertices will change (an animated model, cloth, a terrain being shaped), so its
+    /// ray-tracing structure is made to be refitted to them (refit()) instead of built once for good.
+    Mesh(GraphicsDevice& device, const MeshData& data, bool moves = false);
 
     MTL::Buffer* vertexBuffer() const { return vertexBuffer_.get(); }
     MTL::Buffer* indexBuffer() const { return indexBuffer_.get(); }
@@ -29,12 +33,22 @@ public:
     /// same triangles: what an animated model does every frame. False if it does not fit.
     bool update(const MeshData& data);
     bool isDynamic = false;             // made for one entity and changed as it moves
+    /// Its ray-tracing structure made to fit the vertices as they are now (they moved this frame):
+    /// encoded by the renderer before the frame's rays are traced. Nothing for a mesh made not to move.
+    void refit(MTL::AccelerationStructureCommandEncoder* encoder);
+    /// For a mesh whose vertices the GPU moves (skinning): the box they are in now.
+    void setBounds(const AABB& bounds) { bounds_ = bounds; }
+    /// Posed on the GPU from this (Skinning.hpp): the model's vertices and bones, shared by every
+    /// entity showing the same model. Null for any other mesh.
+    std::shared_ptr<const SkinSource> skin;
     /// Takes the shape of `fresher` (the same file, read again): everything that holds this
     /// mesh draws the new one. Its name stays. The GPU must not be using the old one.
     void adopt(Mesh&& fresher) {
         vertexBuffer_ = std::move(fresher.vertexBuffer_);
         indexBuffer_ = std::move(fresher.indexBuffer_);
         accelerationStructure_ = std::move(fresher.accelerationStructure_);
+        structureDescriptor_ = std::move(fresher.structureDescriptor_);
+        refitScratch_ = std::move(fresher.refitScratch_);
         indexCount_ = fresher.indexCount_;
         bounds_ = fresher.bounds_;
         positions_ = std::move(fresher.positions_);
@@ -53,10 +67,13 @@ public:
     std::string name;
 
 private:
-    void buildAccelerationStructure(GraphicsDevice& device);
+    void buildAccelerationStructure(GraphicsDevice& device, bool moves);
 
     NS::SharedPtr<MTL::Buffer> vertexBuffer_, indexBuffer_;
     NS::SharedPtr<MTL::AccelerationStructure> accelerationStructure_;
+    // Kept for refit(), when it moves: what the structure was built from, and room to refit it in.
+    NS::SharedPtr<MTL::PrimitiveAccelerationStructureDescriptor> structureDescriptor_;
+    NS::SharedPtr<MTL::Buffer> refitScratch_;
     uint32_t indexCount_ = 0;
     AABB bounds_;
     std::vector<Vec3> positions_;       // kept for raycast

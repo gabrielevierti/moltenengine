@@ -27,6 +27,10 @@
 
 namespace molten {
 
+void World::showPose(Entity entity, const std::shared_ptr<const GltfModel>& model, const GltfPose& pose) {
+    if (model) showMesh(entity, model->assembled(pose));
+}
+
 struct World::Materials {
     std::vector<NamedMaterial> list;
     RenderSettings settings;

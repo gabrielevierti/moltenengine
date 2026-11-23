@@ -73,6 +73,8 @@ public:
     std::string nameOf(Entity entity) const;
 
     Entity create(Primitive kind, Entity parent = Entity{});
+    /// What a new particle system starts as (Entity > Create > Effects, + New > Particle Effect).
+    static ParticleEmitter newParticleSystem();
     Entity createFromMesh(const std::string& meshName, Vec3 position);
     /// An entity made in the scene by other code (a model's parts, PlaceAsset.cpp) joins the list at once.
     void adopt(Entity entity) { entities_.push_back(entity); }

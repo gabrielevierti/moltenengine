@@ -96,29 +96,29 @@ private:
         const RenderStats& stats = editor.engine.renderer().stats;
         auto row = [](const char* name, size_t value, const char* icon) {
             ImVec2 at = ImGui::GetCursorScreenPos();
-            ui::drawIcon(ImGui::GetWindowDrawList(), ImVec2(at.x + 8, at.y + ImGui::GetTextLineHeight() * 0.5f), 12, icon, ImGui::GetColorU32(ImGuiCol_Text));
+            ui::drawIcon(ImGui::GetWindowDrawList(), ImVec2(at.x + 8, at.y + ImGui::GetTextLineHeight() * 0.5f), 14, icon, ImGui::GetColorU32(ImGuiCol_TextDisabled), false);
             ImGui::SetCursorScreenPos(ImVec2(at.x + 26, at.y));
             ImGui::TextUnformatted(name);
             ImGui::SameLine(200);
             ImGui::Text("%zu", value);
         };
         ui::subheading("The Scene");
-        row("Entities", editor.scene.entities().size(), "axes");
+        row("Entities", editor.scene.entities().size(), "boxes");
         row("Meshes", scene.count<MeshRenderer>(), "cube");
-        row("Triangles", triangles, "cube");
+        row("Triangles", triangles, "triangle");
         row("Lights", scene.count<Light>(), "light");
         row("Colliders", scene.count<Collider>(), "collider");
         row("Bodies", scene.count<RigidBody>(), "physics");
-        row("Materials", editor.scene.materials.size(), "material");
+        row("Materials", editor.scene.materials.size(), "palette");
         // Every picture drawn in the frame together: the Scene and the Game view, when both show.
         ui::subheading("The Last Frame");
-        row("Draw calls", size_t(stats.drawCalls), "cube");
-        row("Shadow draws", size_t(stats.shadowDraws), "light");
-        row("Depth draws", size_t(stats.depthDraws), "cube");
-        row("Full-screen passes", size_t(stats.passes), "eye");
-        row("Interface and lines", size_t(stats.overlayDraws), "ui");
+        row("Draw calls", size_t(stats.drawCalls), "brush");
+        row("Shadow draws", size_t(stats.shadowDraws), "sun-medium");
+        row("Depth draws", size_t(stats.depthDraws), "layers");
+        row("Full-screen passes", size_t(stats.passes), "aperture");
+        row("Interface and lines", size_t(stats.overlayDraws), "layout-template");
         row("Drawn", size_t(stats.visibleObjects), "eye");
-        row("Culled", size_t(stats.culledObjects), "eye");
+        row("Culled", size_t(stats.culledObjects), "eye-off");
     }
 
     void drawFrame(EditorContext& editor) {
@@ -145,7 +145,9 @@ private:
             gpu /= float(recent);
             drawCalls /= int(recent);
             ImGui::Text("CPU %.2f ms   GPU %.2f ms   %d draw calls   %.0f fps", double(cpu), double(gpu), drawCalls, double(editor.engine.time.framesPerSecond));
-            ui::tooltip("Averages of the last second. The GPU's time is the frame's on the graphics chip: if it is longer than the CPU's, the GPU is the limit.");
+            ui::tooltip("Averages of the last second. The GPU's time is the frame's on the graphics chip: if it is longer than the CPU's, the GPU is the limit.\n"
+                        "Draw calls here are the whole frame's: every view that is drawn (the Scene and the Game when both show). "
+                        "The status bar counts the view in front alone.");
         }
         if (frames.empty()) {
             ImGui::TextDisabled("No frames yet: press Record.");
@@ -194,7 +196,10 @@ private:
                 if (chosen_ != 0) isRecording_ = false;           // held still, to read it
             }
         }
-        ImGui::TextDisabled("Bars: the CPU's time for each frame.  Blue line: the GPU's.  Click a bar to look at that frame.");
+        // Wrapped: in a narrow window the end of it (how to look at a frame) is what matters most.
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::TextWrapped("Bars: the CPU's time for each frame.  Blue line: the GPU's.  Click a bar to look at that frame.");
+        ImGui::PopStyleColor();
 
         // ---- what each pass costs the GPU
         std::vector<GpuTimer::Pass> passes = editor.engine.renderer().gpuPasses();

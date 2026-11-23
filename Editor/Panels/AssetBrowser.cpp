@@ -3,9 +3,11 @@
 #include "Editor.hpp"
 #include "Rendering/Particles.hpp"
 #include "Rendering/SurfaceShader.hpp"
+#include "Rendering/ShaderGraph.hpp"
 #include "Panels/Widgets.hpp"
 #include "Animation/AnimationClip.hpp"
 #include "Animation/AnimatorController.hpp"
+#include "Animation/Timeline.hpp"
 #include "Platform.hpp"
 
 #include "Core/TextFile.hpp"
@@ -29,33 +31,33 @@ bool isLoadableImage(const std::string& path) {
     return extension == ".png" || extension == ".jpg" || extension == ".jpeg" || extension == ".tga" || extension == ".bmp";
 }
 
-/// The color and the two letters of the tile that stands for a kind of asset.
+/// The color and the icon of the tile that stands for a kind of asset.
 struct TileLook {
     ImU32 color;
-    const char* letters;
+    const char* glyph;
 };
 
 TileLook lookOf(AssetType type) {
     switch (type) {
-        case AssetType::Folder: return {IM_COL32(214, 168, 84, 255), ""};
-        case AssetType::Scene: return {IM_COL32(255, 122, 47, 255), "SC"};
-        case AssetType::Mesh: return {IM_COL32(76, 154, 255, 255), "3D"};
-        case AssetType::Texture: return {IM_COL32(120, 190, 120, 255), "TX"};
-        case AssetType::Audio: return {IM_COL32(255, 122, 47, 255), "AU"};
-        case AssetType::Font: return {IM_COL32(150, 160, 175, 255), "Aa"};
-        case AssetType::Shader: return {IM_COL32(240, 200, 80, 255), "SH"};
-        case AssetType::Script: return {IM_COL32(110, 200, 210, 255), "C+"};
-        case AssetType::Text: return {IM_COL32(150, 160, 175, 255), "TXT"};
-        case AssetType::Other: return {IM_COL32(110, 118, 130, 255), "?"};
-        case AssetType::Graph: return {IM_COL32(255, 122, 47, 255), "VS"};
-        case AssetType::Prefab: return {IM_COL32(86, 156, 255, 255), "PRE"};
-        case AssetType::Effect: return {IM_COL32(255, 170, 60, 255), "FX"};
-        case AssetType::Material: return {IM_COL32(230, 120, 160, 255), "MAT"};
-        case AssetType::Animation: return {IM_COL32(255, 175, 90, 255), "ANI"};
-        case AssetType::Controller: return {IM_COL32(120, 170, 255, 255), "CTL"};
-        case AssetType::Timeline: return {IM_COL32(200, 160, 255, 255), "TL"};
+        case AssetType::Folder: return {IM_COL32(214, 168, 84, 255), icon::Folder};
+        case AssetType::Scene: return {IM_COL32(255, 122, 47, 255), icon::Clapperboard};
+        case AssetType::Mesh: return {IM_COL32(76, 154, 255, 255), icon::Shapes};
+        case AssetType::Texture: return {IM_COL32(120, 190, 120, 255), icon::Image};
+        case AssetType::Audio: return {IM_COL32(255, 122, 47, 255), icon::AudioLines};
+        case AssetType::Font: return {IM_COL32(150, 160, 175, 255), icon::Type};
+        case AssetType::Shader: return {IM_COL32(240, 200, 80, 255), icon::Sparkle};
+        case AssetType::Script: return {IM_COL32(110, 200, 210, 255), icon::FileCode};
+        case AssetType::Text: return {IM_COL32(150, 160, 175, 255), icon::File};
+        case AssetType::Other: return {IM_COL32(110, 118, 130, 255), icon::File};
+        case AssetType::Graph: return {IM_COL32(255, 122, 47, 255), icon::Workflow};
+        case AssetType::Prefab: return {IM_COL32(86, 156, 255, 255), icon::Package};
+        case AssetType::Effect: return {IM_COL32(255, 170, 60, 255), icon::Sparkles};
+        case AssetType::Material: return {IM_COL32(230, 120, 160, 255), icon::Palette};
+        case AssetType::Animation: return {IM_COL32(255, 175, 90, 255), icon::Film};
+        case AssetType::Controller: return {IM_COL32(120, 170, 255, 255), icon::GitBranch};
+        case AssetType::Timeline: return {IM_COL32(200, 160, 255, 255), icon::GanttChart};
     }
-    return {IM_COL32(110, 118, 130, 255), "?"};
+    return {IM_COL32(110, 118, 130, 255), icon::File};
 }
 
 class AssetBrowserPanel final : public Panel {
@@ -411,7 +413,11 @@ private:
         add("Visual Script", file("New Script", ".graph", [] { return script::Graph::starter().toText(); }));
         add("Shader", file("New Shader", ".shader", [] { return newSurfaceShaderText(); }));      // one that works, to change
         add("Water Shader", file("Water", ".shader", [] { return newWaterShaderText(); }));       // water of the game's own: a pond, a pool, a lagoon
+        add("Shader Graph", file("New Shader Graph", ".shadergraph", [] { return newShaderGraphText(); }));      // a shader drawn: Window > Shader Graph
         add("Animator Controller", file("New Controller", ".animator", [] { return AnimatorController{}.toText(); }));
+        add("Timeline", file("New Timeline", ".timeline", [] { return Timeline{}.toText(); }));       // a cutscene: Window > Timeline edits it
+        // A particle system kept as a file: dropped into the scene it becomes one, as many times as wanted.
+        add("Particle Effect", file("New Effect", ".effect", [] { return writeEffect(SceneDocument::newParticleSystem()); }));
         return entries;
     }
 
@@ -582,9 +588,11 @@ private:
                 } else if (type == AssetType::Controller) {
                     editor.openPanel("Animator");
                 } else if (type == AssetType::Animation) {
-                    editor.openPanel("Timeline");
+                    editor.openPanel("Animation");
                 } else if (type == AssetType::Timeline) {
                     editor.openPanel("Timeline");
+                } else if (std::filesystem::path(path).extension() == ".shadergraph") {
+                    editor.openPanel("Shader Graph");
                 } else {
                     platform::openWithDefaultApplication(editor.assets.absolutePath(path));
                 }
@@ -676,11 +684,19 @@ private:
             drawList->AddRectFilled(ImVec2(left, top), ImVec2(right, bottom), back, round);
             drawList->AddRectFilled(ImVec2(left, top + t * 0.07f), ImVec2(right, bottom), look.color, round);                                           // the front
         } else {
-            ImVec2 min(pictureMin.x + t * 0.14f, pictureMin.y + (asList ? 0 : 2)), max(pictureMax.x - t * 0.14f, pictureMax.y - (asList ? 0 : 2));
-            drawList->AddRectFilled(min, max, IM_COL32(40, 44, 51, 255), 5.0f);
-            drawList->AddRectFilled(min, ImVec2(max.x, min.y + 5), look.color, 5.0f, ImDrawFlags_RoundCornersTop);
-            ImVec2 letters = ImGui::CalcTextSize(look.letters);
-            if (!asList) drawList->AddText(ImVec2((min.x + max.x - letters.x) * 0.5f, (min.y + max.y - letters.y) * 0.5f), look.color, look.letters);
+            // A card in the kind's color, its icon on it (in a list, the icon alone).
+            ImVec2 middle((pictureMin.x + pictureMax.x) * 0.5f, (pictureMin.y + pictureMax.y) * 0.5f);
+            if (!asList) {
+                ImVec2 min(pictureMin.x + t * 0.14f, pictureMin.y + 2), max(pictureMax.x - t * 0.14f, pictureMax.y - 2);
+                drawList->AddRectFilled(min, max, IM_COL32(40, 44, 51, 255), 6.0f);
+                drawList->AddRect(min, max, (look.color & 0x00FFFFFFu) | IM_COL32(0, 0, 0, 70), 6.0f);
+            }
+            if (ImFont* font = ImGuiLayer::iconFont()) {
+                // (drawIcon wants a kind's name: the glyph is drawn directly instead.)
+                float size = asList ? t * 0.8f : t * 0.42f;
+                ImVec2 extent = font->CalcTextSizeA(size, FLT_MAX, 0.0f, look.glyph);
+                drawList->AddText(font, size, ImVec2(std::round(middle.x - extent.x * 0.5f), std::round(middle.y - extent.y * 0.5f)), look.color, look.glyph);
+            }
         }
 
         // The name: an input while renaming, otherwise up to two lines, cut with "...".

@@ -7,3 +7,7 @@ xcuserdata/
 .idea/
 screenshot.png
 Shaders/Compiled/
+# Python's caches (the Tools scripts) and a profiler's leftovers.
+__pycache__/
+*.pyc
+gmon.out

@@ -112,6 +112,7 @@ public:
     std::shared_ptr<Mesh> loadMesh(const std::string& name) override;
     std::shared_ptr<Material> loadMaterial(const std::string& name) override;
     void showMesh(Entity entity, const MeshData& data) override;
+    void showPose(Entity entity, const std::shared_ptr<const GltfModel>& model, const GltfPose& pose) override;
     uint32_t beginSound(const std::string& name, float volume, float pitch, bool loops) override;
     void adjustSound(uint32_t sound, float volume, float pitch) override;
     void panSound(uint32_t sound, float pan) override;
@@ -162,6 +163,9 @@ private:
     void onUpdate(float dt) override;
     const RenderSettings& effectSettings() override;
     void sceneWasLoaded(const std::string& sceneText) override;
+    void updateBakedLighting();
+    std::string lightingName_;                  // the .lighting file the renderer has, and when it was read
+    int lightingRevision_ = -1;
     void runBehaviors(bool isFixedStep, float dt);
     void handleDeveloperKeys();
     void drawStatistics();
@@ -172,6 +176,8 @@ private:
     GraphicsDevice device_;
     std::unique_ptr<Window> window_;
     std::unique_ptr<Renderer> renderer_;
+    /// The models with bones posed on the GPU, each sent once: by model, while it is in use.
+    std::vector<std::pair<std::weak_ptr<const GltfModel>, std::shared_ptr<const SkinSource>>> skinSources_;
     std::unique_ptr<Assets> assets_;
     std::unique_ptr<Audio> audio_;
     Canvas canvas_;

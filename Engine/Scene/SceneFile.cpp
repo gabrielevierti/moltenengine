@@ -6,6 +6,7 @@
 #include <algorithm>
 
 #include "Core/Log.hpp"
+#include "Core/TextFile.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -218,6 +219,10 @@ bool readMaterial(const std::string& text, Material& material, const TextureLoad
     std::istringstream stream(text);
     std::string line;
     if (!std::getline(stream, line) || line.compare(0, 15, "molten-material") != 0) return false;
+    if (std::string why = text::checkHeader(line, "molten-material"); !why.empty()) {
+        logError("the material %s can't be read: %s", material.assetName.c_str(), why.c_str());
+        return false;
+    }
     std::string assetName = material.assetName;
     material = Material{};
     material.assetName = assetName;
@@ -277,6 +282,7 @@ std::string writeScene(Scene& scene, const std::vector<NamedMaterial>& materials
         if (!settings.sky.sunsetColors) Line("sunsetColors").flag(false).to(out);
         if (settings.sky.stars != SkySettings{}.stars || settings.sky.moon != SkySettings{}.moon) Line("night").number(settings.sky.stars).number(settings.sky.moon).to(out);
         if (!settings.colorGrading.empty()) Line("colorGrading").string(settings.colorGrading).number(settings.colorGradingAmount).to(out);
+        if (!settings.bakedLighting.empty()) Line("bakedLighting").string(settings.bakedLighting).to(out);
         if (settings.autoExposure)
             Line("autoExposure").flag(true).number(settings.exposureCompensation).number(settings.exposureAdaptSpeed)
                 .number(settings.darkestExposure).number(settings.brightestExposure).to(out);
@@ -386,7 +392,7 @@ std::string writeScene(Scene& scene, const std::vector<NamedMaterial>& materials
         }
         if (const RigidBody* b = scene.get<RigidBody>(entity)) {
             Line("body").word(kBodyTypes[int(b->type)]).number(b->mass).number(b->restitution).number(b->friction)
-                .number(b->linearDamping).number(b->gravityScale).flag(b->rotates).number(b->angularDamping).to(out);
+                .number(b->linearDamping).number(b->gravityScale).flag(b->rotates).number(b->angularDamping).flag(b->canSleep).to(out);
         }
         if (const ParticleEmitter* e = scene.get<ParticleEmitter>(entity)) {
             Line("particles").number(e->rate).number(e->lifetimeMin).number(e->lifetimeMax).number(e->speedMin).number(e->speedMax)
@@ -564,6 +570,12 @@ bool readSceneAsWritten(const std::string& text, Scene& scene, std::vector<Named
         logError("not a scene file: the first line must be \"molten-scene 1\"");
         return false;
     }
+    if (header == "molten-scene") {
+        if (std::string why = text::checkHeader(line, "molten-scene"); !why.empty()) {
+            logError("this scene can't be read: %s", why.c_str());
+            return false;
+        }
+    }
 
     enum class Block { None, Settings, Material, Entity };
     Block block = Block::None;
@@ -705,6 +717,8 @@ bool readSceneAsWritten(const std::string& text, Scene& scene, std::vector<Named
                 words.flag(false);
                 words.number(0.3f);
                 settings.sky.stars = words.number(0);
+            } else if (key == "bakedLighting") {
+                settings.bakedLighting = words.string();
             } else if (key == "colorGrading") {
                 settings.colorGrading = words.string();
                 settings.colorGradingAmount = words.number(1);
@@ -865,6 +879,7 @@ bool readSceneAsWritten(const std::string& text, Scene& scene, std::vector<Named
                 b.gravityScale = words.number(b.gravityScale);
                 b.rotates = words.flag(false);
                 b.angularDamping = words.number(b.angularDamping);
+                b.canSleep = words.flag(true);              // files from before sleeping: they may
                 scene.add(entity, b);
             } else if (key == "particles") {
                 ParticleEmitter e;
@@ -969,6 +984,10 @@ bool readVariant(const std::string& text, Scene& scene, std::vector<NamedMateria
     std::istringstream stream(text);
     std::string line;
     std::getline(stream, line);
+    if (std::string why = text::checkHeader(line, "molten-variant"); !why.empty()) {
+        logError("this prefab variant can't be read: %s", why.c_str());
+        return false;
+    }
     std::string base, name;
     std::vector<std::vector<std::string>> sets;
     while (std::getline(stream, line)) {

@@ -205,7 +205,9 @@ bool drawMaterialProperties(EditorContext& editor, Material& material) {
     std::vector<std::string> choices = {"Lit", "Unlit"};
     std::vector<std::string> files;
     for (const AssetInfo& asset : editor.assets.assets()) {
-        if (asset.type == AssetType::Shader && std::filesystem::path(asset.path).extension() == ".shader") files.push_back(asset.path);
+        if (asset.type == AssetType::Shader && (std::filesystem::path(asset.path).extension() == ".shader" || std::filesystem::path(asset.path).extension() == ".shadergraph")) {
+            files.push_back(asset.path);
+        }
     }
     if (!material.shader.empty() && std::find(files.begin(), files.end(), material.shader) == files.end()) files.push_back(material.shader);
     for (const std::string& file : files) choices.push_back(std::filesystem::path(file).stem().string());

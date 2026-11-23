@@ -131,6 +131,7 @@ bool ShaderLibrary::loadPrecompiled() {
         hasExtras_ = true;
         hasSurfaceCode_ = false;
         pipelines_.clear();
+        computePipelines_.clear();
         lastError_.clear();
         logInfo("shaders loaded precompiled from %s", path.string().c_str());
         return true;
@@ -161,6 +162,7 @@ bool ShaderLibrary::compileVariant(const std::string& source, bool withRayTracin
     hasExtras_ = withExtras;
     hasSurfaceCode_ = withSurfaces;
     pipelines_.clear();             // they were built from the old functions
+    computePipelines_.clear();
     lastError_.clear();
     logInfo("compiled %zu shader files from %s%s%s%s", files_.size(), directory_.c_str(), withRayTracing ? ", with ray tracing" : "", withExtras ? ", with the extras" : "",
             withSurfaces ? ", with the project's surface shaders" : "");
@@ -181,6 +183,26 @@ bool ShaderLibrary::reloadIfChanged() {
     if (newestFileTime() <= loadedTime_) return false;
     logInfo("shader files changed, recompiling");
     return compile();
+}
+
+MTL::ComputePipelineState* ShaderLibrary::computePipeline(const std::string& kernel) {
+    if (!library_) return nullptr;
+    auto found = computePipelines_.find(kernel);
+    if (found != computePipelines_.end()) return found->second.get();
+    computePipelines_[kernel] = NS::SharedPtr<MTL::ComputePipelineState>();      // tried: not again every frame
+    auto function = NS::TransferPtr(library_->newFunction(toNSString(kernel)));
+    if (!function) {
+        logError("kernel not found: %s", kernel.c_str());
+        return nullptr;
+    }
+    NS::Error* error = nullptr;
+    auto state = NS::TransferPtr(device_->newComputePipelineState(function.get(), &error));
+    if (!state) {
+        logError("compute pipeline %s: %s", kernel.c_str(), error ? error->localizedDescription()->utf8String() : "unknown error");
+        return nullptr;
+    }
+    computePipelines_[kernel] = state;
+    return state.get();
 }
 
 MTL::RenderPipelineState* ShaderLibrary::pipeline(const PipelineDescription& description) {

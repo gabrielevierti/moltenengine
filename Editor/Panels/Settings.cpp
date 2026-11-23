@@ -1,12 +1,17 @@
 // The panels of the scene's settings (Lighting, Environment, Rendering, Post Processing) and of the project's.
 #include "Editor.hpp"
+#include "Core/Log.hpp"
 #include "Core/TextFile.hpp"
+#include "Kit/LightProbeVolume.hpp"
 #include "Rendering/Quality.hpp"
 #include "Panels/Widgets.hpp"
 #include "Panels/Pickers.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <filesystem>
+#include <future>
 
 namespace molten::editor {
 
@@ -15,6 +20,28 @@ namespace {
 /// Lighting: what lights the scene. The sun, the sky's light, shadows, the lights. The world they
 /// light (the sky, its clouds, the fog, the weather and its wind, the sea) is in Environment; how
 /// the picture is drawn is in Rendering, and what is done to the finished picture in Post Processing.
+/// What the project's quality (Project Settings > Quality) does to a setting of the scene, said
+/// under it, with the way there: a setting the quality turns off does nothing, and must say so.
+void qualityNote(EditorContext& editor, const char* text) {
+    ImGui::PushID(text);
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextColored(ImVec4(0.95f, 0.72f, 0.35f, 1.0f), "%s", text);
+    ImGui::PopTextWrapPos();
+    if (ImGui::SmallButton("Project Settings > Quality")) editor.showProjectSettings("Quality");
+    ImGui::PopID();
+}
+
+/// The project's quality, if it has one (an editor without a project has none: all is as the scene says).
+const GameQuality* projectQuality(EditorContext& editor) {
+    return editor.engine.quality ? &*editor.engine.quality : nullptr;
+}
+
+/// The sun's shadow is traced, not drawn into shadow maps (the project's quality, on a GPU that can trace rays).
+bool sunIsTraced(EditorContext& editor) {
+    const GameQuality* quality = projectQuality(editor);
+    return quality && quality->rayTraced && editor.engine.renderer().canTraceRays();
+}
+
 class LightingPanel final : public Panel {
 public:
     LightingPanel() { title = "Lighting"; }
@@ -33,6 +60,7 @@ public:
         // project's, the same for every scene: Project Settings > Quality.
         drawLight(editor, settings, sun, changed);
         drawShading(editor, settings, changed);
+        drawBaked(editor, settings, changed);
         if (ImGui::CollapsingHeader("Lights in the Scene")) drawLights(editor, changed);
         // These settings are saved with the scene, so changing them is an edit like any other.
         if (changed) editor.scene.markChanged();
@@ -46,8 +74,12 @@ private:
                 changed |= ui::color("Color", light->color, false);
                 changed |= ui::dragFloat("Intensity", light->intensity, 0.02f, 0.0f, 100.0f);
                 changed |= ui::checkbox("Casts Shadows", light->castsShadows);
+                if (const GameQuality* quality = projectQuality(editor); quality && !quality->shadows && light->castsShadows) {
+                    qualityNote(editor, "No shadows at the project's quality: the scene has none, whatever it asks.");
+                }
                 changed |= ui::dragDegrees("Size in the Sky", settings.sky.sunAngularRadius, 0.1f, 20.0f);
-                ui::tooltip("A larger sun gives softer ray traced shadows, and a larger disk in the sky");
+                ui::tooltip(sunIsTraced(editor) ? "How large the sun's disk is in the sky, and how soft its shadows' edges (they are traced: a larger sun, softer edges)"
+                                                : "How large the sun's disk is in the sky. (With ray tracing, at the project's quality, it also softens its shadows' edges)");
                 changed |= ui::dragFloat("Disk Brightness", settings.sky.sunDiskIntensity, 0.1f, 0.0f, 1000.0f);
                 if (ImGui::Button("Select the Sun")) {
                     editor.scene.select(sun);
@@ -70,15 +102,21 @@ private:
     /// how sharp, how many rays) is the project's, the same for every scene: Project Settings > Quality.
     void drawShading(EditorContext& editor, RenderSettings& settings, bool& changed) {
         if (ui::section("Shadows")) {
+            const GameQuality* quality = projectQuality(editor);
             changed |= ui::dragFloat("Distance", settings.cascades.shadowDistance, 0.5f, 5.0f, 2000.0f, "%.0f m");
-            ui::tooltip("How far from the camera this scene's shadows reach. A racing circuit wants more than a room");
-            if (const GameQuality* quality = editor.engine.quality ? &*editor.engine.quality : nullptr; quality && quality->shadowDistance < settings.cascades.shadowDistance) {
-                ImGui::TextDisabled("Up to %.0f m at the project's quality.", quality->shadowDistance);
+            ui::tooltip("How far from the camera this scene's sun shadows reach. A racing circuit wants more than a room. "
+                        "The project's quality reaches a share of it: less at Low, more at Ultra");
+            if (quality && quality->shadows && std::abs(quality->shadowReach - 1.0f) > 0.001f) {
+                ImGui::TextDisabled("At the project's quality: %.0f m (%.0f%%).", settings.cascades.shadowDistance * quality->shadowReach, quality->shadowReach * 100.0f);
             }
+            // The two below are for shadow maps: with the sun's shadow traced, only the lights' maps use them.
+            const bool traced = sunIsTraced(editor);
             changed |= ui::dragFloat("Bias", settings.shadowBias, 0.00001f, 0.0f, 0.01f, "%.5f");
-            ui::tooltip("Shadow maps: how far a surface's own shadow is pushed back. Raise it if surfaces are striped by their own shadow");
+            ui::tooltip(traced ? "The sun's shadow maps: how far a surface's own shadow is pushed back. (The sun's shadow is traced at the project's quality: no maps)"
+                               : "The sun's shadow maps: how far a surface's own shadow is pushed back. Raise it if surfaces are striped by their own shadow");
             changed |= ui::dragFloat("Normal Offset", settings.shadowNormalOffset, 0.05f, 0.0f, 10.0f);
-            ui::tooltip("Shadow maps: how far along its facing a surface looks for its shadow. Raise it for stripes on slopes");
+            ui::tooltip("Shadow maps, the sun's and the point and spot lights': how far along its facing a surface looks for its shadow. Raise it for stripes on slopes");
+            if (traced) ImGui::TextDisabled("The sun's shadow is traced: Bias is not used.");
         }
         // Said once, with the way there: how all of it is drawn is not set here.
         ImGui::Spacing();
@@ -86,6 +124,98 @@ private:
         ImGui::TextDisabled("Shadow maps or ray tracing, and how sharp, are the project's: the same for every scene.");
         ImGui::PopTextWrapPos();
         if (ImGui::SmallButton("Project Settings > Quality")) editor.showProjectSettings("Quality");
+    }
+
+    // ---- baked light: the probes of the scene's Light Probe Volumes (Kit/LightProbeVolume.hpp)
+
+    std::future<BakedLighting> baking_;
+    std::atomic<float> bakeProgress_{0.0f};
+    std::atomic<bool> bakeCancelled_{false};
+    std::string bakeFile_, bakeName_;           // where the result goes: on disk, and as Assets names it
+    std::chrono::steady_clock::time_point bakeStarted_;
+
+    void drawBaked(EditorContext& editor, RenderSettings& settings, bool& changed) {
+        if (!ui::section("Baked Light")) {
+            finishBake(editor, settings, changed);      // a bake goes on with the section closed
+            return;
+        }
+        int volumes = 0;
+        size_t probes = 0;
+        editor.engine.scene.each<kit::LightProbeVolume, Transform>([&](Entity, kit::LightProbeVolume& volume, Transform& transform) {
+            if (!transform.isActiveInHierarchy) return;
+            volumes++;
+            probes += gridFor(volume.desc(transform).box, volume.spacing).probeCount();
+        });
+        ImGui::PushTextWrapPos(0.0f);
+        if (volumes == 0) {
+            ImGui::TextDisabled("No Light Probe Volume in the scene: everything is lit by the whole sky, indoors as out.");
+            ImGui::TextDisabled("Entity > Light > Light Probe Volume puts one round a room or a building.");
+        } else {
+            ImGui::Text("%d %s, %zu probes.", volumes, volumes == 1 ? "volume" : "volumes", probes);
+        }
+        if (baking_.valid()) {
+            float done = bakeProgress_.load();
+            char label[48];
+            std::snprintf(label, sizeof label, "Baking... %.0f%%", double(done * 100.0f));
+            ImGui::ProgressBar(done, ImVec2(-FLT_MIN, 0), label);
+            if (ImGui::Button("Cancel")) bakeCancelled_ = true;
+        } else if (volumes > 0) {
+            const std::string& scenePath = editor.scene.filePath;
+            const std::string root = editor.engine.assetRoot + "/";
+            bool canSave = !scenePath.empty() && scenePath.compare(0, root.size(), root) == 0;
+            ImGui::BeginDisabled(!canSave);
+            if (ImGui::Button("Bake Light Probes")) startBake(editor, settings, scenePath.substr(root.size()));
+            ImGui::EndDisabled();
+            if (!canSave) ImGui::TextDisabled("Save the scene in the project first: the light is kept beside it.");
+            ui::tooltip("Sends rays from every probe into the scene: how much of the sky each sees, and the light the walls and the floor throw back. "
+                        "What moves and what is seen through is left out. Bake again when the scene's walls or lights change");
+        }
+        if (!settings.bakedLighting.empty()) {
+            size_t loaded = editor.engine.renderer().lightProbeCount();
+            ImGui::TextDisabled("%s: %zu probes in use.", settings.bakedLighting.c_str(), loaded);
+            if (ImGui::SmallButton("Stop Using It")) {
+                settings.bakedLighting.clear();
+                changed = true;
+            }
+            ui::tooltip("The scene is lit by the whole sky again. The file stays among the assets");
+        }
+        ImGui::PopTextWrapPos();
+        finishBake(editor, settings, changed);
+    }
+
+    void startBake(EditorContext& editor, RenderSettings& settings, const std::string& sceneName) {
+        auto job = std::make_shared<kit::LightingBakeJob>(kit::prepareLightingBake(editor.engine, settings, 256));
+        bakeName_ = kit::lightingFileFor(sceneName);
+        bakeFile_ = editor.engine.assetRoot + "/" + bakeName_;
+        bakeProgress_ = 0.0f;
+        bakeCancelled_ = false;
+        bakeStarted_ = std::chrono::steady_clock::now();
+        logInfo("baking the light probes: %zu triangles, %zu lights", job->triangleCount(), job->lights.size());
+        // On another thread: the editor goes on meanwhile. The job holds copies of all it needs.
+        baking_ = std::async(std::launch::async, [this, job] {
+            return bakeLighting(job->scene, job->lights, job->volumes, job->settings, [this](float done) {
+                bakeProgress_ = done;
+                return !bakeCancelled_.load();
+            });
+        });
+    }
+
+    void finishBake(EditorContext& editor, RenderSettings& settings, bool& changed) {
+        if (!baking_.valid() || baking_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+        BakedLighting baked = baking_.get();
+        if (bakeCancelled_ || baked.grids.empty()) {
+            logInfo("the bake was stopped: the scene's light is as it was");
+            return;
+        }
+        if (!text::writeFile(bakeFile_, baked.toText())) {
+            logError("could not write %s", bakeFile_.c_str());
+            return;
+        }
+        double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - bakeStarted_).count();
+        logInfo("baked the light probes into %s in %.1f s", bakeName_.c_str(), seconds);
+        settings.bakedLighting = bakeName_;
+        editor.engine.bakedLightingRevision++;      // the same file, read again
+        changed = true;
     }
 
     /// Every light of the scene in one table: turn each on and off, set it, go to it.
@@ -186,6 +316,17 @@ public:
                 changed = true;
             }
             ui::tooltip("The air glows only where the sun reaches it: what stands in its way (a tree, a building, a cloud's edge) casts beams of light and shadow through it. How finely: Project Settings > Quality > Effects");
+            if (shafts) {
+                const GameQuality* quality = projectQuality(editor);
+                bool sunShades = false;
+                editor.engine.scene.each<Light>([&](Entity, Light& light) {
+                    if (light.type == LightType::Directional && light.isEnabled && light.castsShadows) sunShades = true;
+                });
+                if (quality && quality->lightShafts <= 0) qualityNote(editor, "No light shafts at the project's quality.");
+                else if (quality && !quality->shadows) qualityNote(editor, "Light shafts are the sun's shadows in the air: there are none at the project's quality.");
+                else if (!sunShades) ImGui::TextDisabled("They are the sun's shadows in the air: turn on its Casts Shadows (Lighting > Sun).");
+                else if (settings.fogDensity <= 0.0f) ImGui::TextDisabled("They need some fog: raise the Density.");
+            }
         }
         if (ui::section("Weather")) {
             // Built in, none by default: a game that wants its own leaves these at 0.
@@ -204,12 +345,18 @@ public:
             changed |= ui::sliderFloat("Coverage", settings.sky.cloudCoverage, 0.0f, 1.0f);
             changed |= ui::dragFloat("Scale", settings.sky.cloudScale, 0.01f, 0.05f, 20.0f);
             changed |= ui::dragVec2("Drift", settings.sky.cloudSpeed, 0.001f);
+            ui::tooltip("How they move by themselves, besides the wind (which carries them too): along x and z");
             changed |= ui::checkbox("With Depth", settings.sky.cloudsHaveDepth);
             ui::tooltip("Clouds as volumes, thick and thin, lit by the sun through them: a camera can fly in, through and above them. Costs more than the flat layer");
             if (settings.sky.cloudsHaveDepth) {
+                const GameQuality* quality = projectQuality(editor);
+                const bool flat = quality && !quality->volumetricClouds;
+                ImGui::BeginDisabled(flat);
                 changed |= ui::dragFloat("Height", settings.sky.cloudHeight, 5.0f, 50.0f, 12000.0f, "%.0f m");
                 ui::tooltip("Meters above the ground where their base is");
                 changed |= ui::dragFloat("Thickness", settings.sky.cloudThickness, 5.0f, 50.0f, 8000.0f, "%.0f m");
+                ImGui::EndDisabled();
+                if (flat) qualityNote(editor, "Flat clouds at the project's quality (Sky): no depth, so Height and Thickness are not used.");
             }
             // The wind is the weather's too: rain freshens it, a storm makes a gale of it.
             ui::subheading("Wind");
@@ -281,12 +428,21 @@ public:
         bool changed = false;
 
         if (ui::section("Ambient Occlusion")) {
+            const GameQuality* quality = projectQuality(editor);
+            // With the light ray traced, the rays find what hides the sky from each pixel: none of this is used.
+            const bool traced = sunIsTraced(editor);
+            ImGui::BeginDisabled(traced);
             changed |= ui::checkbox("Enabled##ao", settings.ambientOcclusionEnabled);
-            ui::tooltip("The sky's light kept out of creases and corners, worked out from the picture. Where light is ray traced, the rays do it instead");
-            changed |= ui::dragFloat("Radius", settings.ambientOcclusionRadius, 0.01f, 0.01f, 10.0f);
-            ui::tooltip("How wide the shade in creases and corners is, in meters");
-            changed |= ui::dragFloat("Strength", settings.ambientOcclusionIntensity, 0.01f, 0.0f, 4.0f);
-            changed |= ui::dragFloat("Contrast", settings.ambientOcclusionPower, 0.01f, 0.1f, 8.0f);
+            ui::tooltip("The sky's light kept out of creases and corners, worked out from the picture");
+            if (settings.ambientOcclusionEnabled) {
+                changed |= ui::dragFloat("Radius", settings.ambientOcclusionRadius, 0.01f, 0.01f, 10.0f);
+                ui::tooltip("How wide the shade in creases and corners is, in meters");
+                changed |= ui::dragFloat("Strength", settings.ambientOcclusionIntensity, 0.01f, 0.0f, 4.0f);
+                changed |= ui::dragFloat("Contrast", settings.ambientOcclusionPower, 0.01f, 0.1f, 8.0f);
+            }
+            ImGui::EndDisabled();
+            if (traced) qualityNote(editor, "The light around things is ray traced at the project's quality: the rays find the shade in creases and corners, and none of this is used.");
+            else if (quality && !quality->ambientOcclusion && settings.ambientOcclusionEnabled) qualityNote(editor, "No ambient occlusion at the project's quality.");
         }
         if (ui::section("Depth of Field")) {
             changed |= ui::checkbox("Enabled##dof", settings.depthOfField);
@@ -339,9 +495,12 @@ public:
         }
         if (ui::section("Bloom")) {
             changed |= ui::checkbox("Enabled##bloom", settings.bloomEnabled);
-            changed |= ui::dragFloat("Amount", settings.bloomIntensity, 0.002f, 0.0f, 2.0f);
-            changed |= ui::dragFloat("Threshold", settings.bloomThreshold, 0.01f, 0.0f, 50.0f);
-            changed |= ui::dragFloat("Knee", settings.bloomKnee, 0.01f, 0.0f, 1.0f);
+            if (settings.bloomEnabled) {
+                changed |= ui::dragFloat("Amount", settings.bloomIntensity, 0.002f, 0.0f, 2.0f);
+                changed |= ui::dragFloat("Threshold", settings.bloomThreshold, 0.01f, 0.0f, 50.0f);
+                changed |= ui::dragFloat("Knee", settings.bloomKnee, 0.01f, 0.0f, 1.0f);
+                if (const GameQuality* quality = projectQuality(editor); quality && !quality->bloom) qualityNote(editor, "No bloom at the project's quality.");
+            }
         }
         if (ui::section("Color")) {
             changed |= ui::sliderFloat("Contrast", settings.contrast, 0.5f, 1.5f);

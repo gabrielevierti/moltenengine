@@ -199,7 +199,7 @@ bool chooseSeveral(const char* id, std::string& value, const std::vector<std::st
                 changed = true;
             }
         }
-        if (choices.empty()) ImGui::TextDisabled(isBones ? "The entity has no skeleton." : "None made for it yet: Window > Timeline, Create Animation.");
+        if (choices.empty()) ImGui::TextDisabled(isBones ? "The entity has no skeleton." : "None made for it yet: Window > Animation, Create Animation.");
         ImGui::EndCombo();
     }
     ImGui::PopID();

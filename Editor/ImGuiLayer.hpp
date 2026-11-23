@@ -26,6 +26,10 @@ public:
     /// A texture as ImGui::Image wants it.
     static ImTextureID textureId(const Texture* texture);
 
+    /// The font of the editor's icons (Assets/Fonts/Icons.ttf), to draw one at any size; nullptr if
+    /// it could not be read. They are also in the text font: an icon can stand in any label.
+    static ImFont*& iconFont();
+
 private:
     static std::vector<MTL::Texture*>& heldForTheFrame();
 

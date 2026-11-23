@@ -85,7 +85,8 @@ GameQuality GameQuality::preset(Level level) {
             // shadows near the camera, the screen's ambient occlusion, clouds with depth walked coarsely.
             q.renderScale = 0.8f;
             q.antiAliasing = 1;
-            q.shadowDistance = 60, q.shadowResolution = 2048, q.shadowCascades = 2;
+            q.shadowReach = 0.5f, q.shadowResolution = 2048, q.shadowCascades = 2;
+            q.lightShadowResolution = 256, q.shadowedLights = 4;
             q.rayTraced = false, q.setRayTracing(LightingQuality::Low);
             q.lightShafts = 8;
             q.cloudSteps = 24, q.cloudResolution = 0.35f;
@@ -93,7 +94,8 @@ GameQuality GameQuality::preset(Level level) {
             break;
         case Level::Medium:
             q.renderScale = 0.9f;
-            q.shadowDistance = 100, q.shadowCascades = 3;
+            q.shadowReach = 0.75f, q.shadowCascades = 3;
+            q.shadowedLights = 6;
             q.setRayTracing(LightingQuality::Medium);
             q.lightShafts = 12;
             q.cloudSteps = 32, q.cloudResolution = 0.4f;
@@ -105,7 +107,8 @@ GameQuality GameQuality::preset(Level level) {
             // the GPU keeps up, a little fewer, made sharp by MetalFX, while it cannot.
             q.lowestScale = 0.65f;
             q.antiAliasing = 4;
-            q.shadowDistance = 250, q.shadowResolution = 4096;
+            q.shadowReach = 1.5f, q.shadowResolution = 4096;
+            q.lightShadowResolution = 1024, q.shadowedLights = 12;
             q.setRayTracing(LightingQuality::Ultra);
             q.lightShafts = 24;
             q.cloudSteps = 64, q.cloudResolution = 0.5f;
@@ -126,7 +129,8 @@ void GameQuality::setGroup(Group group, Level wanted) {
             break;
         case Group::AntiAliasing: antiAliasing = from.antiAliasing; break;
         case Group::Shadows:
-            shadows = from.shadows, shadowDistance = from.shadowDistance, shadowResolution = from.shadowResolution, shadowCascades = from.shadowCascades;
+            shadows = from.shadows, shadowReach = from.shadowReach, shadowResolution = from.shadowResolution, shadowCascades = from.shadowCascades;
+            lightShadowResolution = from.lightShadowResolution, shadowedLights = from.shadowedLights;
             break;
         case Group::RayTracing: rayTraced = from.rayTraced, rayTracing = from.rayTracing; break;
         case Group::Effects: ambientOcclusion = from.ambientOcclusion, bloom = from.bloom, lightShafts = from.lightShafts; break;
@@ -145,7 +149,8 @@ bool GameQuality::isAt(Group group, Level candidate) const {
                    (!dynamicResolution || (targetFrameRate == p.targetFrameRate && lowestScale == p.lowestScale)) && followsDeviceHeat == p.followsDeviceHeat;
         case Group::AntiAliasing: return antiAliasing == p.antiAliasing;
         case Group::Shadows:
-            return shadows == p.shadows && shadowDistance == p.shadowDistance && shadowResolution == p.shadowResolution && shadowCascades == p.shadowCascades;
+            return shadows == p.shadows && shadowReach == p.shadowReach && shadowResolution == p.shadowResolution && shadowCascades == p.shadowCascades &&
+                   lightShadowResolution == p.lightShadowResolution && shadowedLights == p.shadowedLights;
         case Group::RayTracing: return rayTraced == p.rayTraced && (!rayTraced || rayTracing == p.rayTracing);
         case Group::Effects: return ambientOcclusion == p.ambientOcclusion && bloom == p.bloom && lightShafts == p.lightShafts;
         case Group::Sky: return volumetricClouds == p.volumetricClouds && (!volumetricClouds || (cloudSteps == p.cloudSteps && cloudResolution == p.cloudResolution));
@@ -193,7 +198,8 @@ std::string GameQuality::summaryOf(Group group) const {
             break;
         case Group::Shadows:
             if (!shadows) std::snprintf(text, sizeof(text), "None");
-            else std::snprintf(text, sizeof(text), "Up to %.0f m, %d px, %d slice%s", shadowDistance, shadowResolution, shadowCascades, shadowCascades == 1 ? "" : "s");
+            else std::snprintf(text, sizeof(text), "%.0f%% as far as each scene asks, %d px, %d slice%s; %d lights", shadowReach * 100.0f, shadowResolution,
+                               shadowCascades, shadowCascades == 1 ? "" : "s", shadowedLights);
             break;
         case Group::RayTracing:
             if (!rayTraced) std::snprintf(text, sizeof(text), "Off: shadow maps");
@@ -232,10 +238,12 @@ void GameQuality::applyTo(RenderSettings& settings) const {
     dynamicResolutionFor(settings.dynamicResolution, settings.targetFrameRate, settings.lowestDynamicScale);
     settings.followsDeviceHeat = followsDeviceHeat;
     settings.shadowsEnabled = settings.shadowsEnabled && shadows;
-    // As far as the scene asks, and no farther than this level reaches.
-    settings.cascades.shadowDistance = std::min(settings.cascades.shadowDistance, std::max(shadowDistance, 1.0f));
+    // As far as the scene asks, times this level's reach: the scene's distance always counts.
+    settings.cascades.shadowDistance = std::max(settings.cascades.shadowDistance * std::clamp(shadowReach, 0.1f, 4.0f), 1.0f);
     settings.cascades.resolution = shadowResolution;
     settings.cascades.count = std::clamp(shadowCascades, 1, 4);
+    settings.lightShadowResolution = std::clamp(lightShadowResolution, 64, 2048);
+    settings.shadowedLights = std::clamp(shadowedLights, 0, 48);
     // Ray tracing is the project's alone: what the scene file says of it (scenes of before) is not
     // asked. On, all of it, as the level has it, at full strength.
     if (rayTraced) {
@@ -287,9 +295,13 @@ std::optional<GameQuality> GameQuality::parse(const std::string& text) {
         else if (key == "lowestScale") q.lowestScale = number(0.5f);
         else if (key == "followsDeviceHeat") q.followsDeviceHeat = flag(true);
         else if (key == "shadows") q.shadows = flag(true);
-        else if (key == "shadowDistance") q.shadowDistance = number(150);
+        else if (key == "shadowReach") q.shadowReach = number(1);
+        // Files of before said meters, a limit for every scene: the share of the 150 m it was at High.
+        else if (key == "shadowDistance") q.shadowReach = std::clamp(number(150) / 150.0f, 0.25f, 2.0f);
         else if (key == "shadowResolution") q.shadowResolution = int(number(2048));
         else if (key == "shadowCascades") q.shadowCascades = int(number(4));
+        else if (key == "lightShadowResolution") q.lightShadowResolution = int(number(512));
+        else if (key == "shadowedLights") q.shadowedLights = int(number(8));
         else if (key == "rayTracing") {
             Level most = levelNamed(Level::High);
             q.setRayTracing(most == Level::Low ? LightingQuality::Low : most == Level::Medium ? LightingQuality::Medium : most == Level::Ultra ? LightingQuality::Ultra : LightingQuality::High);
@@ -325,9 +337,11 @@ std::string GameQuality::toText() const {
         << "followsDeviceHeat " << (followsDeviceHeat ? 1 : 0) << "\n"
         << "antiAliasing " << antiAliasing << "\n"
         << "shadows " << (shadows ? 1 : 0) << "\n"
-        << "shadowDistance " << shadowDistance << "\n"
+        << "shadowReach " << shadowReach << "\n"
         << "shadowResolution " << shadowResolution << "\n"
         << "shadowCascades " << shadowCascades << "\n"
+        << "lightShadowResolution " << lightShadowResolution << "\n"
+        << "shadowedLights " << shadowedLights << "\n"
         << "rayTraced " << (rayTraced ? 1 : 0) << "\n"
         << "rayTracing " << lightingName(rayTracing) << "\n"
         << "ambientOcclusion " << (ambientOcclusion ? 1 : 0) << "\n"

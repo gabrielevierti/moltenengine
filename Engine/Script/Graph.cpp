@@ -193,8 +193,8 @@ bool Graph::connect(int fromNode, const std::string& fromPin, int toNode, const 
     const Node* from = find(fromNode);
     const Node* to = find(toNode);
     if (!from || !to || fromNode == toNode) return false;
-    const NodeDef* fromDef = NodeLibrary::instance().find(from->type);
-    const NodeDef* toDef = NodeLibrary::instance().find(to->type);
+    const NodeDef* fromDef = kinds().find(from->type);
+    const NodeDef* toDef = kinds().find(to->type);
     const PinDef* output = fromDef ? fromDef->findOutput(fromPin) : nullptr;
     const PinDef* input = toDef ? toDef->findInput(toPin) : nullptr;
     if (!output || !input) return false;
@@ -246,6 +246,7 @@ std::string Graph::toText() const {
 std::optional<Graph> Graph::fromText(const std::string& contents) {
     std::vector<std::vector<std::string>> lines = text::parseLines(contents);
     if (lines.empty() || lines[0][0] != "molten-graph") return std::nullopt;
+    if (!text::checkHeader(text::firstLine(contents), "molten-graph").empty()) return std::nullopt;
     Graph graph;
     Node* current = nullptr;
     for (size_t i = 1; i < lines.size(); i++) {

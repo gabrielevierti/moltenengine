@@ -25,7 +25,7 @@ if [ -f "$icon" ] && { [ ! -f "$icns" ] || [ "$icon" -nt "$icns" ]; }; then
     rm -rf "$work"
 fi
 
-# Its name in the menu bar, with the version: "Molten Engine v1.2".
+# Its name in the menu bar, with the version: "Molten Engine v1.3".
 short="$(echo "$version" | cut -d. -f1,2)"
 cat > "$contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

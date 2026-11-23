@@ -112,6 +112,10 @@ struct Graph {
     std::vector<Node> nodes;
     std::vector<Link> links;
     int nextId = 1;
+    /// The kinds of node it is made of: null for a visual script's (NodeLibrary::instance()); a
+    /// shader graph has its own (Rendering/ShaderGraph.hpp). Not saved: whoever reads the file knows.
+    const NodeLibrary* library = nullptr;
+    const NodeLibrary& kinds() const { return library ? *library : NodeLibrary::instance(); }
 
     Node* find(int id);
     const Node* find(int id) const;

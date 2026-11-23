@@ -1,5 +1,8 @@
 #include "Core/SaveGame.hpp"
 
+#include "Core/Log.hpp"
+#include "Core/TextFile.hpp"
+
 #include <cstdio>
 #include <cstdlib>
 #include <sstream>
@@ -117,6 +120,13 @@ std::string SaveGame::toText() const {
 
 SaveGame SaveGame::fromText(const std::string& text) {
     SaveGame save;
+    // A save from a newer version of the game's engine is not guessed at: it reads as empty.
+    if (text.rfind("molten-save", 0) == 0) {
+        if (std::string why = text::checkHeader(text::firstLine(text), "molten-save"); !why.empty()) {
+            logWarning("the saved game can't be read: %s", why.c_str());
+            return save;
+        }
+    }
     std::istringstream lines(text);
     std::string line;
     while (std::getline(lines, line)) {

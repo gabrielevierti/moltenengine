@@ -19,7 +19,7 @@ else()
     set(MOLTEN_IOS OFF)
     set(CMAKE_OSX_DEPLOYMENT_TARGET 13.0 CACHE STRING "Oldest macOS the programs run on")
 endif()
-project(MoltenMetalEngine VERSION 1.2.0 LANGUAGES C CXX OBJC OBJCXX)
+project(MoltenMetalEngine VERSION 1.3.0 LANGUAGES C CXX OBJC OBJCXX)
 
 if(NOT APPLE)
     message(FATAL_ERROR "Metal only exists on Apple platforms: Molten builds on macOS, for macOS and iOS.")
@@ -113,7 +113,7 @@ if(MOLTEN_IOS)
     set(MOLTEN_IOS_BUNDLE_ID "com.example.moltenplayer" CACHE STRING "The application's bundle identifier")
     set(MOLTEN_IOS_TEAM "" CACHE STRING "Your Apple developer team identifier, for signing")
     set(MOLTEN_IOS_NAME "Molten" CACHE STRING "The name under the application's icon")
-    set(MOLTEN_IOS_VERSION "${PROJECT_VERSION}" CACHE STRING "The game's version, as players see it: 1.2.0")
+    set(MOLTEN_IOS_VERSION "${PROJECT_VERSION}" CACHE STRING "The game's version, as players see it: 1.3.0")
     set(MOLTEN_IOS_BUILD_NUMBER "1" CACHE STRING "The build's number: higher for each one sent to the App Store")
     set(MOLTEN_IOS_ICON "${CMAKE_SOURCE_DIR}/Assets/Branding/icon.png" CACHE FILEPATH "A square picture for the application's icon")
 
@@ -232,7 +232,7 @@ target_link_libraries(molten PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,moltenengine>
                       "-framework UniformTypeIdentifiers")
 set_target_properties(molten PROPERTIES ENABLE_EXPORTS ON)
 # Its name for the Mac when it is started as it is (./build/molten), not from its .app: the menu
-# bar's first menu is "Molten Engine v1.2", with the version of this project.
+# bar's first menu is "Molten Engine v1.3", with the version of this project.
 set(MOLTEN_VERSION_SHORT "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 configure_file(${CMAKE_SOURCE_DIR}/Editor/Info.plist ${CMAKE_BINARY_DIR}/EditorInfo.plist @ONLY)
 target_link_options(molten PRIVATE "LINKER:-sectcreate,__TEXT,__info_plist,${CMAKE_BINARY_DIR}/EditorInfo.plist")

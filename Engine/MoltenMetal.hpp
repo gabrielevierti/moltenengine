@@ -24,6 +24,7 @@
 #include "Kit/Sound.hpp"
 #include "Kit/Ragdoll.hpp"
 #include "Kit/Rope.hpp"
+#include "Kit/LightProbeVolume.hpp"
 #include "Animation/Timeline.hpp"
 #include "Kit/Kit.hpp"
 #include "Kit/Vehicles.hpp"

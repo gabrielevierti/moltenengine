@@ -211,7 +211,7 @@ void EditorApp::registerCommands() {
     // ---------------------------------------------------------------- Window
     // The windows, in groups. (Layouts are in the bar at the top right.)
     auto focus = [](const char* window) {
-        return [window] { ImGui::SetWindowFocus(window); };
+        return [window] { ImGui::SetWindowFocus(ui::windowId(window).c_str()); };
     };
     commands.add("windowScene", "Window/Scene", focus("Scene")).when(hasProject);
     commands.add("windowGame", "Window/Game", focus("Game")).when(hasProject);
@@ -225,9 +225,11 @@ void EditorApp::registerCommands() {
     commands.add("windowRendering", "Window/Rendering", show("Rendering")).when(hasProject);
     commands.add("windowPostProcessing", "Window/Post Processing", show("Post Processing")).when(hasProject);
     commands.line("Window");
+    commands.add("windowAnimation", "Window/Animation", show("Animation")).when(hasProject);
     commands.add("windowTimeline", "Window/Timeline", show("Timeline")).when(hasProject);
     commands.add("windowAnimator", "Window/Animator", show("Animator")).when(hasProject);
     commands.add("windowScript", "Window/Visual Script", show("Visual Script")).when(hasProject);
+    commands.add("windowShaderGraph", "Window/Shader Graph", show("Shader Graph")).when(hasProject);
     commands.line("Window");
     commands.add("windowProfiler", "Window/Profiler", show("Profiler")).when(hasProject);
     commands.add("windowSource", "Window/Source Control", show("Source Control")).when(hasProject);
@@ -238,8 +240,8 @@ void EditorApp::registerCommands() {
     }).ticked([&editor] { return editor.engine.window() && platform::isFullScreen(editor.engine.window()->nativeHandle()); });
     // Windows that plugins added.
     commands.add("", "Window/Others").when(hasProject).lists([&editor] {
-        static const char* const listed[] = {"Hierarchy", "Inspector", "Explorer", "Console", "Lighting", "Environment", "Rendering", "Post Processing", "Timeline", "Animator",
-                                             "Visual Script", "Profiler", "Source Control", "Manual", "Project Settings"};
+        static const char* const listed[] = {"Hierarchy", "Inspector", "Explorer", "Console", "Lighting", "Environment", "Rendering", "Post Processing", "Animation", "Timeline", "Animator",
+                                             "Visual Script", "Shader Graph", "Profiler", "Source Control", "Manual", "Project Settings"};
         std::vector<MenuEntry> entries;
         for (auto& item : editor.registry.panels) {
             Panel* panel = item.value.get();

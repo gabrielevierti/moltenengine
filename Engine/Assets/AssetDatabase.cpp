@@ -79,7 +79,7 @@ AssetType AssetDatabase::typeOfExtension(const std::string& extension) {
     if (e == ".png" || e == ".jpg" || e == ".jpeg" || e == ".tga" || e == ".bmp" || e == ".hdr" || e == ".exr" || e == ".ktx2") return AssetType::Texture;
     if (e == ".wav" || e == ".mp3" || e == ".flac" || e == ".ogg" || e == ".m4a") return AssetType::Audio;
     if (e == ".ttf" || e == ".otf") return AssetType::Font;
-    if (e == ".metal" || e == ".shader") return AssetType::Shader;
+    if (e == ".metal" || e == ".shader" || e == ".shadergraph") return AssetType::Shader;
     if (e == ".effect") return AssetType::Effect;
     if (e == ".anim") return AssetType::Animation;
     if (e == ".animator") return AssetType::Controller;

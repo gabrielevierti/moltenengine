@@ -6,7 +6,9 @@
 #include "Scene/Components.hpp"
 
 #include <algorithm>
+#include <thread>
 #include <numeric>
+#include <unordered_set>
 
 namespace molten {
 
@@ -14,6 +16,11 @@ namespace {
 const float kPenetrationSlop = 0.005f;      // overlap we tolerate, to keep resting contacts stable
 const float kCorrectionFraction = 0.8f;     // how much of the remaining overlap is removed per step
 const float kBounceThreshold = 1.0f;        // approach speeds below this do not bounce
+// Sleeping: slower than this, for this long, and a body is left out of the steps until woken.
+const float kSleepSpeed = 0.15f;            // meters a second (a stack's resting jitter is below it)
+const float kSleepSpin = 0.25f;             // radians a second
+const float kSleepAfter = 0.6f;             // seconds
+const size_t kPairsPerThread = 192;         // fewer pairs than this for each thread: not worth starting one
 const float kWalkableNormalY = 0.65f;       // surfaces flatter than about 50 degrees count as ground
 
 /// One over how hard a body of this shape is to turn about each of its own axes.
@@ -89,6 +96,35 @@ ShapeInstance Physics::makeShape(const Collider& collider, Vec3 position, Quat r
     return shape;
 }
 
+bool Physics::isAwake(const Proxy& proxy) {
+    return proxy.body && proxy.body->type != BodyType::Static && !proxy.body->isSleeping;
+}
+
+/// The exact test of every pair the broad phase kept. Each pair reads only its two shapes, so
+/// with many pairs they are shared among threads (each its own stretch of the list); with a few,
+/// starting threads would cost more than it saves.
+void Physics::narrowPhase() {
+    auto test = [this](size_t from, size_t to) {
+        for (size_t k = from; k < to; k++) {
+            Candidate& candidate = candidates_[k];
+            candidate.info = ContactInfo{};
+            candidate.touches = collide(proxies_[order_[candidate.first]].shape, proxies_[order_[candidate.second]].shape, candidate.info);
+        }
+    };
+    const size_t count = candidates_.size();
+    const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
+    const size_t threads = std::min<size_t>(std::min(cores, 8u), count / kPairsPerThread);
+    if (threads <= 1) {
+        test(0, count);
+        return;
+    }
+    std::vector<std::thread> helpers;
+    const size_t share = (count + threads - 1) / threads;
+    for (size_t t = 1; t < threads; t++) helpers.emplace_back(test, t * share, std::min(count, (t + 1) * share));
+    test(0, std::min(count, share));
+    for (std::thread& helper : helpers) helper.join();
+}
+
 uint64_t Physics::pairKey(Entity a, Entity b) {
     uint32_t low = std::min(a.index, b.index), high = std::max(a.index, b.index);
     return (uint64_t(high) << 32) | uint64_t(low);
@@ -96,6 +132,15 @@ uint64_t Physics::pairKey(Entity a, Entity b) {
 
 void Physics::step(Scene& scene, float dt) {
     rayShapesReady_ = false;                    // bodies are about to move
+    // 0. What lay on something that is gone (deleted, switched off, its collider taken away) wakes and falls.
+    for (const auto& [key, pair] : touching_) {
+        for (int side = 0; side < 2; side++) {
+            Entity gone = side ? pair.second : pair.first, other = side ? pair.first : pair.second;
+            const Transform* place = scene.get<Transform>(gone);
+            if (scene.isAlive(gone) && scene.has<Collider>(gone) && place && place->isActiveInHierarchy) continue;
+            if (RigidBody* body = scene.get<RigidBody>(other)) body->wake();
+        }
+    }
     // 1. Integrate: velocity from forces, then position from velocity (semi-implicit Euler).
     scene.each<RigidBody, Transform>([&](Entity, RigidBody& body, Transform& transform) {
         if (!transform.isActiveInHierarchy) return;
@@ -108,13 +153,19 @@ void Physics::step(Scene& scene, float dt) {
             // Moved by hand: an editor's tools, the inspector, the game's own code. The body goes where it was put.
             body.position = transform.position;
             body.writtenPosition = transform.position;
+            body.wake();
         }
         // And turned by hand; a body that does not turn by itself always faces as its Transform says.
         if (!body.rotates || std::abs(simd::dot(transform.rotation.vector, body.writtenRotation.vector)) < 0.9999995f) {
+            if (body.rotates) body.wake();
             body.rotation = body.writtenRotation = transform.rotation;
         }
         body.previousPosition = body.position;
         body.previousRotation = body.rotation;
+        // Asleep with a velocity: the game gave it one (a sleeping body has none). It wakes.
+        if (body.isSleeping && (simd::length_squared(body.velocity) > 0 || simd::length_squared(body.angularVelocity) > 0)) body.wake();
+        if (body.isSleeping || body.type != BodyType::Dynamic) body.isSleeping = body.isSleeping && body.type == BodyType::Dynamic;
+        if (body.isSleeping) return;                                // where it lies, as it lies: standing on what it stood on
         body.isGrounded = false;
         if (body.type == BodyType::Dynamic) {
             body.velocity += gravity * (body.gravityScale * dt);
@@ -178,9 +229,11 @@ void Physics::step(Scene& scene, float dt) {
     // What moves in this step, by any means: a pair of which neither does is not looked at.
     std::unordered_map<uint64_t, bool> movesNow;
     for (const Proxy& proxy : proxies_) {
-        movesNow[(uint64_t(proxy.entity.index) << 32) | proxy.entity.generation] = (proxy.body && proxy.body->type != BodyType::Static) || proxy.movedItself;
+        movesNow[(uint64_t(proxy.entity.index) << 32) | proxy.entity.generation] = isAwake(proxy) || proxy.movedItself;
     }
 
+    // The pairs worth an exact look: boxes that overlap, layers that meet, at least one of them moving.
+    candidates_.clear();
     for (size_t i = 0; i < order_.size(); i++) {
         Proxy& a = proxies_[order_[i]];
         for (size_t j = i + 1; j < order_.size(); j++) {
@@ -190,46 +243,64 @@ void Physics::step(Scene& scene, float dt) {
             if (!(a.collider->layer & b.collider->mask) || !(b.collider->layer & a.collider->mask)) continue;
             // The project's own table of which layers meet (Project Settings > Physics).
             if (!(layerMeets[a.collider->layer ? size_t(std::countr_zero(a.collider->layer)) : 0] & b.collider->layer)) continue;
-            bool aMoves = (a.body && a.body->type != BodyType::Static) || a.movedItself;
-            bool bMoves = (b.body && b.body->type != BodyType::Static) || b.movedItself;
-            if (!aMoves && !bMoves) continue;                       // two things that stay put never need testing
+            bool aMoves = isAwake(a) || a.movedItself;
+            bool bMoves = isAwake(b) || b.movedItself;
+            if (!aMoves && !bMoves) continue;                       // two things that stay put (or sleep) never need testing
+            candidates_.push_back(Candidate{uint32_t(i), uint32_t(j)});
+        }
+    }
 
-            // 4. Narrow phase: the exact shapes.
-            ContactInfo info;
-            if (!collide(a.shape, b.shape, info)) continue;
+    // 4. Narrow phase: the exact shapes. Each pair is on its own, so with many of them they are
+    //    shared among the processor's cores; what they found is then gone through in order.
+    narrowPhase();
 
-            if (a.collider->isTrigger || b.collider->isTrigger) {
-                bool aIsTrigger = a.collider->isTrigger;
-                triggeringNow[pairKey(a.entity, b.entity)] = aIsTrigger ? std::make_pair(a.entity, b.entity)
-                                                                        : std::make_pair(b.entity, a.entity);
-                continue;
-            }
-            if (a.inverseMass + b.inverseMass <= 0) continue;       // kinematic against static: nothing to solve
+    for (const Candidate& candidate : candidates_) {
+        if (!candidate.touches) continue;
+        const size_t i = candidate.first, j = candidate.second;
+        Proxy& a = proxies_[order_[i]];
+        Proxy& b = proxies_[order_[j]];
+        const ContactInfo& info = candidate.info;
+        if (a.collider->isTrigger || b.collider->isTrigger) {
+            bool aIsTrigger = a.collider->isTrigger;
+            triggeringNow[pairKey(a.entity, b.entity)] = aIsTrigger ? std::make_pair(a.entity, b.entity) : std::make_pair(b.entity, a.entity);
+            continue;
+        }
+        if (a.inverseMass + b.inverseMass <= 0) continue;           // kinematic against static: nothing to solve
+        // A sleeper touched by something that moves wakes up, and is solved as awake from now.
+        if (a.body && a.body->isSleeping) a.body->wake();
+        if (b.body && b.body->isSleeping) b.body->wake();
 
-            Vec3 velocityA = a.body ? a.body->velocity : Vec3{0, 0, 0};
-            Vec3 velocityB = b.body ? b.body->velocity : Vec3{0, 0, 0};
-            Contact contact;
-            contact.a = a.entity;
-            contact.b = b.entity;
-            contact.point = info.point;
-            contact.normal = info.normal;
-            contact.depth = info.depth;
-            contact.impactSpeed = std::max(0.0f, -simd::dot(velocityB - velocityA, info.normal));
-            if (info.pointCount > 1) {
-                // One contact for each point where they touch: together they hold a box flat.
-                for (int point = 0; point < info.pointCount; point++) {
-                    contact.point = info.points[point];
-                    contact.depth = info.depths[point];
-                    contact.share = 1.0f / float(info.pointCount);
-                    contacts_.push_back(contact);
-                    contactProxies_.push_back({order_[i], order_[j]});
-                }
-            } else {
+        Vec3 velocityA = a.body ? a.body->velocity : Vec3{0, 0, 0};
+        Vec3 velocityB = b.body ? b.body->velocity : Vec3{0, 0, 0};
+        Contact contact;
+        contact.a = a.entity;
+        contact.b = b.entity;
+        contact.point = info.point;
+        contact.normal = info.normal;
+        contact.depth = info.depth;
+        contact.impactSpeed = std::max(0.0f, -simd::dot(velocityB - velocityA, info.normal));
+        if (info.pointCount > 1) {
+            // One contact for each point where they touch: together they hold a box flat.
+            for (int point = 0; point < info.pointCount; point++) {
+                contact.point = info.points[point];
+                contact.depth = info.depths[point];
+                contact.share = 1.0f / float(info.pointCount);
                 contacts_.push_back(contact);
                 contactProxies_.push_back({order_[i], order_[j]});
             }
-            touchingNow[pairKey(a.entity, b.entity)] = {a.entity, b.entity};
+        } else {
+            contacts_.push_back(contact);
+            contactProxies_.push_back({order_[i], order_[j]});
         }
+        touchingNow[pairKey(a.entity, b.entity)] = {a.entity, b.entity};
+    }
+    // Two that touched and now both stay put (asleep, or never moving) still touch: not looked at,
+    // they must not seem to part and meet again when one of them wakes.
+    for (const auto& [key, pair] : touching_) {
+        if (touchingNow.count(key)) continue;
+        auto first = movesNow.find((uint64_t(pair.first.index) << 32) | pair.first.generation);
+        auto second = movesNow.find((uint64_t(pair.second.index) << 32) | pair.second.generation);
+        if (first != movesNow.end() && second != movesNow.end() && !first->second && !second->second) touchingNow[key] = pair;
     }
 
     // 5. Resolve velocities with impulses, at the point of contact: a push there moves a
@@ -307,6 +378,52 @@ void Physics::step(Scene& scene, float dt) {
             a.body->groundNormal = -contact.normal;
         }
     }
+
+    // 6b. Who falls asleep, and who was woken by what happened in this step (pushed by a contact
+    //     or a joint, moved apart from what it sank into).
+    scene.each<RigidBody, Transform>([&](Entity entity, RigidBody& body, Transform& transform) {
+        if (!transform.isActiveInHierarchy || body.type != BodyType::Dynamic || !body.isInitialized) return;
+        const float speed = simd::length_squared(body.velocity), spin = simd::length_squared(body.angularVelocity);
+        if (body.isSleeping) {
+            if (speed > 0 || spin > 0 || simd::distance_squared(body.position, body.previousPosition) > 1e-12f) body.wake();
+            return;
+        }
+        // A body on a joint stays awake: what it hangs from or holds would not wake it.
+        if (!body.canSleep || scene.has<Joint>(entity)) {
+            body.stillFor = 0;
+            return;
+        }
+        body.stillFor = speed < kSleepSpeed * kSleepSpeed && spin < kSleepSpin * kSleepSpin ? body.stillFor + dt : 0.0f;
+    });
+    // Those that touch fall asleep together or not at all: a crate under one still sliding must
+    // not sleep (it would only be woken at once). One ready beside one that is not waits, and so
+    // in turn do those beside it (a few times over, for a stack).
+    std::unordered_set<uint64_t> waiting;
+    auto keyOf = [](Entity entity) { return (uint64_t(entity.index) << 32) | entity.generation; };
+    auto isReady = [&](Entity entity) {
+        const RigidBody* body = scene.get<RigidBody>(entity);
+        if (!body || body->type != BodyType::Dynamic || body->isSleeping) return true;
+        return body->stillFor >= kSleepAfter && !waiting.count(keyOf(entity));
+    };
+    for (int pass = 0; pass < 4; pass++) {
+        bool changed = false;
+        for (const auto& [key, pair] : touchingNow) {
+            const bool first = isReady(pair.first), second = isReady(pair.second);
+            if (first == second) continue;
+            const Entity ready = first ? pair.first : pair.second;
+            const RigidBody* body = scene.get<RigidBody>(ready);
+            if (body && body->type == BodyType::Dynamic && !body->isSleeping) changed |= waiting.insert(keyOf(ready)).second;
+        }
+        if (!changed) break;
+    }
+    scene.each<RigidBody, Transform>([&](Entity entity, RigidBody& body, Transform& transform) {
+        if (!transform.isActiveInHierarchy || body.type != BodyType::Dynamic || body.isSleeping || !isReady(entity)) return;
+        body.isSleeping = true;
+        body.velocity = Vec3{0, 0, 0};
+        body.angularVelocity = Vec3{0, 0, 0};
+        body.previousPosition = body.position;
+        body.previousRotation = body.rotation;
+    });
 
     // 7. Events. Collected first and sent last, so a callback can change the scene freely.
     std::vector<Contact> began;
@@ -451,6 +568,7 @@ std::vector<Entity> Physics::overlapSphere(Scene& scene, Vec3 center, float radi
 
 void RigidBody::applyImpulse(Vec3 impulse, Vec3 worldPoint) {
     if (type != BodyType::Dynamic) return;
+    wake();
     velocity += impulse / std::max(mass, 1e-4f);
     // Without its collider the body's shape is not known here: it turns as a ball of half a meter would.
     if (rotates) angularVelocity += simd::cross(worldPoint - position, impulse) / (0.4f * 0.25f * std::max(mass, 1e-4f));

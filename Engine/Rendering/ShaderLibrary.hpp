@@ -57,6 +57,9 @@ public:
 
     /// The pipeline for this description, or nullptr if the shaders failed to compile.
     MTL::RenderPipelineState* pipeline(const PipelineDescription& description);
+    /// A compute pipeline for the kernel of that name (skin_vertices), made once and kept;
+    /// nullptr if the kernel is not there.
+    MTL::ComputePipelineState* computePipeline(const std::string& kernel);
 
     /// Recompiles if any shader file changed on disk. Returns true if new shaders are in use.
     bool reloadIfChanged();
@@ -89,6 +92,7 @@ private:
     NS::SharedPtr<MTL::Library> library_;
     NS::SharedPtr<MTL::VertexDescriptor> meshVertexDescriptor_;
     std::unordered_map<std::string, NS::SharedPtr<MTL::RenderPipelineState>> pipelines_;
+    std::unordered_map<std::string, NS::SharedPtr<MTL::ComputePipelineState>> computePipelines_;
     std::vector<std::string> files_;
     std::filesystem::file_time_type loadedTime_{};
     std::string lastError_;

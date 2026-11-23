@@ -33,6 +33,13 @@ void saveGameSettings(EditorContext& editor, const GameSettings& settings) {
 }
 
 namespace {
+/// Under a value that something else makes do nothing: why, so that nothing set here is silently ignored.
+static void ignoredNote(const char* text) {
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextColored(ImVec4(0.95f, 0.72f, 0.35f, 1.0f), "%s", text);
+    ImGui::PopTextWrapPos();
+}
+
 
 class ProjectSettingsPanel final : public Panel {
 public:
@@ -50,11 +57,11 @@ public:
             return;
         }
         static const char* const pages[][3] = {
-            {"Game", "person", "What the game is: its name, version, icon and the scene it starts with. File > Build Settings makes it into an application."},
-            {"Quality", "eye", "How well the game draws as it ships: the same for every scene."},
-            {"Input", "logic", "The actions the game asks about, and the keys, buttons and sticks that move them."},
-            {"Physics", "physics", "Gravity, how often physics steps, and which layers collide with which."},
-            {"Tags and Layers", "collider", "The tags and the layers that the things of this project can be given."},
+            {"Game", "gamepad-2", "What the game is: its name, version, icon and the scene it starts with. File > Build Settings makes it into an application."},
+            {"Quality", "gauge", "How well the game draws as it ships: the same for every scene."},
+            {"Input", "keyboard", "The actions the game asks about, and the keys, buttons and sticks that move them."},
+            {"Physics", "atom", "Gravity, how often physics steps, and which layers collide with which."},
+            {"Tags and Layers", "tag", "The tags and the layers that the things of this project can be given."},
         };
         const int count = int(std::size(pages));
         if (!editor.projectSettingsPage.empty()) {
@@ -197,7 +204,7 @@ private:
         ImGui::Spacing();
 
         // ---- the groups
-        static const char* const icons[GameQuality::kGroupCount] = {"ui", "spline", "cube", "light", "spark", "material", "leaf"};
+        static const char* const icons[GameQuality::kGroupCount] = {"scaling", "grid-3x3", "sun-medium", "orbit", "sparkles", "cloud-sun", "trees"};
         static const char* const about[GameQuality::kGroupCount] = {
             "How many pixels the scene is drawn with before the picture is made the screen's size. Fewer is the surest way to a faster frame.",
             "How smooth the edges of things are.",
@@ -293,6 +300,9 @@ private:
                         ui::tooltip("Below 1 the scene is drawn smaller and made the screen's size: faster, a little softer");
                         edited |= ui::checkbox("MetalFX Upscaling", quality.metalFX);
                         ui::tooltip("A smaller picture is made the screen's size by MetalFX, which keeps it sharp, instead of being stretched");
+                        if (quality.metalFX && quality.renderScale >= 0.999f && !quality.dynamicResolution && !quality.followsDeviceHeat) {
+                            ignoredNote("At a Render Scale of 1, never drawn smaller: nothing to make larger.");
+                        }
                         edited |= ui::checkbox("Dynamic Resolution", quality.dynamicResolution);
                         ui::tooltip("While the GPU cannot keep up with the frame rate below, the scene is drawn smaller, and larger again when it can. A scene that traces rays is the first to need it");
                         if (quality.dynamicResolution) {
@@ -314,8 +324,15 @@ private:
                     }
                     case Group::Shadows: {
                         edited |= ui::checkbox("Shadows", quality.shadows);
-                        edited |= ui::dragFloat("Farthest##q", quality.shadowDistance, 0.5f, 5.0f, 2000.0f, "%.0f m");
-                        ui::tooltip("The sun's shadows reach as far as the scene asks (Window > Lighting), and no farther than this");
+                        {
+                            float percent = quality.shadowReach * 100.0f;
+                            if (ui::dragFloat("Reach##q", percent, 1.0f, 25.0f, 200.0f, "%.0f%%")) {
+                                quality.shadowReach = percent / 100.0f;
+                                edited = true;
+                            }
+                        }
+                        ui::tooltip("How far the sun's shadows reach, as a share of how far each scene asks (Lighting > Shadows > Distance): "
+                                    "50% half as far, which costs less; 150% farther, sharper far away");
                         int resolution = quality.shadowResolution >= 4096 ? 2 : quality.shadowResolution >= 2048 ? 1 : 0;
                         if (ui::combo("Resolution", resolution, {"1024", "2048", "4096"})) {
                             quality.shadowResolution = resolution == 2 ? 4096 : resolution == 1 ? 2048 : 1024;
@@ -323,6 +340,17 @@ private:
                         }
                         edited |= ui::dragInt("Slices", quality.shadowCascades, 0.05f, 1, 4);
                         ui::tooltip("Slices of the view, each with its shadow map: more keeps shadows sharp both near and far");
+                        if (quality.rayTraced && editor.engine.renderer().canTraceRays()) {
+                            ignoredNote("Ray Tracing is on: the sun's shadow is traced. Its maps (Resolution, Slices) are drawn only for the light shafts in the fog.");
+                        }
+                        edited |= ui::dragInt("Lights", quality.shadowedLights, 0.05f, 0, 48);
+                        ui::tooltip("Point and spot lights that cast shadows (those with Casts Shadows on): at most this many at once, "
+                                    "the nearest and brightest first. A spot light draws one shadow map, a point light six");
+                        int lightResolution = quality.lightShadowResolution >= 1024 ? 2 : quality.lightShadowResolution >= 512 ? 1 : 0;
+                        if (ui::combo("Light Resolution", lightResolution, {"256", "512", "1024"})) {
+                            quality.lightShadowResolution = lightResolution == 2 ? 1024 : lightResolution == 1 ? 512 : 256;
+                            edited = true;
+                        }
                         break;
                     }
                     case Group::RayTracing: {
@@ -347,6 +375,9 @@ private:
                     }
                     case Group::Effects: {
                         edited |= ui::checkbox("Ambient Occlusion##q", quality.ambientOcclusion);
+                        if (quality.rayTraced && editor.engine.renderer().canTraceRays()) {
+                            ignoredNote("Ray Tracing is on: the rays find what hides the sky from each pixel. This, the screen's own, is not used.");
+                        }
                         edited |= ui::checkbox("Bloom##q", quality.bloom);
                         edited |= ui::dragInt("Light Shaft Steps", quality.lightShafts, 0.2f, 0, 48);
                         ui::tooltip("The most steps a scene's shafts of light are walked in: 0 none");

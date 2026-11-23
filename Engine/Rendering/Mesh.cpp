@@ -1,10 +1,12 @@
 #include "Rendering/Mesh.hpp"
+#include "Rendering/Skinning.hpp"
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
 namespace molten {
 
-Mesh::Mesh(GraphicsDevice& device, const MeshData& data) {
+Mesh::Mesh(GraphicsDevice& device, const MeshData& data, bool moves) {
     std::vector<float> vertices = data.interleaved();
     vertexBuffer_ = NS::TransferPtr(device.device()->newBuffer(vertices.data(), vertices.size() * sizeof(float),
                                                                MTL::ResourceStorageModeShared));
@@ -14,13 +16,13 @@ Mesh::Mesh(GraphicsDevice& device, const MeshData& data) {
     positions_ = data.positions;
     indices_ = data.indices;
     bounds_ = data.bounds();
-    if (device.supportsRayTracing() && indexCount_ >= 3) buildAccelerationStructure(device);
+    if (device.supportsRayTracing() && indexCount_ >= 3) buildAccelerationStructure(device, moves);
 }
 
 /// Tracing a ray against every triangle would be hopeless; the GPU instead sorts the
 /// triangles into a tree of boxes once, and a ray then only visits the boxes it crosses.
 /// The structure reads the positions straight from the vertex buffer.
-void Mesh::buildAccelerationStructure(GraphicsDevice& device) {
+void Mesh::buildAccelerationStructure(GraphicsDevice& device, bool moves) {
     auto geometry = NS::TransferPtr(MTL::AccelerationStructureTriangleGeometryDescriptor::alloc()->init());
     geometry->setVertexBuffer(vertexBuffer_.get());
     geometry->setVertexFormat(MTL::AttributeFormatFloat3);                     // the position starts each vertex
@@ -32,6 +34,10 @@ void Mesh::buildAccelerationStructure(GraphicsDevice& device) {
 
     auto descriptor = NS::TransferPtr(MTL::PrimitiveAccelerationStructureDescriptor::alloc()->init());
     descriptor->setGeometryDescriptors(NS::Array::array(geometry.get()));
+    // One that moves is refitted to its vertices as they move: the same tree of boxes, its boxes
+    // grown or shrunk around the triangles where they are now (cheap, and good while the shape
+    // keeps its topology, as a posed character or a flag does).
+    if (moves) descriptor->setUsage(MTL::AccelerationStructureUsageRefit);
 
     MTL::AccelerationStructureSizes sizes = device.device()->accelerationStructureSizes(descriptor.get());
     accelerationStructure_ = NS::TransferPtr(device.device()->newAccelerationStructure(sizes.accelerationStructureSize));
@@ -47,6 +53,15 @@ void Mesh::buildAccelerationStructure(GraphicsDevice& device) {
     encoder->buildAccelerationStructure(accelerationStructure_.get(), descriptor.get(), scratch.get(), 0);
     encoder->endEncoding();
     commandBuffer->commit();
+    if (moves) {
+        structureDescriptor_ = descriptor;
+        refitScratch_ = NS::TransferPtr(device.device()->newBuffer(std::max<NS::UInteger>(sizes.refitScratchBufferSize, 16), MTL::ResourceStorageModePrivate));
+    }
+}
+
+void Mesh::refit(MTL::AccelerationStructureCommandEncoder* encoder) {
+    if (!encoder || !accelerationStructure_ || !structureDescriptor_ || !refitScratch_) return;
+    encoder->refitAccelerationStructure(accelerationStructure_.get(), structureDescriptor_.get(), nullptr, refitScratch_.get(), 0);
 }
 
 bool Mesh::update(const MeshData& data) {
@@ -78,6 +93,26 @@ std::optional<float> Mesh::raycast(const Ray& ray) const {
         if (t > 1e-5f && (!nearest || t < *nearest)) nearest = t;
     }
     return nearest;
+}
+
+// SkinSource's buffers: here, with the rest of what meshes put on the GPU (Skinning.cpp needs no Metal).
+bool SkinSource::upload(GraphicsDevice& device) {
+    if (vertexCount == 0) return false;
+    MTL::Device* gpu = device.device();
+    auto keep = [](MTL::Buffer* buffer) { return std::shared_ptr<void>(buffer, [](void* made) { static_cast<MTL::Buffer*>(made)->release(); }); };
+    MTL::Buffer* rested = gpu->newBuffer(rest.data(), rest.size() * sizeof(float), MTL::ResourceStorageModeShared);
+    MTL::Buffer* joined = gpu->newBuffer(joints.data(), joints.size() * sizeof(joints[0]), MTL::ResourceStorageModeShared);
+    MTL::Buffer* weighed = gpu->newBuffer(weights.data(), weights.size() * sizeof(Vec4), MTL::ResourceStorageModeShared);
+    if (!rested || !joined || !weighed) {
+        if (rested) rested->release();
+        if (joined) joined->release();
+        if (weighed) weighed->release();
+        return false;
+    }
+    restBuffer = keep(rested);
+    jointBuffer = keep(joined);
+    weightBuffer = keep(weighed);
+    return true;
 }
 
 }  // namespace molten

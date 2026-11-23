@@ -15,7 +15,7 @@ struct Splash {
 
     /// Draws the splash over the whole canvas. `seconds` is the time since it appeared.
     /// It fades in, stays, and fades out to show what is behind it.
-    /// With `logo` (the engine's Assets/Branding/logo.png, 1200 x 268) that picture is shown;
+    /// With `logo` (the engine's Assets/Branding/logo.png, 2400 x 536) that picture is shown;
     /// without it, the name in letters.
     static void draw(Canvas& canvas, float seconds, std::string_view subtitle, const Texture* logo = nullptr);
 

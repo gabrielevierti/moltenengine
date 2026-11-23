@@ -29,7 +29,7 @@ TEST(a_group_can_be_at_a_level_of_its_own) {
     quality.setGroup(Group::Shadows, Level::Low);
     CHECK(quality.level == Level::Custom);
     CHECK(quality.levelOf(Group::Shadows) == Level::Low);
-    CHECK(quality.shadowResolution == 2048 && quality.shadowCascades == 2 && quality.shadowDistance == 60);
+    CHECK(quality.shadowResolution == 2048 && quality.shadowCascades == 2 && quality.shadowReach == 0.5f);
     // The rest is where it was.
     CHECK(quality.levelOf(Group::Resolution) == Level::High && quality.renderScale == 1.0f);
     CHECK(quality.levelOf(Group::RayTracing) == Level::High && quality.rayTracing == LightingQuality::High);
@@ -49,7 +49,7 @@ TEST(a_group_can_be_at_a_level_of_its_own) {
     GameQuality low = GameQuality::preset(Level::Low), medium = GameQuality::preset(Level::Medium), high = GameQuality::preset(Level::High),
                 ultra = GameQuality::preset(Level::Ultra);
     CHECK(low.renderScale < medium.renderScale && medium.renderScale < high.renderScale && high.renderScale <= ultra.renderScale);
-    CHECK(low.shadowDistance < medium.shadowDistance && medium.shadowDistance < high.shadowDistance && high.shadowDistance < ultra.shadowDistance);
+    CHECK(low.shadowReach < medium.shadowReach && medium.shadowReach < high.shadowReach && high.shadowReach < ultra.shadowReach);
     CHECK(int(low.rayTracing) < int(medium.rayTracing) && int(medium.rayTracing) < int(high.rayTracing) && int(high.rayTracing) < int(ultra.rayTracing));
     CHECK(!low.rayTraced && medium.rayTraced && high.rayTraced && ultra.rayTraced);
     CHECK(low.cloudSteps < medium.cloudSteps && medium.cloudSteps < high.cloudSteps && high.cloudSteps < ultra.cloudSteps);
@@ -79,15 +79,15 @@ TEST(the_quality_goes_through_its_file) {
     // A file of before the groups, at a level: that level as it is now, whatever values it carried
     // (they were that level's own of then: 60 meters of shadows, which now would hold a scene back).
     std::optional<GameQuality> old = GameQuality::parse("molten-quality 1\nlevel High\nantiAliasing 2\nrenderScale 1\nshadowDistance 60\nshadowResolution 2048\n");
-    CHECK(old && old->level == Level::High && old->shadowDistance == GameQuality::preset(Level::High).shadowDistance);
+    CHECK(old && old->level == Level::High && old->shadowReach == GameQuality::preset(Level::High).shadowReach);
     CHECK(old->rayTracing == LightingQuality::High && old->dynamicResolution);
     // And one that had values of its own keeps them, with what it does not say taken from High.
     std::optional<GameQuality> custom = GameQuality::parse("molten-quality 1\nlevel Custom\nantiAliasing 4\nshadowDistance 90\nvolumetricClouds 0\n");
-    CHECK(custom && custom->level == Level::Custom && custom->antiAliasing == 4 && custom->shadowDistance == 90 && !custom->volumetricClouds);
+    CHECK(custom && custom->level == Level::Custom && custom->antiAliasing == 4 && std::abs(custom->shadowReach - 0.6f) < 1e-4f && !custom->volumetricClouds);
     CHECK(custom->shadowResolution == 2048 && custom->rayTracing == LightingQuality::High);
     // A new file that names a level and one value: the level's, with that value.
     std::optional<GameQuality> partial = GameQuality::parse("molten-quality 2\nlevel Low\ncloudSteps 99\n");
-    CHECK(partial && partial->antiAliasing == 1 && partial->cloudSteps == 99 && partial->shadowDistance == 60);
+    CHECK(partial && partial->antiAliasing == 1 && partial->cloudSteps == 99 && partial->shadowReach == 0.5f);
 }
 
 TEST(the_quality_limits_what_a_scene_asks_and_decides_its_ray_tracing) {
@@ -101,19 +101,19 @@ TEST(the_quality_limits_what_a_scene_asks_and_decides_its_ray_tracing) {
     RenderSettings atLow = scene;
     GameQuality::preset(Level::Low).applyTo(atLow);
     CHECK(!atLow.rayTracedShadows && !atLow.rayTracedOcclusion && !atLow.rayTracedReflections && !atLow.rayTracedBounce);
-    CHECK(atLow.cascades.shadowDistance == 60 && atLow.cascades.resolution == 2048 && atLow.cascades.count == 2);
+    CHECK(atLow.cascades.shadowDistance == 55 && atLow.cascades.resolution == 2048 && atLow.cascades.count == 2);      // half as far as the scene asks
     CHECK(atLow.sky.cloudsHaveDepth && atLow.sky.cloudSteps == 24 && atLow.fogShaftSteps == 8 && atLow.ambientOcclusionEnabled);
     CHECK(atLow.sampleCount == 1 && atLow.renderScale == 0.8f && atLow.dynamicResolution);
 
     RenderSettings atMedium = scene;
     GameQuality::preset(Level::Medium).applyTo(atMedium);
     CHECK(lightingQualityOf(atMedium) == LightingQuality::Medium);
-    CHECK(atMedium.cascades.shadowDistance == 100 && atMedium.sky.cloudsHaveDepth && atMedium.sky.cloudSteps == 32 && atMedium.fogShaftSteps == 12);
+    CHECK(atMedium.cascades.shadowDistance == 82.5f && atMedium.sky.cloudsHaveDepth && atMedium.sky.cloudSteps == 32 && atMedium.fogShaftSteps == 12);
 
     RenderSettings atHigh = scene;
     GameQuality::preset(Level::High).applyTo(atHigh);
     CHECK(lightingQualityOf(atHigh) == LightingQuality::High);
-    CHECK(atHigh.cascades.shadowDistance == 110);           // as far as the scene asks: High would reach farther
+    CHECK(atHigh.cascades.shadowDistance == 110);           // as far as the scene asks
     CHECK(atHigh.sky.cloudSteps == 48 && atHigh.sky.cloudResolution == 0.5f && atHigh.fogShaftSteps == 16);
 
     RenderSettings atUltra = scene;
@@ -156,7 +156,7 @@ TEST(the_quality_limits_what_a_scene_asks_and_decides_its_ray_tracing) {
     // A file of before, that chose its values one by one: off if the sun's shadows were.
     std::optional<GameQuality> before = GameQuality::parse("molten-quality 2\nlevel Custom\nrayTracing Ultra\ntracedShadows 0\nshadowRays 9\n");
     CHECK(before && !before->rayTraced && before->rayTracing == LightingQuality::Ultra);
-    CHECK(plainAtUltra.cascades.shadowDistance == 25);
+    CHECK(plainAtUltra.cascades.shadowDistance == 37.5f);      // farther than it asks: Ultra reaches half as far again
 
     // A scene's own smaller picture (a game's menu sets it) and the level's multiply; its own dynamic resolution is kept.
     RenderSettings small;
@@ -299,4 +299,17 @@ TEST(a_sky_that_barely_changed_need_not_be_captured_again_at_once) {
     now = then;
     now.skyIntensity = 2;
     CHECK(!skyBarelyChanged(now, then));
+}
+
+TEST(the_quality_says_how_many_point_and_spot_lights_cast_shadows) {
+    GameQuality low = GameQuality::preset(GameQuality::Level::Low), ultra = GameQuality::preset(GameQuality::Level::Ultra);
+    CHECK(low.shadowedLights < ultra.shadowedLights && low.lightShadowResolution < ultra.lightShadowResolution);
+    GameQuality mine = GameQuality::preset(GameQuality::Level::High);
+    mine.shadowedLights = 3;
+    mine.lightShadowResolution = 1024;
+    std::optional<GameQuality> back = GameQuality::parse(mine.toText());
+    CHECK(back && back->shadowedLights == 3 && back->lightShadowResolution == 1024);
+    RenderSettings settings;
+    back->applyTo(settings);
+    CHECK(settings.shadowedLights == 3 && settings.lightShadowResolution == 1024);
 }

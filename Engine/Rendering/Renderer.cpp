@@ -23,6 +23,25 @@ Renderer::Renderer(GraphicsDevice& device, const std::string& shaderDirectory)
     // The clouds' noise: half a second of arithmetic, done while the rest of the engine starts.
     cloudNoiseMaking_ = std::async(std::launch::async, [] { return makeCloudNoise(); });
     gpuTimer_ = std::make_unique<GpuTimer>(device.device());
+    setLightProbes(BakedLighting{});
+}
+
+void Renderer::setLightProbes(const BakedLighting& baked) {
+    probeVolumes_ = gpu::ProbeVolumes{};
+    std::vector<Vec4> cells;
+    for (const ProbeGrid& grid : baked.grids) {
+        if (probeVolumes_.count >= gpu::MMMaxProbeVolumes) break;
+        if (grid.cells.size() != grid.probeCount() * 6 || grid.probeCount() == 0) continue;
+        gpu::ProbeVolume& volume = probeVolumes_.volumes[probeVolumes_.count++];
+        Vec3 far = grid.farCorner();
+        volume.origin = Vec4{grid.origin.x, grid.origin.y, grid.origin.z, grid.spacing};
+        volume.farCorner = Vec4{far.x, far.y, far.z, grid.fade};
+        volume.counts = Vec4{float(grid.countX), float(grid.countY), float(grid.countZ), float(cells.size() / 6)};
+        cells.insert(cells.end(), grid.cells.begin(), grid.cells.end());
+    }
+    lightProbeCount_ = cells.size() / 6;
+    if (cells.empty()) cells.assign(6, Vec4{0, 0, 0, 1});
+    probes_ = NS::TransferPtr(device_.device()->newBuffer(cells.data(), cells.size() * sizeof(Vec4), MTL::ResourceStorageModeShared));
 }
 
 Renderer::~Renderer() {
@@ -223,6 +242,7 @@ void Renderer::collectItems(Scene& scene, const View& view, std::vector<DrawItem
                 item.tint = renderer.tint;
                 item.bounds = local.transformed(item.world);
                 item.castsShadows = renderer.castsShadows;
+                item.previousWorld = previousPlace((uint64_t(entity.index) << 32 | entity.generation) ^ (uint64_t(&place - copies->places.data() + 1) << 44), item.world);
                 items.push_back(item);
             }
             return;
@@ -235,6 +255,7 @@ void Renderer::collectItems(Scene& scene, const View& view, std::vector<DrawItem
         item.bounds = renderer.mesh->bounds().transformed(transform.world);
         item.distanceSquared = simd::length_squared(item.bounds.center() - view.position);
         item.castsShadows = renderer.castsShadows;
+        item.previousWorld = previousPlace(uint64_t(entity.index) << 32 | entity.generation, item.world);
         items.push_back(item);
     });
     // The scene's sea: the sheet round the eye at its level, a square far larger than anything
@@ -299,6 +320,8 @@ int Renderer::collectLights(Scene& scene, gpu::LightData* lights, gpu::FrameUnif
             if (found == cookiesWanted_.end() && cookiesWanted_.size() < size_t(gpu::MMMaxCookies)) found = cookiesWanted_.insert(cookiesWanted_.end(), light.cookie);
             if (found != cookiesWanted_.end()) data.cookie = float(found - cookiesWanted_.begin() + 1);
         }
+        // Asked for: whether it gets one is chosen with the others (chooseLightShadows).
+        if (light.castsShadows && (light.type == LightType::Point || light.type == LightType::Spot)) data.shadow = -1.0f;
         if (light.isVolumetric && (light.type == LightType::Point || light.type == LightType::Spot) && light.volumetricStrength > 0) {
             data.volumetric = light.volumetricStrength;
             hasLightsInAir_ = true;
@@ -372,7 +395,7 @@ std::vector<Renderer::Batch> Renderer::makeBatches(std::vector<const DrawItem*>&
         instances.clear();
         size_t next = first;
         while (next < items.size() && items[next]->mesh == items[first]->mesh && items[next]->material == items[first]->material) {
-            instances.push_back(gpu::InstanceData{items[next]->world, normalMatrix(items[next]->world), items[next]->tint});
+            instances.push_back(gpu::InstanceData{items[next]->world, normalMatrix(items[next]->world), items[next]->tint, items[next]->previousWorld});
             next++;
         }
         Batch batch;
@@ -384,6 +407,22 @@ std::vector<Renderer::Batch> Renderer::makeBatches(std::vector<const DrawItem*>&
         first = next;
     }
     return batches;
+}
+
+Mat4 Renderer::previousPlace(uint64_t key, const Mat4& now) const {
+    auto found = motion_.find(key);
+    if (found == motion_.end()) {
+        motion_.emplace(key, Motion{now, now, frameNumber_});
+        return now;
+    }
+    Motion& motion = found->second;
+    if (motion.frame != frameNumber_) {
+        // A new frame: what it was is where it was the last time (if that was the frame just gone).
+        motion.last = motion.frame + 1 == frameNumber_ ? motion.now : now;
+        motion.now = now;
+        motion.frame = frameNumber_;
+    }
+    return motion.last;
 }
 
 gpu::PassUniforms Renderer::makePassUniforms(const Mat4& view, const Mat4& projection, Vec3 position, int width, int height,
@@ -401,6 +440,8 @@ gpu::PassUniforms Renderer::makePassUniforms(const Mat4& view, const Mat4& proje
     uniforms.farPlane = farPlane;
     uniforms.wind = windWithWeather(settings);
     uniforms.windGust = std::clamp(gustsWithWeather(settings), 0.0f, 1.0f);
+    uniforms.previousViewProjection = uniforms.viewProjection;
+    uniforms.deltaTime = frameDelta_;
     return uniforms;
 }
 
@@ -419,8 +460,90 @@ Renderer::Rect Renderer::sceneRect(MTL::Texture* target) const {
     return area;
 }
 
-/// Builds, for this frame, the structure rays are traced against: one entry per object
-/// that casts a shadow, each pointing at its mesh's own structure with the object's
+void Renderer::chooseLightShadows(gpu::LightData* lights, int count, const View& view) {
+    lightShadowViewCount_ = 0;
+    struct Wanted {
+        int index;
+        float weight;
+        int views;
+    };
+    std::vector<Wanted> wanted;
+    Frustum seen(view.viewProjection);
+    for (int i = 0; i < count; i++) {
+        if (lights[i].shadow >= 0.0f) continue;
+        lights[i].shadow = 0.0f;
+        if (!settings.shadowsEnabled || settings.shadowedLights <= 0) continue;
+        // Only if its light reaches something seen.
+        if (!seen.intersects(AABB::fromCenter(lights[i].position, Vec3{1, 1, 1} * lights[i].range))) continue;
+        float away = std::max(simd::length(lights[i].position - view.position) - lights[i].range, 0.0f);
+        Vec3 c = lights[i].color;
+        float bright = c.x * 0.2126f + c.y * 0.7152f + c.z * 0.0722f;
+        wanted.push_back(Wanted{i, bright * lights[i].range * lights[i].range / (1.0f + away * away),
+                                lights[i].type == gpu::MMLightPoint ? 6 : 1});
+    }
+    std::sort(wanted.begin(), wanted.end(), [](const Wanted& a, const Wanted& b) { return a.weight > b.weight; });
+    std::vector<const Wanted*> chosen;
+    int views = 0;
+    for (const Wanted& light : wanted) {
+        if (int(chosen.size()) >= settings.shadowedLights) break;
+        if (views + light.views > int(gpu::MMMaxLightShadowViews)) continue;
+        chosen.push_back(&light);
+        views += light.views;
+    }
+    if (views == 0) return;
+
+    // The atlas: squares in rows, as sharp as asked while they fit in 4096 texels.
+    int columns = int(std::ceil(std::sqrt(double(views))));
+    int tile = std::clamp(settings.lightShadowResolution, 64, 2048);
+    tile = std::min(tile, 4096 / columns);
+    int rows = (views + columns - 1) / columns;
+    int width = columns * tile, height = rows * tile;
+    if (!lightShadowAtlas_ || int(lightShadowAtlas_->width()) < width || int(lightShadowAtlas_->height()) < height) {
+        // Made larger when more is needed, never smaller (no new texture each time a light comes and goes).
+        int w = std::max(width, lightShadowAtlas_ ? int(lightShadowAtlas_->width()) : 0);
+        int h = std::max(height, lightShadowAtlas_ ? int(lightShadowAtlas_->height()) : 0);
+        auto descriptor = NS::TransferPtr(MTL::TextureDescriptor::texture2DDescriptor(kDepthFormat, NS::UInteger(w), NS::UInteger(h), false));
+        descriptor->setUsage(MTL::TextureUsageRenderTarget | MTL::TextureUsageShaderRead);
+        descriptor->setStorageMode(MTL::StorageModePrivate);
+        lightShadowAtlas_ = NS::TransferPtr(device_.device()->newTexture(descriptor.get()));
+        if (!lightShadowAtlas_) return;
+        lightShadowAtlas_->setLabel(NS::String::string("Light shadow maps", NS::UTF8StringEncoding));
+    }
+    lightShadowTile_ = tile;
+    const float atlasWidth = float(lightShadowAtlas_->width()), atlasHeight = float(lightShadowAtlas_->height());
+    auto add = [&](const Mat4& viewProjection) {
+        int n = lightShadowViewCount_++;
+        lightShadowViews_.viewProjection[n] = viewProjection;
+        lightShadowViews_.tile[n] = Vec4{float((n % columns) * tile) / atlasWidth, float((n / columns) * tile) / atlasHeight,
+                                         float(tile) / atlasWidth, float(tile) / atlasHeight};
+    };
+    for (const Wanted* light : chosen) {
+        gpu::LightData& data = lights[light->index];
+        data.shadow = float(lightShadowViewCount_ + 1);
+        float range = std::max(data.range, 0.01f);
+        float nearPlane = std::clamp(range * 0.002f, 0.02f, 0.2f);
+        if (data.type == gpu::MMLightSpot) {
+            // Through its cone, a little wider, so that its edge is soft inside the map.
+            float cosOuter = std::clamp(-data.spotOffset / data.spotScale, 0.05f, 0.9999f);
+            float fov = std::min(2.0f * std::acos(cosOuter) + radians(4.0f), radians(170.0f));
+            Vec3 up = std::abs(data.direction.y) > 0.99f ? Vec3{1, 0, 0} : Vec3{0, 1, 0};
+            add(perspective(fov, 1.0f, nearPlane, range) * lookAt(data.position, data.position + data.direction, up));
+            data.shadowTexel = 2.0f * std::tan(fov * 0.5f) / float(tile) * std::max(settings.shadowNormalOffset, 0.0f) * 0.5f;      // (Lighting > Shadows > Normal Offset)
+        } else {
+            // Six faces of a cube, each a little wider than a quarter turn: its corners meet the next.
+            float widen = 1.0f + 3.0f / float(tile);
+            float fov = 2.0f * std::atan(widen);
+            const Vec3 faces[6] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+            const Vec3 ups[6] = {{0, 1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}, {0, 1, 0}, {0, 1, 0}};
+            for (int f = 0; f < 6; f++) add(perspective(fov, 1.0f, nearPlane, range) * lookAt(data.position, data.position + faces[f], ups[f]));
+            data.shadowTexel = 2.0f * widen / float(tile) * std::max(settings.shadowNormalOffset, 0.0f) * 0.5f;
+        }
+    }
+    stats.shadowedLights = int(chosen.size());
+}
+
+/// Builds, for this frame, the structure rays are traced against: one entry per opaque object
+/// (those that cast no shadow only seen by the rays that do not look for shadows), each pointing at its mesh's own structure with the object's
 /// place in the world. Returns false if there is nothing to trace against.
 ///
 /// The meshes' structures never change; only this list of instances is rebuilt, which
@@ -431,8 +554,9 @@ bool Renderer::buildSceneAccelerationStructure(MTL::CommandBuffer* commandBuffer
     std::vector<gpu::TracedSurface> surfaces;       // what a ray that hits each instance sees
     for (const DrawItem& item : items) {
         const MTL::AccelerationStructure* meshStructure = item.mesh->accelerationStructure();
-        // Glass and other blended materials let light through: they cast no shadow here either.
-        if (!meshStructure || !item.castsShadows || item.material->isSeenThrough()) continue;
+        // Glass and other blended materials let light through: rays go through them. What casts no
+        // shadow is still seen (in reflections, by the light it bounces): only shadow rays pass it.
+        if (!meshStructure || item.material->isSeenThrough() || item.mesh == waterSheet_.get()) continue;
         auto found = std::find(tracedMeshes_.begin(), tracedMeshes_.end(), meshStructure);
         uint32_t meshIndex = uint32_t(found - tracedMeshes_.begin());
         if (found == tracedMeshes_.end()) tracedMeshes_.push_back(meshStructure);
@@ -444,7 +568,7 @@ bool Renderer::buildSceneAccelerationStructure(MTL::CommandBuffer* commandBuffer
             instance.transformationMatrix.columns[column] = MTL::PackedFloat3(c.x, c.y, c.z);
         }
         instance.options = MTL::AccelerationStructureInstanceOptionOpaque;
-        instance.mask = 0xFF;
+        instance.mask = item.castsShadows ? uint32_t(gpu::MMRayMaskShadow | gpu::MMRayMaskSeen) : uint32_t(gpu::MMRayMaskSeen);
         instance.intersectionFunctionTableOffset = 0;
         instance.accelerationStructureIndex = meshIndex;
         instances.push_back(instance);
@@ -484,6 +608,73 @@ bool Renderer::buildSceneAccelerationStructure(MTL::CommandBuffer* commandBuffer
     encoder->buildAccelerationStructure(sceneAccelerationStructure_.get(), descriptor.get(), sceneAccelerationScratch_.get(), 0);
     encoder->endEncoding();
     return true;
+}
+
+// ---------------------------------------------------------------- meshes that move
+
+void Renderer::skin(const std::shared_ptr<Mesh>& mesh, const std::shared_ptr<const SkinSource>& source, std::vector<Mat4> palette) {
+    if (!mesh || !source || palette.size() < source->paletteSize) return;
+    // Asked twice in a frame (the editor's views, a second Animator update): the last pose wins.
+    for (SkinJob& job : skinJobs_) {
+        if (job.mesh == mesh) {
+            job.palette = std::move(palette);
+            return;
+        }
+    }
+    skinJobs_.push_back(SkinJob{mesh, source, std::move(palette)});
+}
+
+void Renderer::meshMoved(const std::shared_ptr<Mesh>& mesh) {
+    if (mesh && device_.supportsRayTracing() && std::find(movedMeshes_.begin(), movedMeshes_.end(), mesh) == movedMeshes_.end()) movedMeshes_.push_back(mesh);
+}
+
+/// Each skinned mesh's vertices, as its bones have them this frame, written by the GPU into the
+/// mesh's own buffer: one dispatch per mesh, a thread per vertex. The palettes go in this frame's
+/// memory; everything drawn later in the frame reads the posed vertices.
+void Renderer::poseSkinnedMeshes(MTL::CommandBuffer* commandBuffer) {
+    if (skinJobs_.empty()) return;
+    MTL::ComputePipelineState* pipeline = shaders_.computePipeline("skin_vertices");
+    if (!pipeline) {
+        // No kernel (a library from before it): the models stay as they were made this frame,
+        // and are posed on the processor from the next.
+        canSkin_ = false;
+        logWarning("no skin_vertices kernel: models with bones are posed on the processor");
+        skinJobs_.clear();
+        return;
+    }
+    Profiler::Scope timed(profilerOrIdle(), "Posing models with bones");
+    MTL::ComputeCommandEncoder* encoder = commandBuffer->computeCommandEncoder();
+    encoder->setLabel(NS::String::string("Skinning", NS::UTF8StringEncoding));
+    encoder->setComputePipelineState(pipeline);
+    const NS::UInteger group = std::min<NS::UInteger>(pipeline->maxTotalThreadsPerThreadgroup(), 64);
+    for (const SkinJob& job : skinJobs_) {
+        const SkinSource& source = *job.source;
+        MTL::Buffer* target = job.mesh->vertexBuffer();
+        if (!target || !source.restBuffer || source.vertexCount == 0 || target->length() < source.rest.size() * sizeof(float)) continue;
+        FrameAllocator::Allocation palette = allocator().copyArray(job.palette.data(), job.palette.size());
+        const uint32_t count = source.vertexCount;
+        encoder->setBuffer(static_cast<MTL::Buffer*>(source.restBuffer.get()), 0, 0);
+        encoder->setBuffer(static_cast<MTL::Buffer*>(source.jointBuffer.get()), 0, 1);
+        encoder->setBuffer(static_cast<MTL::Buffer*>(source.weightBuffer.get()), 0, 2);
+        encoder->setBuffer(palette.buffer, palette.offset, 3);
+        encoder->setBuffer(target, 0, 4);
+        encoder->setBytes(&count, sizeof(count), 5);
+        encoder->dispatchThreadgroups(MTL::Size((count + group - 1) / group, 1, 1), MTL::Size(group, 1, 1));
+        meshMoved(job.mesh);
+    }
+    encoder->endEncoding();
+    skinJobs_.clear();
+}
+
+/// The ray-tracing structures of the meshes that moved, fitted to their vertices as they are now:
+/// after the skinning above (the same command buffer runs in order), before any ray is traced.
+void Renderer::refitMovedMeshes(MTL::CommandBuffer* commandBuffer) {
+    if (movedMeshes_.empty()) return;
+    MTL::AccelerationStructureCommandEncoder* encoder = commandBuffer->accelerationStructureCommandEncoder();
+    encoder->setLabel(NS::String::string("Refitting what moved", NS::UTF8StringEncoding));
+    for (const std::shared_ptr<Mesh>& mesh : movedMeshes_) mesh->refit(encoder);
+    encoder->endEncoding();
+    movedMeshes_.clear();
 }
 
 void Renderer::takeCloudNoise() {
@@ -624,6 +815,12 @@ void Renderer::render(Scene& scene, const Canvas& canvas, const RenderTarget& ta
     allocator().reset();
     if (gpuTimer_) gpuTimer_->beginFrame(frameIndex_);
     frameNumber_++;
+    frameDelta_ = lastFrameTime_ >= 0 ? float(std::clamp(time - lastFrameTime_, 0.0, 0.25)) : 0.0f;
+    lastFrameTime_ = time;
+    // Things not drawn for a while are forgotten.
+    if (frameNumber_ % 120 == 0) {
+        for (auto it = motion_.begin(); it != motion_.end();) it = it->second.frame + 2 < frameNumber_ ? motion_.erase(it) : std::next(it);
+    }
     stats = RenderStats{};
     adjustDynamicScale();
     hasSceneStructureThisFrame_ = false;
@@ -639,6 +836,9 @@ void Renderer::render(Scene& scene, const Canvas& canvas, const RenderTarget& ta
     }
 
     MTL::CommandBuffer* commandBuffer = device_.queue()->commandBuffer();
+    // Before anything is drawn: the models with bones posed, and what moved refitted for the rays.
+    poseSkinnedMeshes(commandBuffer);
+    refitMovedMeshes(commandBuffer);
     takeCloudNoise();
     waterLastFrame_ = waterSeen_;
     waterSeen_ = false;
@@ -735,6 +935,7 @@ void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const
     bool sunCastsShadows = false;
     int lightCount = collectLights(scene, lights, frame, sunCastsShadows);
     updateCookies(commandBuffer);
+    chooseLightShadows(lights, lightCount, view);
     // The weather (Kit/Weather.hpp): rain and storms cloud the sky over and hide the sun behind
     // it; lightning lights the clouds from inside, and the world with them, for a moment.
     const float clouded = settings.weather.clouded();
@@ -819,10 +1020,15 @@ void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const
     // Carried a step each frame, as far as the wind blows now: a wind that rises with the weather
     // speeds them up from where they are, instead of putting them where a harder wind would have
     // carried them from the start.
-    if (cloudDriftTime_ >= 0.0 && time > cloudDriftTime_) cloudDrift_ += frame.cloudWind * float(std::min(time - cloudDriftTime_, 0.5) / 2400.0);
+    // Their own Drift the same way: changing either moves them on at the new speed from where they
+    // are (a speed times the whole time since the start would send them racing across the sky
+    // while the value is being dragged).
+    if (cloudDriftTime_ >= 0.0 && time > cloudDriftTime_) {
+        cloudDrift_ += (frame.cloudWind / 2400.0f + settings.sky.cloudSpeed) * float(std::min(time - cloudDriftTime_, 0.5));
+    }
     if (time != cloudDriftTime_) cloudDriftTime_ = time;
     cloudDrift_ = Vec2{std::fmod(cloudDrift_.x, 1000.0f), std::fmod(cloudDrift_.y, 1000.0f)};
-    frame.cloudOffset = settings.sky.cloudSpeed * float(time) + cloudDrift_;
+    frame.cloudOffset = cloudDrift_;
     // The traced shadows' softness: the sun as wide as it is drawn, up to a little over twice the
     // real one (0.27 degrees across its radius). A sun drawn large for looks would otherwise
     // blur every shadow of the scene into a smudge.
@@ -944,6 +1150,10 @@ void Renderer::renderView(MTL::CommandBuffer* commandBuffer, Scene& scene, const
     if (frame.cascadeCount > 0) {
         Profiler::Scope timed(timing, "Shadow maps");
         renderShadows(commandBuffer, casters, cascades, passUniforms, frameUniforms);
+    }
+    if (lightShadowViewCount_ > 0) {
+        Profiler::Scope timed(timing, "Light shadow maps");
+        renderLightShadows(commandBuffer, items);
     }
     // Decals this frame: they need the depth of what is under them.
     hasDecals_ = false;

@@ -22,6 +22,12 @@ struct MeshVertexOut {
     float2 uv;
     float4 tint;
     float viewDepth;                        // distance in front of the camera
+    // The thing's own axes, for what sticks to it (the rain on it, Forward.metal: wetten): where
+    // the point is in them, in meters, and the axes themselves in the world.
+    float3 localPosition;
+    float3 axisX;
+    float3 axisY;
+    float3 previousWorldPosition;           // where this point was a frame ago (as worldPosition): how fast it moves
 };
 
 // How far the wind moves a point of a swaying thing: along the wind, the more the higher it is
@@ -200,11 +206,22 @@ vertex MeshVertexOut vertex_mesh(MeshVertexIn in [[stage_in]],
                                  constant MaterialUniforms &material [[buffer(MMBufferMaterial)]]) {
     InstanceData instance = instances[instanceID];
     float4 world = instance.model * float4(in.position, 1.0);
+    // A frame ago: from where the thing was then (still, if it was not drawn then).
+    float3 before = instance.previousModel[3][3] != 0.0 ? (instance.previousModel * float4(in.position, 1.0)).xyz : world.xyz;
+    float3 axisX = normalize(instance.model[0].xyz), axisY = normalize(instance.model[1].xyz), axisZ = normalize(instance.model[2].xyz);
+    float3 fromOrigin = world.xyz - instance.model[3].xyz;
+    float3 local = float3(dot(fromOrigin, axisX), dot(fromOrigin, axisY), dot(fromOrigin, axisZ));
     if (material.sway > 0.0) {
-        world.xyz += windSway(in.position.y, instance.model[3].xyz, world.xyz, pass, material.sway);
+        float3 swayed = windSway(in.position.y, instance.model[3].xyz, world.xyz, pass, material.sway);
+        world.xyz += swayed;
+        before += swayed;
     }
 
     MeshVertexOut out;
+    out.localPosition = local;
+    out.axisX = axisX;
+    out.axisY = axisY;
+    out.previousWorldPosition = before;
     out.position = pass.viewProjection * world;
     out.worldPosition = world.xyz;
     out.normal = (instance.normalMatrix * float4(in.normal, 0.0)).xyz;
@@ -245,6 +262,10 @@ vertex MeshVertexOut vertex_water(MeshVertexIn in [[stage_in]],
     out.tangent = float4(1.0, 0.0, 0.0, 2.0);       // w above 1 says: `uv` is where this water rests
     out.uv = float2(rest.x, rest.z);
     out.tint = instance.tint;
+    out.localPosition = world.xyz;
+    out.axisX = float3(1.0, 0.0, 0.0);
+    out.axisY = float3(0.0, 1.0, 0.0);
+    out.previousWorldPosition = world.xyz;
     out.viewDepth = -(pass.view * world).z;
     return out;
 }
@@ -321,3 +342,43 @@ vertex ShadowDetailVertexOut vertex_shadow_detailed(MeshVertexIn in [[stage_in]]
     return out;
 }
 #endif
+
+// ---------------------------------------------------------------- skinning
+
+// A model with bones, posed on the GPU before anything is drawn (Rendering/Skinning.hpp): each
+// vertex as it was modeled, moved by up to four matrices of the palette (its bones', or its
+// node's for a part that is not skinned) and blended by how much it follows each, written into
+// the mesh's own vertices. Twelve floats a vertex, as MeshData::interleaved lays them out:
+// position, normal, tangent and its handedness, uv.
+kernel void skin_vertices(device const float* rest [[buffer(0)]],
+                          device const ushort4* joints [[buffer(1)]],
+                          device const float4* weights [[buffer(2)]],
+                          constant float4x4* palette [[buffer(3)]],
+                          device float* posed [[buffer(4)]],
+                          constant uint& count [[buffer(5)]],
+                          uint index [[thread_position_in_grid]]) {
+    if (index >= count) return;
+    device const float* from = rest + index * 12;
+    const float4 position = float4(from[0], from[1], from[2], 1.0);
+    const float4 normal = float4(from[3], from[4], from[5], 0.0);
+    const float4 tangent = float4(from[6], from[7], from[8], 0.0);
+    const ushort4 joint = joints[index];
+    const float4 weight = weights[index];
+    float3 p = float3(0.0);
+    float3 n = float3(0.0);
+    float3 t = float3(0.0);
+    for (int k = 0; k < 4; k++) {
+        if (weight[k] <= 0.0) continue;
+        const float4x4 m = palette[joint[k]];
+        p += (m * position).xyz * weight[k];
+        n += (m * normal).xyz * weight[k];
+        t += (m * tangent).xyz * weight[k];
+    }
+    n = dot(n, n) > 1e-12 ? normalize(n) : normal.xyz;
+    t = dot(t, t) > 1e-12 ? normalize(t) : tangent.xyz;
+    device float* to = posed + index * 12;
+    to[0] = p.x;  to[1] = p.y;  to[2] = p.z;
+    to[3] = n.x;  to[4] = n.y;  to[5] = n.z;
+    to[6] = t.x;  to[7] = t.y;  to[8] = t.z;  to[9] = from[9];
+    to[10] = from[10];  to[11] = from[11];
+}

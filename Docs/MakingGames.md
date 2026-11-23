@@ -159,7 +159,18 @@ or keep it in the Dock (`./build/molten` from the Terminal is the same editor). 
 logo, then the projects opened lately on the left: choose one and it is shown on the right, with the
 question whether to open it (Return opens it, a double-click opens it at once); **New Project** starts
 one with an empty scene. Opening a project, a scene, building the game's code and exporting each show
-what is being done, step by step, until it is done.
+what is being done, step by step, until it is done. Opening a project also keeps a log under the bar:
+each step done and how long it took (reading the project, looking through its assets, loading its
+plugins, building its code, reading the scene and the files it uses, counted as they are read), and
+every warning or error said on the way, so a script that did not build is seen before the editor opens.
+
+**Icons.** Every window has its icon on its tab; where several share a narrow place (the Inspector with
+Lighting, Environment, Rendering and Post Processing), the tabs behind show their icon alone and say
+their name when the pointer rests on them. Components, assets, the Scene view's tools and the quality
+groups have theirs; in the Scene view, lights (a sun, a bulb, a flashlight for a spot), cameras,
+particle systems and sounds, which have no mesh to click, are shown by a round badge with their icon,
+a light's in its color, ringed in orange while selected. The icons are Lucide's (ISC license), in
+`Assets/Fonts/Icons.ttf`; `Tools/make_icon_font.py` adds one.
 
 **Moving and deleting.** In the **Explorer**, Cmd and a click chooses several files, Shift a range,
 Cmd+A all; Delete (or Backspace) moves them to the Trash after asking; Cmd+X and Cmd+V, or Move To in
@@ -175,7 +186,7 @@ no longer names the file.
 
 **Inspector and Viewer.** The Inspector is for the things of the scene: what is chosen in the view or the Hierarchy, and nothing else. Each component has an icon by its name (a cube for a mesh, a bulb for a light, a speaker for a sound, braces for a script), so they are told apart at a glance; titles inside one (a material's Surface, Textures) are lines, not more folding headers. With nothing chosen, the Inspector shows the scene at a glance, what was chosen lately, and tiles to make the usual things. The Viewer is for the things of the Explorer, and it is part of the Explorer: choose an asset (or a folder) and it opens at the Explorer's right, as wide as its bar is dragged; close it with its **x** or by clicking empty space. A right click anywhere in the Explorer offers what can be made there. Choosing in one never unchooses the other, so a material in the Viewer can be dragged onto the entity in the Inspector.
 
-**Menus.** On a Mac they are in the Mac's own menu bar, at the top of the screen, as every program's are, and only there, in full screen too. **Molten Engine v1.2** (the program's own menu, named with its version) has About, **Preferences** (Cmd+,: autosave, the editor's look, and every shortcut, searchable and changed by pressing the new keys) and Quit. **File** has the scenes (new, open, save), the projects (new, open, recent, close, Save Project as Template) and **Build Settings** (Shift+Cmd+B), which makes the game into an application. **Edit** has undo, cut, copy and paste, the selection, Find and **Search Everything** (Cmd+K, which finds any command by name, with the entities and the assets), Play, and **Project Settings**: what the game is (its name, version, icon and first scene), Quality, Input, Physics, Tags and Layers. **Assets** makes and imports files; **Entity** makes things and arranges them (Unity's GameObject); **Component** adds one to what is selected; **Window** opens the windows (the layouts are at the top right), and has **Full Screen** (as the window's green button does): the whole screen but the Mac's menu bar, which stays with the menus in it, and no title bar; the Dock hides until the pointer goes down to it; **Help** has the manuals. Each command is in one place, with its keys beside it. The Scene view's **Gizmos** button chooses what it shows besides the scene, the outline of every collider among it. **Simulate** (in the Scene view and the Game view) lets what moves by itself move while you edit: particles, water's waves, plants swaying in the wind, the clouds. It is off by default, and then all of it stands still except while such a thing is selected (a particle system, a water or swaying material), so that it can be tuned while it is seen moving; the button is lit whenever it moves. The **Profiler** has three pages: the frame's time, what the scene holds (Scene), and what it weighs (Memory). The **Input** page of Project Settings shows a controller and a keyboard, lit as they are pressed (and whether a controller is connected), with what the chosen action is bound to in orange; **Bind by Pressing** takes the next key or button.
+**Menus.** On a Mac they are in the Mac's own menu bar, at the top of the screen, as every program's are, and only there, in full screen too. **Molten Engine v1.3** (the program's own menu, named with its version) has About, **Preferences** (Cmd+,: autosave, the editor's look, and every shortcut, searchable and changed by pressing the new keys) and Quit. **File** has the scenes (new, open, save), the projects (new, open, recent, close, Save Project as Template) and **Build Settings** (Shift+Cmd+B), which makes the game into an application. **Edit** has undo, cut, copy and paste, the selection, Find and **Search Everything** (Cmd+K, which finds any command by name, with the entities and the assets), Play, and **Project Settings**: what the game is (its name, version, icon and first scene), Quality, Input, Physics, Tags and Layers. **Assets** makes and imports files; **Entity** makes things and arranges them (Unity's GameObject); **Component** adds one to what is selected; **Window** opens the windows (the layouts are at the top right), and has **Full Screen** (as the window's green button does): the whole screen but the Mac's menu bar, which stays with the menus in it, and no title bar; the Dock hides until the pointer goes down to it; **Help** has the manuals. Each command is in one place, with its keys beside it. The Scene view's **Gizmos** button chooses what it shows besides the scene, the outline of every collider among it. **Simulate** (in the Scene view and the Game view) lets what moves by itself move while you edit: particles, water's waves, plants swaying in the wind, the clouds. It is off by default, and then all of it stands still except while such a thing is selected (a particle system, a water or swaying material), so that it can be tuned while it is seen moving; the button is lit whenever it moves. The **Profiler** has three pages: the frame's time, what the scene holds (Scene), and what it weighs (Memory). The **Input** page of Project Settings shows a controller and a keyboard, lit as they are pressed (and whether a controller is connected), with what the chosen action is bound to in orange; **Bind by Pressing** takes the next key or button.
 
 **Text fields name nothing.** Wherever a field names something (a sound, a scene, a prefab, a timeline, an entity, a tag, a bone, an animation, a state or parameter of the Animator, an input action, a key, a shared value, a message), the Inspector and the Visual Script boxes offer a list of what it can actually be, with a search box when the list is long; files can also be dropped on it from the Explorer. A name that is no longer there shows in orange as missing. Values and messages, which are new names a game invents, have **A new name** at the end of their list. Only words people read (a button's label, a text on screen, a win message) are typed.
 
@@ -211,11 +222,23 @@ In the scene view a camera is drawn as the pyramid of what it sees, a directiona
 
 ## Cutscenes
 
-A cutscene is an animation like any other: of an entity that holds what moves in it (the camera,
-the characters, the doors), made in **Window > Timeline** with Record, its sounds and the
-moments the game waits for as events (a sound plays; any other name is a message the scripts
-hear). Its Animator plays it when told: `animator->play("Intro")`, or Play Animation in a visual
-script. Scenes made before keep their Timeline Players and `.timeline` files, which still play.
+There are two ways, as in Unity. A cutscene can be an animation like any other: of an entity that
+holds what moves in it (the camera, the characters, the doors), made in **Window > Animation** with
+Record, its sounds and the moments the game waits for as events (a sound plays; any other name is a
+message the scripts hear). Its Animator plays it when told: `animator->play("Intro")`, or Play
+Animation in a visual script.
+
+Or it can be a **timeline** (`.timeline`), made in **Window > Timeline** (**New** there, or **+ New >
+Timeline** in the Explorer): tracks along time, each for one thing. **Move** takes an entity
+through its keys (move it in the view, then **Key** on its track: where it is in the world now, at
+the playhead); **Camera** cuts from one camera to another; **Sound** plays sounds; **Value** sets a
+shared value (what a script or a menu waits for); **Show** shows or hides an entity; **Trigger** sets
+a trigger of an Animator; **Clip** starts an animation. Double-click a track for a key or a mark,
+drag them along it, right-click one to change it or remove it. **Preview** shows the scene as the
+timeline has it at the playhead, while the time is dragged or played, and puts everything back
+when it stops. A **Timeline Player** (Add Component > Animation) plays it in the game: from the
+start, looping or not, at a speed, setting its **Done Value** when it ends; **Edit in Timeline** on
+it opens its file.
 
 ## Morning, noon and night
 
@@ -528,12 +551,15 @@ storm makes a gale of it: the clouds, the waves, the rain and what sways all go 
 where it falls, gusts and all, so the rain slants along the wind, the more the harder it blows
 (snow, lighter, the same, drifting). Each drop is aimed, as it is born, at what it will
 hit (any collider, the ground's mesh, a car's roof) or at the water, and ends there: a splash of
-droplets thrown off the way the surface faces, a widening ring on water, and on what is steep (a
-wall, a windscreen, the side of a car) drops that run down it. What is out in the rain gets wet:
-darker where it soaks the water up, glossier, with rings spreading where the drops land on what
-lies flat; on what slopes (a bonnet, a windscreen, a wall) the water stands in beads that gather,
-and now and then one grown heavy sets off down the slope, as gravity and the wind take it along
-the surface, sweeping up the beads in its way and leaving a clear trail; under a roof, a porch or inside a car
+droplets thrown off the way the surface faces, a widening ring on water. What is out in the rain
+gets wet. What soaks water up (asphalt, stone, wood: rough and not metal) darkens, and where it
+lies flat the drops' small rings spread on the water standing on it. On what is smooth or metal
+(paint, glass, plastic, steel) the water stands in beads; when what pulls them beats how they
+cling, they run: down the surface by their weight, and along it in the air going by it (the wind,
+and the thing's own speed: on a car that drives, the drops on the bonnet and the windscreen are
+blown back and up over it, the faster the harder), each in fits, wandering a little, gathering
+the beads in its way and leaving a wet trail. The drops are the thing's own: they stay on a car
+that drives off, and follow its shape, not its texture; under a roof, a porch or inside a car
 it stays dry (the scene round the camera is seen from above to know). As it rains the sky clouds
 over, the sun dims and the air thickens. **Storm** adds lightning, a few kilometers away or
 nearer: some strokes stay inside the clouds and light them from within, round where they are;
@@ -564,16 +590,16 @@ one more button before them, **Off**):
 |---|---|
 | Resolution | How many pixels are drawn before the picture is made the screen's size (MetalFX keeps it sharp), and **dynamic resolution**: fewer pixels while the GPU cannot keep the frame rate, more again when it can |
 | Anti-Aliasing | Multisampling: off, 2x or 4x |
-| Shadows | Shadow maps on or off, the farthest the sun's shadows reach (a scene may ask for less: Window > Lighting > Shadows), the shadow map's size, how many slices |
+| Shadows | Shadows on or off; how far the sun's shadows reach, as a share of what each scene asks (Window > Lighting > Shadows > Distance: half at Low, half again at Ultra); the shadow map's size and how many slices; how many point and spot lights may cast shadows at once, and how sharp |
 | Ray Tracing | **Off**, or on at **Low, Medium, High or Ultra**. On, all of the light is found with rays at every level: the sun's **shadows** (sharp where things touch, soft away from them), the **light around things** (the sky's light hidden where it really is, and **bounced light**: a red wall in the sun tints the floor) and **reflections**. A higher level sends more rays along shadows' edges and for the light around things, and mirrors rougher things. Off, or where the GPU cannot trace rays: shadow maps, the screen's ambient occlusion, reflections of the sky. The whole project's Low level has it off |
 | Effects | The screen's ambient occlusion, bloom, the steps of light shafts |
 | Sky | Clouds with depth or flat, in how many steps, into how large a picture |
 | Detail | How far the far levels of LOD groups and painted foliage last |
 
 **Low** is meant to still look good on the slowest machine the game runs on: a little smaller and
-made sharp by MetalFX, shadow maps to 60 m, the screen's ambient occlusion, light shafts and
+made sharp by MetalFX, shadow maps half as far as each scene asks, the screen's ambient occlusion, light shafts and
 clouds with depth, walked coarsely; only ray tracing is off. **Ultra** is the best the engine
-draws at 60 frames a second on a recent Mac (an M3): 4x multisampling, shadows to 250 m at 4096,
+draws at 60 frames a second on a recent Mac (an M3): 4x multisampling, shadows half again as far as a scene asks, at 4096,
 the most rays (twelve along a shadow's edge, three for the light around things, mirrors on
 rougher things), clouds with depth in 64 steps, the finest light shafts, and detail that lasts
 half as far again; every pixel while the GPU keeps up, a few fewer, made sharp by MetalFX, while
@@ -588,7 +614,11 @@ shafts, smaller and with two slices. **Profiler > Frame** shows what each pass o
 the picture costs the GPU (the shadow maps, the clouds, the scene, the bloom...), in milliseconds:
 where to look first when a frame is slow.
 
-Where a scene asks for shadows farther than the level reaches, the Lighting panel says so. The quality is kept in Settings/Quality.settings and goes into the exported game.
+Nothing a scene sets is silently ignored: where the quality turns something off or takes it over
+(no shadows at Low, the light around things found by rays instead of the screen's ambient
+occlusion, flat clouds), the panel where the scene sets it says so in orange, with a button to
+Project Settings > Quality; and the Lighting panel shows how far the shadows reach at the
+project's quality. The quality is kept in Settings/Quality.settings and goes into the exported game.
 
 **Ray tracing costs about a ray and a half a pixel**: one ray toward the sun from each pixel
 that faces it, from the pixel's own place and the same in every frame (so shadows stand still
@@ -602,6 +632,13 @@ pixels instead of fewer frames.
 **Area lights** (Entity > Light > Area Light) are glowing rectangles: a window, a ceiling panel, a
 screen, shining from their front, softly, as much as their size.
 
+**Point and spot lights cast shadows** with **Casts Shadows** on (the Light in the Inspector): a
+lamp in a room, a torch, a car's headlights, the bars of a window in a spot light's beam. A spot
+light draws one shadow map, a point light six (one each way); as many lights cast them at once as
+the project's quality allows (Project Settings > Quality > Shadows > Lights), the nearest and
+brightest first, and only those whose light reaches what is seen. Their shadows fall in the air
+too, with Volumetric on: beams through a window, the dark behind a pillar.
+
 A **spot light's cookie**, as in Unity: a picture in Assets that the light shines through, spread
 across its cone (white lets it through, black stops it, colors tint it): the frame of a window on
 the floor, leaves, stained glass, a theatre's gobo. It turns with the light about its axis. Drop a
@@ -611,7 +648,8 @@ picture on the Light's **Cookie** slot in the Inspector.
 lamp's glow in the mist, a car's headlights in the rain, a beam across a dusty room, the cookie's
 pattern in it too. **In The Air** is how much (1 as fog would be lit); the fog makes it thicker
 (Environment > Fog), and what is far is dimmed by the fog in front of it. It is seen in front of
-what it lights and not through walls, and it casts no shadows in the air.
+what it lights and not through walls; with Casts Shadows on, what stands in its light shades the
+air behind it.
 
 ## The picture: grading, exposure, focus, motion, sky, decals, wind
 
@@ -656,6 +694,30 @@ damp do; off, it is painted over it.
 **Wind.** A material's **Sway** lets the scene's **Wind** (Environment > Weather > Wind) move it, the more
 the higher above the model's base: 1 for grass, 0.1 for a tree, in waves that cross the field
 and gusts as gusty as the wind's gustiness. Painted Foliage sways with its material.
+
+### Baked light: Light Probe Volumes
+
+Without baked light every surface is lit by the whole sky, indoors as out: a room with one small
+window is as bright as the field outside. A **Light Probe Volume** (Entity > Light > Light Probe
+Volume) fixes that for the part of the scene inside its box. Put one round a building, a cave or
+a street between tall houses, and press **Bake Light Probes** in Lighting > Baked Light.
+
+Baking sends rays from probes spread through the box (**Spacing** meters apart: 1 for rooms, 4 or
+more for open ground) into the scene's triangles. Each probe keeps, for six directions, how much
+of the sky it sees that way and the light thrown back at it by what is there: the floor in the
+sun lights the ceiling, a red wall tints the floor beside it. **Bounce** says how much the walls
+give back (1 as their colors say). What moves (bodies that are not static) and what is seen
+through is left out of the bake, but everything drawn inside the box is lit by it, moving or not.
+The probes do not hold the sky itself: turn the sun to evening and the rooms still darken as they
+should, though the light bounced inside them stays that of the sun they were baked in. Bake again
+when the walls or the lights change.
+
+The bake runs while the editor goes on, and takes seconds for a house, a minute or two for a town
+at fine spacing. It is written beside the scene (`Scenes/Main.lighting` for `Scenes/Main.scene`,
+see [FileFormats.md](FileFormats.md)), and the scene names it, so a built game has it too. **Stop
+Using It** goes back to the sky's light everywhere and keeps the file. With traced light (ray
+tracing at the project's quality) the rays already say all of this, more exactly, and the probes
+are not used.
 
 ## Water, mist and traced light
 
@@ -720,10 +782,10 @@ the same fields, changed at once while it runs; its `simulation->points()` are w
 ## Animation, as in Unity
 
 - **An entity's animations** are its own: made for it, and for nothing else. Choose the entity,
-  open **Window > Timeline** (or **Open Timeline** on its Animator) and **Create Animation**: it
+  open **Window > Animation** (or **Open Animation** on its Animator) and **Create Animation**: it
   is kept in Animations/<its name>, its **Animator** is made if it has none, and it is listed in
   the Animator's **Animations**. A model's animations (a `.gltf` or `.glb`) are its too.
-- **The Timeline** keys it, as Unity's Animation window does: press **Record**, and where things
+- **The Animation window** keys it, as Unity's does: press **Record**, and where things
   are is kept at the playhead; click another time, change things in the Inspector or move them in
   the view, and each change is a key there. **Key** keeps everything animated as it is now. Keys
   are dragged along their track, a double click adds one, a right click chooses how the curve
@@ -732,7 +794,7 @@ the same fields, changed at once while it runs; its `simulation->points()` are w
 - **Procedural**: a right click on a track's name makes it move by itself, over its keys or alone:
   a wave, a wander, or a parameter of the Animator that the game sets (a door opened as much as
   "open" says). **Time by** makes a whole animation follow a parameter (0 its start, 1 its end)
-  instead of time. **Create Procedural Animation** (in the Timeline, or in the Animator window's
+  instead of time. **Create Procedural Animation** (in the Animation window, or in the Animator window's
   right click) starts one.
 - **The Animator** plays one of them from the start (**Clip**), or, with a **Controller** (a
   `.animator`, drawn in **Window > Animator**: states, transitions on parameters, blend trees,
@@ -994,6 +1056,13 @@ a parent stand where the parent puts them.
   body. The Inspector says how many corners and faces it has.
 - An object has one collider; for more shapes, put more objects under it.
 
+**Sleeping.** A body that has lain still for a moment falls asleep, with whatever it rests against: it is left out of
+the physics (no gravity, no contacts with what stays put) until something wakes it: a moving body touching it, a push,
+its velocity set by a script, being moved by hand, or what it lay on being deleted or switched off. A heap of five
+hundred crates asleep costs about a quarter of what it costs awake. The Rigidbody says "asleep" beside **Can Sleep**;
+switch that off for a body that must react to something that does not touch it. Bodies on a Joint never sleep. With
+many pairs to test exactly, the tests are shared among the processor's cores.
+
 **Vehicles** hit the world with the colliders on them or under them, of any kind (a convex Mesh Collider of the body is the
 closest to the real shape): each point where one is in something is a stiff spring out of it, and what it hits is pushed back
 if it can move. The wheels' rays pass through the vehicle's own colliders. A vehicle with no colliders of its own uses the
@@ -1056,6 +1125,29 @@ use a project shader are drawn as plain lit surfaces until it does: a mistake ne
 the rest of the picture. In code: `material.shader = "Shaders/Lava.shader"` and
 `material.setShaderValue("speed", Vec4{2, 0, 0, 0})`.
 
+
+### Shader graphs
+
+**+ New > Shader Graph** in the Explorer (or **New** in **Window > Shader Graph**) makes a
+`.shadergraph`: the same kind of shader, drawn as boxes and wires on the board the visual
+scripts use, instead of written. Space (or a right click) adds a node; drag from a pin to wire it.
+
+- **Input**: UV, Position, Normal, View Direction, Time, Entity Tint, Wind, and **Material**: what
+  the material's own settings and pictures made of the surface, before the graph.
+- **Value** and **Property**: a number, a color or a vector typed in; a **Number Property** or a
+  **Color Property** is one each material sets for itself, by its name (up to eight).
+- **Math**: Add, Subtract, Multiply, Divide, Power, Min, Max, Mix, One Minus, Absolute, Fraction,
+  Sine, Cosine, Saturate, Normalize, Negate, Step, Smoothstep, Remap, Dot, Length, Distance,
+  Split and Combine. Every value is three numbers or one: one goes where three are wanted as
+  three of itself.
+- **Pattern**: Noise, Scroll UV (with time), Checker, Fresnel (a rim where the surface turns away).
+- **Surface**: what the surface becomes. What is wired or typed into it replaces what the
+  material made; the rest stays as the material has it.
+
+It is saved as soon as the hand is off and every material using it changes at once; the window
+says what is wrong, if anything, and **Show Code** shows the surface shader the engine makes of
+it. A material chooses it under **Shader** exactly as it chooses a `.shader`.
+
 ## Import settings
 
 A picture, a model or a sound has **Import Settings** at the top of the Viewer: how the file
@@ -1073,9 +1165,12 @@ A change is applied when you let go: the file is loaded again, and the open scen
 ## Particle systems
 
 **Entity > Effects > Particle System** makes one: soft white particles rising in a cone, to make
-into whatever it should be (fire, smoke, rain, sparks are made, not picked). It is made of
-modules, as in Unity, each folding open in the Inspector; the ones with a box are switched off
-until they are wanted:
+into whatever it should be (fire, smoke, rain, sparks are made, not picked). **Save as Effect**, in
+the menu of its header in the Inspector, keeps it as a file in `Assets/Effects` (`+ New > Particle
+Effect` makes one from the start); an `.effect` dragged into the Scene view or onto the Hierarchy, or
+added with the viewer's **Add to Scene**, becomes that particle system again, as many times as
+wanted. It is made of modules, as in Unity, each folding open in the Inspector; the ones with a box
+are switched off until they are wanted:
 
 - **Main**: playing or not, duration and looping, prewarm (already running when the scene
   starts), start delay, lifetime and speed (between two numbers), size and shade variation,

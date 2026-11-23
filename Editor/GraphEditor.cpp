@@ -439,7 +439,7 @@ bool GraphEditor::drawAddMenu(Graph& graph, ImVec2 at) {
         if (pendingConnect_.isValid()) {
             const PinDef* fromPin = nullptr;
             if (const Node* from = graph.find(pendingConnect_.node)) {
-                if (const NodeDef* fromKind = NodeLibrary::instance().find(from->type)) {
+                if (const NodeDef* fromKind = graph.kinds().find(from->type)) {
                     fromPin = pendingConnect_.isOutput ? fromKind->findOutput(pendingConnect_.pin) : fromKind->findInput(pendingConnect_.pin);
                 }
             }
@@ -482,10 +482,10 @@ bool GraphEditor::drawAddMenu(Graph& graph, ImVec2 at) {
     if (!wanted.empty()) {
         // What matches, best first: by the title, then by the family or what it does.
         std::vector<const NodeDef*> found;
-        for (const NodeDef& definition : NodeLibrary::instance().all()) {
+        for (const NodeDef& definition : graph.kinds().all()) {
             if (lowered(definition.title).find(wanted) != std::string::npos) found.push_back(&definition);
         }
-        for (const NodeDef& definition : NodeLibrary::instance().all()) {
+        for (const NodeDef& definition : graph.kinds().all()) {
             if (lowered(definition.title).find(wanted) == std::string::npos &&
                 (lowered(definition.category).find(wanted) != std::string::npos || lowered(definition.help).find(wanted) != std::string::npos)) {
                 found.push_back(&definition);
@@ -510,12 +510,12 @@ bool GraphEditor::drawAddMenu(Graph& graph, ImVec2 at) {
     }
     ImGui::Separator();
     std::vector<std::string> categories;
-    for (const NodeDef& definition : NodeLibrary::instance().all()) {
+    for (const NodeDef& definition : graph.kinds().all()) {
         if (std::find(categories.begin(), categories.end(), definition.category) == categories.end()) categories.push_back(definition.category);
     }
     for (const std::string& category : categories) {
         if (!ImGui::BeginMenu(category.c_str())) continue;
-        for (const NodeDef& definition : NodeLibrary::instance().all()) {
+        for (const NodeDef& definition : graph.kinds().all()) {
             if (definition.category != category) continue;
             if (ImGui::MenuItem(definition.title.c_str())) add(definition);
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s", definition.help.c_str());
@@ -564,7 +564,7 @@ bool GraphEditor::draw(Graph& graph, ImVec2 size) {
         for (const Node& node : graph.nodes) {
             left = std::min(left, node.x);
             top = std::min(top, node.y);
-            ImVec2 size = sizeOf(node, NodeLibrary::instance().find(node.type));
+            ImVec2 size = sizeOf(node, graph.kinds().find(node.type));
             right = std::max(right, node.x + size.x);
             bottom = std::max(bottom, node.y + size.y + 40);
         }
@@ -652,7 +652,7 @@ bool GraphEditor::draw(Graph& graph, ImVec2 size) {
     for (int id : ids) {
         Node* node = graph.find(id);
         if (!node) continue;
-        if (drawNode(graph, *node, NodeLibrary::instance().find(node->type), origin, drawList)) changed = true;
+        if (drawNode(graph, *node, graph.kinds().find(node->type), origin, drawList)) changed = true;
     }
 
     // The wires, as curves that leave and arrive horizontally. Along each, dots run the way
@@ -767,7 +767,7 @@ bool GraphEditor::draw(Graph& graph, ImVec2 size) {
             isBoxSelecting_ = false;
             if (high.x - low.x > 3 || high.y - low.y > 3) {
                 for (const Node& node : graph.nodes) {
-                    ImVec2 size = sizeOf(node, NodeLibrary::instance().find(node.type));
+                    ImVec2 size = sizeOf(node, graph.kinds().find(node.type));
                     ImVec2 nodeMin(origin.x + node.x * zoom_, origin.y + node.y * zoom_);
                     ImVec2 nodeMax(nodeMin.x + size.x * zoom_, nodeMin.y + size.y * zoom_);
                     if (nodeMax.x >= low.x && nodeMin.x <= high.x && nodeMax.y >= low.y && nodeMin.y <= high.y) selection_.insert(node.id);
@@ -805,7 +805,7 @@ bool GraphEditor::draw(Graph& graph, ImVec2 size) {
         for (const Node& node : graph.nodes) {
             left = std::min(left, node.x);
             top = std::min(top, node.y);
-            ImVec2 size = sizeOf(node, NodeLibrary::instance().find(node.type));
+            ImVec2 size = sizeOf(node, graph.kinds().find(node.type));
             right = std::max(right, node.x + size.x);
             bottom = std::max(bottom, node.y + size.y);
         }
@@ -822,7 +822,7 @@ bool GraphEditor::draw(Graph& graph, ImVec2 size) {
         drawList->AddRectFilled(mapMin, mapMax, IM_COL32(14, 15, 19, 225), 6);
         drawList->AddRect(mapMin, mapMax, IM_COL32(255, 255, 255, 30), 6);
         for (const Node& node : graph.nodes) {
-            const NodeDef* kind = NodeLibrary::instance().find(node.type);
+            const NodeDef* kind = graph.kinds().find(node.type);
             ImU32 family = kind ? categoryColor(kind->category) : IM_COL32(150, 50, 50, 255);
             ImVec2 size = sizeOf(node, kind);
             drawList->AddRectFilled(onMap(node.x, node.y), onMap(node.x + size.x, node.y + size.y), isSelected(node.id) ? kAccent : withAlpha(family, 200), 2);

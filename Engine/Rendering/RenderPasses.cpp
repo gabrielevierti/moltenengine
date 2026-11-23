@@ -242,6 +242,47 @@ void Renderer::renderShadows(MTL::CommandBuffer* commandBuffer, std::vector<Shad
     encoder->endEncoding();
 }
 
+void Renderer::renderLightShadows(MTL::CommandBuffer* commandBuffer, const std::vector<DrawItem>& items) {
+    auto pass = NS::TransferPtr(MTL::RenderPassDescriptor::alloc()->init());
+    MTL::RenderPassDepthAttachmentDescriptor* depth = pass->depthAttachment();
+    depth->setTexture(lightShadowAtlas_.get());
+    depth->setLoadAction(MTL::LoadActionClear);
+    depth->setClearDepth(1.0);
+    depth->setStoreAction(MTL::StoreActionStore);
+    MTL::RenderCommandEncoder* encoder = encoderFor(commandBuffer, pass.get(), "Light shadow maps");
+    encoder->setDepthStencilState(device_.depthWrite());
+    encoder->setFrontFacingWinding(MTL::WindingCounterClockwise);
+    // Pushed back in proportion to the surface's slope as the light sees it.
+    encoder->setDepthBias(0.0f, 2.0f, 0.0f);
+    encoder->setFragmentSamplerState(device_.materialSampler(), gpu::MMSamplerMaterial);
+    const double atlasWidth = double(lightShadowAtlas_->width()), atlasHeight = double(lightShadowAtlas_->height());
+    std::vector<const DrawItem*> inView;
+    for (int v = 0; v < lightShadowViewCount_; v++) {
+        // What casts a shadow and is in this view of the light: glass and the like let the light through.
+        Frustum frustum(lightShadowViews_.viewProjection[v]);
+        inView.clear();
+        for (const DrawItem& item : items) {
+            if (!item.castsShadows || item.material->isSeenThrough() || item.mesh == waterSheet_.get()) continue;
+            if (frustum.intersects(item.bounds)) inView.push_back(&item);
+        }
+        if (inView.empty()) continue;
+        std::vector<Batch> batches = makeBatches(inView, true);
+        gpu::PassUniforms uniforms{};
+        uniforms.viewProjection = lightShadowViews_.viewProjection[v];
+        uniforms.view = identity();
+        uniforms.projection = lightShadowViews_.viewProjection[v];
+        FrameAllocator::Allocation passUniforms = allocator().copy(uniforms);
+        const Vec4& tile = lightShadowViews_.tile[v];
+        double x = double(tile.x) * atlasWidth, y = double(tile.y) * atlasHeight;
+        double w = double(tile.z) * atlasWidth, h = double(tile.w) * atlasHeight;
+        encoder->setViewport(MTL::Viewport{x, y, w, h, 0.0, 1.0});
+        encoder->setScissorRect(MTL::ScissorRect{NS::UInteger(std::lround(x)), NS::UInteger(std::lround(y)), NS::UInteger(std::lround(w)), NS::UInteger(std::lround(h))});
+        encoder->setVertexBuffer(passUniforms.buffer, passUniforms.offset, gpu::MMBufferPass);
+        drawBatches(encoder, batches, MeshPass::Shadow, MTL::PixelFormatInvalid, 1);
+    }
+    encoder->endEncoding();
+}
+
 void Renderer::renderShadowsEachCascade(MTL::CommandBuffer* commandBuffer, const std::vector<ShadowCaster>& casters, const Cascades& cascades) {
     for (int cascade = 0; cascade < cascades.count; cascade++) {
         std::vector<const DrawItem*> inThisOne;
@@ -622,6 +663,13 @@ void Renderer::renderScene(MTL::CommandBuffer* commandBuffer, Scene& scene, cons
     encoder->setFragmentTexture(shadowMap_.get(), gpu::MMTextureShadowMap);
     encoder->setFragmentTexture(rainMapDrawn_ ? rainMap_.get() : nullptr, gpu::MMTextureRainMap);
     encoder->setFragmentTexture(cookies_.get(), gpu::MMTextureLightCookies);
+    // The point and spot lights' shadow maps, and where each is in them.
+    encoder->setFragmentTexture(lightShadowViewCount_ > 0 ? lightShadowAtlas_.get() : nullptr, gpu::MMTextureLightShadows);
+    FrameAllocator::Allocation lightShadows = allocator().copy(lightShadowViews_);
+    encoder->setFragmentBuffer(lightShadows.buffer, lightShadows.offset, gpu::MMBufferLightShadows);
+    // The scene's baked light probes, and the grids they are in (none: the sky lights all as it is).
+    encoder->setFragmentBytes(&probeVolumes_, sizeof(probeVolumes_), gpu::MMBufferProbeVolumes);
+    encoder->setFragmentBuffer(probes_.get(), 0, gpu::MMBufferProbes);
     // Water reads which way the bottom faces under it (for the sun's lines on it), and what floats on it.
     encoder->setFragmentTexture(wantsDepth() && prepassNormal_ ? prepassNormal_.get() : nullptr, gpu::MMTextureSceneNormal);
     FrameAllocator::Allocation wakes = allocator().copy(waterWakes);

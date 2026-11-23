@@ -116,7 +116,7 @@ void Animator::update(World& world, Entity self, float dt) {
             if (hasModel && pose.translations.size() == loaded->nodes.size()) {
                 moveWithRoot(world, self);
                 reachWithLimbs(world, self);
-                world.showMesh(self, loaded->assembled(pose));
+                world.showPose(self, loaded, pose);
             }
             return;
         }
@@ -171,7 +171,7 @@ void Animator::update(World& world, Entity self, float dt) {
     }
     moveWithRoot(world, self);
     reachWithLimbs(world, self);
-    world.showMesh(self, loaded->assembled(pose));
+    world.showPose(self, loaded, pose);
 }
 
 void Animator::moveWithRoot(World& world, Entity self) {

@@ -9,6 +9,7 @@
 #include "Kit/Spline.hpp"
 #include "Kit/Terrain.hpp"
 #include "Kit/Foliage.hpp"
+#include "Kit/LightProbeVolume.hpp"
 #include "Audio/Audio.hpp"
 #include "Panels/Widgets.hpp"
 
@@ -228,6 +229,18 @@ void drawColliderOf(EditorContext& editor, Entity entity, Vec4 color, int depth)
         lines.line(worldPosition, worldPosition + rotate(rotation, Vec3{0, 0, -0.6f * vehicle->size.z}), orange * Vec4{1, 1, 1, 0.7f});
     }
     if (scene.get<kit::Bumper>(entity)) lines.sphere(transform->worldPosition(), 0.08f, Vec4{1.0f, 0.55f, 0.15f, color.w}, 10);
+    // A Light Probe Volume: its box, along the world's axes, and its probes (a few of them, if many).
+    if (const kit::LightProbeVolume* volume = scene.get<kit::LightProbeVolume>(entity)) {
+        const Vec4 blue{0.45f, 0.75f, 1.0f, color.w};
+        ProbeVolumeDesc desc = volume->desc(*transform);
+        lines.box(desc.box.center(), desc.box.halfExtents(), Quat{}, blue);
+        ProbeGrid grid = gridFor(desc.box, desc.spacing);
+        if (grid.probeCount() <= 600) {
+            for (int z = 0; z < grid.countZ; z++)
+                for (int y = 0; y < grid.countY; y++)
+                    for (int x = 0; x < grid.countX; x++) lines.sphere(grid.placeOf(x, y, z), 0.06f, blue * Vec4{1, 1, 1, 0.7f}, 6);
+        }
+    }
     if (depth >= 8) return;
     for (Entity child : editor.scene.children(entity)) drawColliderOf(editor, child, color, depth + 1);
 }
@@ -273,20 +286,30 @@ void drawOutline(EditorContext& editor, Entity entity) {
     drawColliderOf(editor, entity, Vec4{0.25f, 1.0f, 0.35f, 1}, 0);
 }
 
-/// Lights, cameras and emitters have no mesh to see or click: each gets a small disc with a letter.
+/// Lights, cameras, emitters and sounds have no mesh to see or click: each gets a small badge with
+/// its icon (a light's in its own color), ringed in orange while selected.
 void drawIcons(EditorContext& editor, const ViewportInfo& viewport) {
     Scene& scene = editor.engine.scene;
+    ImFont* icons = ImGuiLayer::iconFont();
     for (Entity entity : editor.scene.entities()) {
         if (scene.has<MeshRenderer>(entity)) continue;
         const GizmoSettings& shown = editor.gizmo;
         const Light* light = shown.showLights ? scene.get<Light>(entity) : nullptr;
-        const char* letter = light                                                   ? "L"
-                             : shown.showCameras && scene.has<Camera>(entity)          ? "C"
-                             : shown.showEffects && scene.has<ParticleEmitter>(entity) ? "P"
-                             : shown.showSounds && scene.has<kit::AudioSource>(entity) ? "S"
-                                                                                       : nullptr;
+        const char* glyph = nullptr;
+        if (light) {
+            glyph = light->type == LightType::Directional ? icon::Sun
+                    : light->type == LightType::Spot      ? icon::Flashlight
+                    : light->type == LightType::Area      ? icon::RectangleHorizontal
+                                                          : icon::Lightbulb;
+        } else if (shown.showCameras && scene.has<Camera>(entity)) {
+            glyph = icon::Video;
+        } else if (shown.showEffects && scene.has<ParticleEmitter>(entity)) {
+            glyph = icon::Sparkles;
+        } else if (shown.showSounds && scene.has<kit::AudioSource>(entity)) {
+            glyph = icon::Volume2;
+        }
         ImVec2 at;
-        if (!letter || !viewport.worldToScreen(scene.get<Transform>(entity)->worldPosition(), at)) continue;
+        if (!glyph || !viewport.worldToScreen(scene.get<Transform>(entity)->worldPosition(), at)) continue;
         // Inside the view, and not on its tool bar: an icon over the buttons hides them and takes their clicks.
         const float kToolBar = 44;
         if (at.x < viewport.position.x + 10 || at.x > viewport.position.x + viewport.size.x - 10 || at.y < viewport.position.y + kToolBar ||
@@ -294,14 +317,23 @@ void drawIcons(EditorContext& editor, const ViewportInfo& viewport) {
             continue;
         }
         bool isSelected = editor.scene.isSelected(entity);
-        ImU32 fill = light ? IM_COL32(int(saturate(light->color.x) * 255), int(saturate(light->color.y) * 255), int(saturate(light->color.z) * 255), 255)
-                           : IM_COL32(141, 150, 163, 255);
+        // A light's icon in its color, kept bright enough to read on the dark badge.
+        ImU32 tint = IM_COL32(214, 220, 228, 255);
+        if (light) {
+            Vec3 c{saturate(light->color.x), saturate(light->color.y), saturate(light->color.z)};
+            float top = std::max({c.x, c.y, c.z, 0.001f});
+            c = c * (1.0f / top);
+            tint = IM_COL32(int(140 + c.x * 115), int(140 + c.y * 115), int(140 + c.z * 115), 255);
+        }
         float k = std::clamp(shown.iconSize, 0.3f, 3.0f);
-        viewport.drawList->AddCircleFilled(at, 11.5f * k, isSelected ? IM_COL32(255, 122, 47, 255) : IM_COL32(20, 24, 31, 220), 24);
-        viewport.drawList->AddCircleFilled(at, 9.0f * k, fill, 24);
-        float fontSize = ImGui::GetFontSize() * std::min(k, 1.2f);
-        ImVec2 size = ImGui::GetFont()->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, letter);
-        viewport.drawList->AddText(ImGui::GetFont(), fontSize, ImVec2(at.x - size.x * 0.5f, at.y - size.y * 0.5f), IM_COL32(20, 24, 31, 255), letter);
+        float radius = 12.0f * k;
+        viewport.drawList->AddCircleFilled(at, radius, IM_COL32(22, 25, 31, 225), 28);
+        viewport.drawList->AddCircle(at, radius, isSelected ? IM_COL32(255, 122, 47, 255) : IM_COL32(255, 255, 255, 40), 28, isSelected ? 2.0f : 1.0f);
+        if (icons) {
+            float size = 15.0f * k;
+            ImVec2 extent = icons->CalcTextSizeA(size, FLT_MAX, 0.0f, glyph);
+            viewport.drawList->AddText(icons, size, ImVec2(std::round(at.x - extent.x * 0.5f), std::round(at.y - extent.y * 0.5f)), tint, glyph);
+        }
     }
 }
 
@@ -424,60 +456,16 @@ void drawShapes(EditorContext& editor) {
     }
 }
 
-/// One of the pictures on the Scene view's tool buttons, drawn in a box `s` across around `c`.
+/// One of the pictures on the Scene view's tool buttons (an icon's name), `s` across around `c`,
+/// in the button's own color.
 void drawToolPicture(ImDrawList* d, ImVec2 c, float s, const char* kind, ImU32 color) {
-    const float h = s * 0.5f, t = 1.5f;
-    auto arrow = [&](ImVec2 from, ImVec2 to) {
-        d->AddLine(from, to, color, t);
-        ImVec2 dir(to.x - from.x, to.y - from.y);
-        float length = std::sqrt(dir.x * dir.x + dir.y * dir.y);
-        if (length < 0.01f) return;
-        dir.x /= length;
-        dir.y /= length;
-        ImVec2 side(-dir.y, dir.x);
-        const float head = s * 0.2f;
-        d->AddTriangleFilled(ImVec2(to.x + dir.x * head * 0.6f, to.y + dir.y * head * 0.6f), ImVec2(to.x - dir.x * head + side.x * head * 0.7f, to.y - dir.y * head + side.y * head * 0.7f),
-                             ImVec2(to.x - dir.x * head - side.x * head * 0.7f, to.y - dir.y * head - side.y * head * 0.7f), color);
-    };
-    std::string name = kind;
-    if (name == "move") {                   // four arrows from the middle
-        arrow(ImVec2(c.x, c.y), ImVec2(c.x, c.y - h * 0.82f));
-        arrow(ImVec2(c.x, c.y), ImVec2(c.x, c.y + h * 0.82f));
-        arrow(ImVec2(c.x, c.y), ImVec2(c.x - h * 0.82f, c.y));
-        arrow(ImVec2(c.x, c.y), ImVec2(c.x + h * 0.82f, c.y));
-    } else if (name == "rotate") {          // most of a circle, and an arrow where it ends
-        d->PathArcTo(c, h * 0.72f, -0.4f, 4.3f, 20);
-        d->PathStroke(color, ImDrawFlags_None, t);
-        ImVec2 end(c.x + std::cos(-0.4f) * h * 0.72f, c.y + std::sin(-0.4f) * h * 0.72f);
-        d->AddTriangleFilled(ImVec2(end.x + 1, end.y - s * 0.3f), ImVec2(end.x - s * 0.2f, end.y + 1), ImVec2(end.x + s * 0.22f, end.y + 2), color);
-    } else if (name == "scale") {           // a small box that becomes a large one
-        d->AddRectFilled(ImVec2(c.x - h * 0.8f, c.y), ImVec2(c.x - h * 0.05f, c.y + h * 0.78f), color, 1.5f);
-        d->AddRect(ImVec2(c.x - h * 0.8f, c.y - h * 0.78f), ImVec2(c.x + h * 0.8f, c.y + h * 0.78f), color, 2.0f, ImDrawFlags_None, t);
-        arrow(ImVec2(c.x + h * 0.05f, c.y - h * 0.05f), ImVec2(c.x + h * 0.5f, c.y - h * 0.5f));
-    } else if (name == "all") {             // the three at once: an arrow up, an arrow across, an arc between
-        arrow(ImVec2(c.x - h * 0.6f, c.y + h * 0.6f), ImVec2(c.x - h * 0.6f, c.y - h * 0.8f));
-        arrow(ImVec2(c.x - h * 0.6f, c.y + h * 0.6f), ImVec2(c.x + h * 0.8f, c.y + h * 0.6f));
-        d->PathArcTo(ImVec2(c.x - h * 0.6f, c.y + h * 0.6f), h * 0.95f, -1.35f, -0.22f, 10);
-        d->PathStroke(color, ImDrawFlags_None, t);
-    } else if (name == "magnet") {          // a horseshoe, its two ends marked
-        d->PathArcTo(ImVec2(c.x, c.y + h * 0.1f), h * 0.62f, 0.0f, 3.14159f, 14);
-        d->PathStroke(color, ImDrawFlags_None, s * 0.2f);
-        d->AddLine(ImVec2(c.x - h * 0.62f, c.y + h * 0.1f), ImVec2(c.x - h * 0.62f, c.y - h * 0.75f), color, s * 0.2f);
-        d->AddLine(ImVec2(c.x + h * 0.62f, c.y + h * 0.1f), ImVec2(c.x + h * 0.62f, c.y - h * 0.75f), color, s * 0.2f);
-    } else if (name == "grid") {
-        for (int i = 0; i < 3; i++) {
-            float o = (float(i) - 1.0f) * h * 0.62f;
-            d->AddLine(ImVec2(c.x - h * 0.8f, c.y + o), ImVec2(c.x + h * 0.8f, c.y + o), color, 1.2f);
-            d->AddLine(ImVec2(c.x + o, c.y - h * 0.8f), ImVec2(c.x + o, c.y + h * 0.8f), color, 1.2f);
-        }
-    } else {
-        ui::drawIcon(d, c, s, name, color);
-    }
+    ui::drawIcon(d, c, s, kind, color, false);
 }
 
 /// A square button with a picture: lit while what it stands for is on. Several in a row with no
-/// space between make one control, as the tools are.
-bool toolButton(const char* id, const char* picture, bool isOn, const char* tooltip, const char* label = nullptr) {
+/// space between make one control, as the tools are: `corners` rounds only the ends of the row.
+bool toolButton(const char* id, const char* picture, bool isOn, const char* tooltip, const char* label = nullptr,
+                ImDrawFlags corners = ImDrawFlags_RoundCornersAll) {
     const float height = 26, padding = 8;
     float width = label ? ImGui::CalcTextSize(label).x + padding * 2 + (picture ? 20 : 0) : 30;
     ImVec2 min = ImGui::GetCursorScreenPos(), max(min.x + width, min.y + height);
@@ -488,7 +476,7 @@ bool toolButton(const char* id, const char* picture, bool isOn, const char* tool
     unsigned accent = themeAccent();
     ImU32 lit = IM_COL32((accent >> 16) & 0xFF, (accent >> 8) & 0xFF, accent & 0xFF, 235);
     ImU32 back = isOn ? lit : isHeld ? ImGui::GetColorU32(ImGuiCol_ButtonActive) : isHovered ? ImGui::GetColorU32(ImGuiCol_ButtonHovered) : IM_COL32(30, 33, 38, 235);
-    draw->AddRectFilled(min, max, back, 5.0f);
+    draw->AddRectFilled(min, max, back, 5.0f, corners);
     ImU32 ink = isOn ? IM_COL32(20, 22, 26, 255) : ImGui::GetColorU32(ImGuiCol_Text);
     if (picture) drawToolPicture(draw, ImVec2(label ? min.x + padding + 7 : (min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f), 15, picture, ink);
     if (label) draw->AddText(ImVec2(min.x + padding + (picture ? 20 : 0), min.y + (height - ImGui::GetTextLineHeight()) * 0.5f), ink, label);
@@ -513,35 +501,51 @@ void drawToolbar(EditorContext& editor) {
     GizmoSettings& gizmo = editor.gizmo;
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2, 4));
 
-    // ---- the tools: one of them is the current one
-    if (toolButton("##move", "move", gizmo.operation == GizmoOperation::Move, "Move (W)")) gizmo.operation = GizmoOperation::Move;
-    ImGui::SameLine();
-    if (toolButton("##rotate", "rotate", gizmo.operation == GizmoOperation::Rotate, "Rotate (E)")) gizmo.operation = GizmoOperation::Rotate;
-    ImGui::SameLine();
-    if (toolButton("##scale", "scale", gizmo.operation == GizmoOperation::Scale, "Scale (R)")) gizmo.operation = GizmoOperation::Scale;
-    ImGui::SameLine();
-    if (toolButton("##all", "all", gizmo.operation == GizmoOperation::Universal, "Move, rotate and scale at once (T)")) gizmo.operation = GizmoOperation::Universal;
-
-    // ---- where the handles are and which way they point
-    ImGui::SameLine(0, 12);
-    if (toolButton("##space", nullptr, false, "The handles follow the world's axes (World) or the entity's own (Local). X switches.",
-                   gizmo.space == GizmoSpace::World ? "World" : "Local")) {
-        gizmo.space = gizmo.space == GizmoSpace::World ? GizmoSpace::Local : GizmoSpace::World;
+    // ---- the tools, one control: one of them is the current one
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(1, 4));
+    if (toolButton("##move", "move", gizmo.operation == GizmoOperation::Move, "Move (W)", nullptr, ImDrawFlags_RoundCornersLeft)) {
+        gizmo.operation = GizmoOperation::Move;
     }
     ImGui::SameLine();
-    if (toolButton("##pivot", nullptr, false,
+    if (toolButton("##rotate", "rotate", gizmo.operation == GizmoOperation::Rotate, "Rotate (E)", nullptr, ImDrawFlags_RoundCornersNone)) {
+        gizmo.operation = GizmoOperation::Rotate;
+    }
+    ImGui::SameLine();
+    if (toolButton("##scale", "scale", gizmo.operation == GizmoOperation::Scale, "Scale (R)", nullptr, ImDrawFlags_RoundCornersNone)) {
+        gizmo.operation = GizmoOperation::Scale;
+    }
+    ImGui::SameLine();
+    if (toolButton("##all", "all", gizmo.operation == GizmoOperation::Universal, "Move, rotate and scale at once (T)", nullptr, ImDrawFlags_RoundCornersRight)) {
+        gizmo.operation = GizmoOperation::Universal;
+    }
+
+    // ---- where the handles are and which way they point: one control, two switches
+    ImGui::SameLine(0, 12);
+    const bool isWorld = gizmo.space == GizmoSpace::World;
+    if (toolButton("##space", isWorld ? "globe" : "box", false, "The handles follow the world's axes (World) or the entity's own (Local). X switches.",
+                   isWorld ? "World" : "Local", ImDrawFlags_RoundCornersLeft)) {
+        gizmo.space = isWorld ? GizmoSpace::Local : GizmoSpace::World;
+    }
+    ImGui::SameLine();
+    if (toolButton("##pivot", gizmo.aroundCenter ? "focus" : "circle-dot", false,
                    "With several selected: the handles at the middle of them all, which they turn and scale around (Center),\nor on the last one chosen (Pivot)",
-                   gizmo.aroundCenter ? "Center" : "Pivot")) {
+                   gizmo.aroundCenter ? "Center" : "Pivot", ImDrawFlags_RoundCornersRight)) {
         gizmo.aroundCenter = !gizmo.aroundCenter;
     }
+    ImGui::PopStyleVar();
 
     // ---- snapping, and its steps
     ImGui::SameLine(0, 12);
-    if (toolButton("##snap", "magnet", gizmo.snapEnabled, "Snap: move, turn and scale in steps. Holding Cmd while dragging does the opposite.")) {
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(1, 4));
+    if (toolButton("##snap", "magnet", gizmo.snapEnabled, "Snap: move, turn and scale in steps. Holding Cmd while dragging does the opposite.", nullptr,
+                   ImDrawFlags_RoundCornersLeft)) {
         gizmo.snapEnabled = !gizmo.snapEnabled;
     }
     ImGui::SameLine();
-    if (toolButton("##snap-steps", nullptr, false, "The steps, what moving snaps to, and arranging the selection", "Snapping")) ImGui::OpenPopup("##snap");
+    if (toolButton("##snap-steps", nullptr, false, "The steps, what moving snaps to, and arranging the selection", "Snapping", ImDrawFlags_RoundCornersRight)) {
+        ImGui::OpenPopup("##snap");
+    }
+    ImGui::PopStyleVar();
     ImGui::SetNextWindowPos(ImVec2(ImGui::GetItemRectMin().x, ImGui::GetItemRectMax().y + 4), ImGuiCond_Appearing);
     if (ImGui::BeginPopup("##snap")) {
         ImGui::TextDisabled("Steps");
@@ -596,11 +600,14 @@ void drawToolbar(EditorContext& editor) {
 
     // ---- what the view shows besides the scene (Unity's Gizmos)
     ImGui::SameLine(0, 12);
-    if (toolButton("##grid", "grid", gizmo.showGrid, "The grid on the ground")) gizmo.showGrid = !gizmo.showGrid;
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(1, 4));
+    if (toolButton("##grid", "grid", gizmo.showGrid, "The grid on the ground", nullptr, ImDrawFlags_RoundCornersLeft)) gizmo.showGrid = !gizmo.showGrid;
     ImGui::SameLine();
-    if (toolButton("##gizmos", "eye", false, "What the view shows besides the scene: icons, outlines, colliders", "Gizmos")) ImGui::OpenPopup("##gizmos");
-    ImGui::SameLine(0, 12);
-    simulateButton(editor);
+    if (toolButton("##gizmos", "scan-eye", false, "What the view shows besides the scene: icons, outlines, colliders", "Gizmos", ImDrawFlags_RoundCornersRight)) {
+        ImGui::OpenPopup("##gizmos");
+    }
+    ImGui::PopStyleVar();
+    // Under its own button (asked before the next button is drawn: it is placed by the last one).
     ImGui::SetNextWindowPos(ImVec2(ImGui::GetItemRectMin().x, ImGui::GetItemRectMax().y + 4), ImGuiCond_Appearing);
     if (ImGui::BeginPopup("##gizmos")) {
         ImGui::TextDisabled("Shown in the view");
@@ -632,10 +639,12 @@ void drawToolbar(EditorContext& editor) {
         ui::tooltip("How large the icons of lights, cameras, effects and sounds are");
         ImGui::EndPopup();
     }
+    ImGui::SameLine(0, 12);
+    simulateButton(editor);
 
     // ---- the view's own camera
     ImGui::SameLine();
-    if (toolButton("##camera", "camera", false, "The view's camera: how fast it flies (right mouse button and W A S D)")) ImGui::OpenPopup("##view-camera");
+    if (toolButton("##camera", "video", false, "The view's camera: how fast it flies (right mouse button and W A S D)")) ImGui::OpenPopup("##view-camera");
     ImGui::SetNextWindowPos(ImVec2(ImGui::GetItemRectMin().x, ImGui::GetItemRectMax().y + 4), ImGuiCond_Appearing);
     if (ImGui::BeginPopup("##view-camera")) {
         ImGui::TextDisabled("Scene Camera");
@@ -1389,7 +1398,7 @@ void drawGameView(EditorContext& editor, bool takesCanvas) {
         ImGui::SetNextWindowFocus();
     }
     wasMaximized = isMaximized;
-    bool isVisible = ImGui::Begin(isMaximized ? "Game##maximized" : "Game", nullptr, flags);
+    bool isVisible = ImGui::Begin(isMaximized ? "Game##maximized" : ui::windowName("Game").c_str(), nullptr, flags);
     ImGui::PopStyleVar();
     keepViewAtLeast();
     // While playing, the game hears the keys, the mouse and the controllers only while it has them:
@@ -1887,7 +1896,7 @@ void drawSceneView(EditorContext& editor) {
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::SetNextWindowSizeConstraints(kLeastViewSize, ImVec2(FLT_MAX, FLT_MAX));
-    bool isVisible = ImGui::Begin("Scene", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoCollapse);
+    bool isVisible = ImGui::Begin(ui::windowName("Scene").c_str(), nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoCollapse);
     ImGui::PopStyleVar();
     keepViewAtLeast();
     ImVec2 position = ImGui::GetCursorScreenPos(), size = ImGui::GetContentRegionAvail();
@@ -2020,7 +2029,7 @@ void drawSceneView(EditorContext& editor) {
         Vec3 point = groundPoint(viewport.screenRay(io.MousePos));
         for (const std::string& path : imported) {
             const AssetInfo* asset = editor.assets.find(path);
-            if (asset && (asset->type == AssetType::Mesh || asset->type == AssetType::Prefab)) placeAsset(editor, path, point);
+            if (asset && (asset->type == AssetType::Mesh || asset->type == AssetType::Prefab || asset->type == AssetType::Effect)) placeAsset(editor, path, point);
         }
     }
     if (ImGui::BeginDragDropTarget()) {
@@ -2063,6 +2072,9 @@ void drawSceneView(EditorContext& editor) {
             } else if (asset && asset->type == AssetType::Prefab) {
                 Vec3 point = groundPoint(viewport.screenRay(io.MousePos));
                 if (!document.instantiatePrefab(path, point).isValid()) editor.notify("Cannot read " + path, ConsoleMessage::Level::Error);
+            } else if (asset && asset->type == AssetType::Effect) {
+                // A particle effect: where it was let go.
+                placeAsset(editor, path, groundPoint(viewport.screenRay(io.MousePos)));
             } else if (asset && asset->type == AssetType::Scene) {
                 editor.requestOpenScene(editor.assets.absolutePath(path));
             }

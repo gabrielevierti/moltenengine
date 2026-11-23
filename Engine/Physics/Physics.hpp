@@ -48,6 +48,11 @@ struct RigidBody {
     bool rotates = false;
     float angularDamping = 0.08f;   // how quickly it stops turning by itself
     Vec3 angularVelocity{0, 0, 0};  // world axes, radians per second
+    /// A body that has lain still for a moment falls asleep: it is left out of the steps (no
+    /// gravity, no contacts with what stays put) until something wakes it: a moving body
+    /// touching it, a push, its velocity set, being moved by hand, what it lay on going away.
+    /// A heap of a thousand resting crates then costs next to nothing. Off: it never sleeps.
+    bool canSleep = true;
 
     // Maintained by Physics. Read them freely; change position only through Physics::teleport.
     Vec3 position{0, 0, 0};
@@ -57,9 +62,16 @@ struct RigidBody {
     bool isInitialized = false;
     Vec3 writtenPosition{0, 0, 0};  // what physics last put in the Transform: anything else there was put by someone else
     Quat rotation{}, previousRotation{}, writtenRotation{};
+    bool isSleeping = false;        // maintained by Physics: see canSleep
+    float stillFor = 0;             // maintained by Physics: seconds it has hardly moved
 
     /// A push at a point of the body, in world space: it moves it and, off-center, turns it.
     void applyImpulse(Vec3 impulse, Vec3 worldPoint);
+    /// Back into the steps, if it was asleep.
+    void wake() {
+        isSleeping = false;
+        stillFor = 0;
+    }
 };
 
 /// Ties a body to another, or to the world: a door on its hinges, a lamp on its chain, a
@@ -256,6 +268,15 @@ private:
         Vec3 inverseInertia{0, 0, 0};   // about its own axes; zero does not turn
         bool movedItself = false;       // no body, yet not where it was at the last step: a character, a thing a script or an animation moves
     };
+    /// A pair the broad phase kept (positions in order_), and what the exact test found.
+    struct Candidate {
+        uint32_t first = 0, second = 0;
+        bool touches = false;
+        ContactInfo info;
+    };
+    std::vector<Candidate> candidates_;
+    static bool isAwake(const Proxy& proxy);
+    void narrowPhase();
     void solveJoints(Scene& scene, float dt);
 
     std::vector<Contact> begunContacts_;

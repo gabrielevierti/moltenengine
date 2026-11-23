@@ -372,6 +372,23 @@ int SceneDocument::materialIndex(const std::shared_ptr<Material>& material) cons
     return -1;
 }
 
+ParticleEmitter SceneDocument::newParticleSystem() {
+    // As a new system starts in Unity: soft white particles rising in a cone, to shape from there.
+    ParticleEmitter emitter;
+    emitter.rate = 20;
+    emitter.lifetimeMin = 1.5f, emitter.lifetimeMax = 2.5f;
+    emitter.speedMin = 1.0f, emitter.speedMax = 2.0f;
+    emitter.spread = radians(25.0f);
+    emitter.spawnRadius = 0.1f;
+    emitter.gravity = Vec3{0, 0, 0};
+    emitter.drag = 0.2f;
+    emitter.sizeStart = 0.25f, emitter.sizeEnd = 0.05f;
+    emitter.colorStart = Vec4{1, 1, 1, 1}, emitter.colorEnd = Vec4{1, 1, 1, 0};
+    emitter.isAdditive = false;
+    emitter.softness = 0.2f;
+    return emitter;
+}
+
 Entity SceneDocument::create(Primitive kind, Entity parent) {
     static const char* const names[] = {"Empty", "Cube", "Sphere", "Plane", "Cylinder", "Directional Light",
                                         "Point Light", "Spot Light", "Camera", "Particles"};
@@ -449,21 +466,8 @@ Entity SceneDocument::create(Primitive kind, Entity parent) {
             break;
         }
         case Primitive::ParticleEmitter: {
-            // As a new system starts in Unity: soft white particles rising in a cone, to shape from there.
             transform.position.y += 0.2f;
-            ParticleEmitter emitter;
-            emitter.rate = 20;
-            emitter.lifetimeMin = 1.5f, emitter.lifetimeMax = 2.5f;
-            emitter.speedMin = 1.0f, emitter.speedMax = 2.0f;
-            emitter.spread = radians(25.0f);
-            emitter.spawnRadius = 0.1f;
-            emitter.gravity = Vec3{0, 0, 0};
-            emitter.drag = 0.2f;
-            emitter.sizeStart = 0.25f, emitter.sizeEnd = 0.05f;
-            emitter.colorStart = Vec4{1, 1, 1, 1}, emitter.colorEnd = Vec4{1, 1, 1, 0};
-            emitter.isAdditive = false;
-            emitter.softness = 0.2f;
-            scene.add(entity, emitter);
+            scene.add(entity, newParticleSystem());
             break;
         }
     }

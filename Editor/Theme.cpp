@@ -69,6 +69,10 @@ void applyTheme(float scale) {
     style.FrameBorderSize = 0;
     style.PopupBorderSize = 1;
     style.TabBarBorderSize = 1;
+    // Tabs: a crowded row shrinks them before it scrolls them (the ones behind show their icon
+    // alone then: ui::windowName), and a tab behind shows its close button only under the pointer.
+    style.TabMinWidthShrink = 34;
+    style.TabCloseButtonMinWidthUnselected = 0;
     style.WindowMenuButtonPosition = ImGuiDir_None;
     style.SeparatorTextBorderSize = 1;
     style.DockingSeparatorSize = 2;

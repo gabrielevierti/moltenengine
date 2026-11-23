@@ -111,6 +111,7 @@ std::optional<Timeline> Timeline::parse(const std::string& text, std::string* er
     std::istringstream lines(text);
     std::string line;
     bool hasHeader = false;
+    bool skipsTrack = false;            // the lines of a track of a kind this engine does not know
     int lineNumber = 0;
     while (std::getline(lines, line)) {
         lineNumber++;
@@ -118,6 +119,10 @@ std::optional<Timeline> Timeline::parse(const std::string& text, std::string* er
         if (words.empty() || words[0][0] == '#') continue;
         const std::string& keyword = words[0];
         if (keyword == "molten-timeline") {
+            if (std::string why = text::checkHeader(line, "molten-timeline"); !why.empty()) {
+                if (error) *error = "this timeline can't be read: " + why;
+                return std::nullopt;
+            }
             hasHeader = true;
         } else if (keyword == "length") {
             timeline.length = std::max(number(words, 1, 10), 0.01f);
@@ -130,12 +135,13 @@ std::optional<Timeline> Timeline::parse(const std::string& text, std::string* er
                     known = true;
                 }
             }
-            if (!known) {
-                if (error) *error = "line " + std::to_string(lineNumber) + ": no track of the kind " + (words.size() > 1 ? words[1] : std::string());
-                return std::nullopt;
-            }
+            // A kind from a newer engine: its track and its lines are skipped, the rest is read.
+            skipsTrack = !known;
+            if (!known) continue;
             if (words.size() > 2) track.target = words[2];
             timeline.tracks.push_back(track);
+        } else if (skipsTrack && (keyword == "key" || keyword == "at")) {
+            continue;
         } else if (keyword == "key" && !timeline.tracks.empty()) {
             TimelineKey key;
             key.time = number(words, 1);
@@ -155,10 +161,8 @@ std::optional<Timeline> Timeline::parse(const std::string& text, std::string* er
                 mark.number = number(words, 2, 1);
             }
             timeline.tracks.back().marks.push_back(mark);
-        } else {
-            if (error) *error = "line " + std::to_string(lineNumber) + ": " + keyword + " is not something a timeline has";
-            return std::nullopt;
         }
+        // Anything else is a line from a newer engine of the same version: skipped.
     }
     if (!hasHeader) {
         if (error) *error = "not a timeline: it starts with \"molten-timeline 1\"";

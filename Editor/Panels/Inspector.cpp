@@ -5,6 +5,8 @@
 #include "Assets/Gltf.hpp"
 #include "Core/TextFile.hpp"
 #include "Rendering/Particles.hpp"
+#include "Animation/Timeline.hpp"
+#include "Rendering/Quality.hpp"
 #include "Panels/Widgets.hpp"
 #include "Panels/Pickers.hpp"
 #include "Kit/Foliage.hpp"
@@ -305,6 +307,21 @@ private:
                     component.add(scene, entity);
                     document.markChanged();
                 }
+                if (component.name == "Particle System" && ImGui::MenuItem("Save as Effect")) {
+                    // Kept as a file in Effects, named after the entity: dropped into a scene, it
+                    // becomes this system again, anywhere, as many times as wanted.
+                    const ParticleEmitter* emitter = scene.get<ParticleEmitter>(entity);
+                    std::string path = editor.assets.uniquePath("Effects", document.nameOf(entity), ".effect");
+                    std::error_code ignored;
+                    std::filesystem::create_directories(std::filesystem::path(editor.assets.absolutePath(path)).parent_path(), ignored);
+                    if (emitter && text::writeFile(editor.assets.absolutePath(path), writeEffect(*emitter))) {
+                        editor.assets.refresh();
+                        editor.selectedAsset = path;
+                        editor.notify("Saved the effect as Assets/" + path);
+                    } else {
+                        editor.notify("Cannot write Assets/" + path, ConsoleMessage::Level::Error);
+                    }
+                }
                 ImGui::Separator();
                 if (ImGui::MenuItem("Remove Component")) removed = true;
                 ImGui::EndPopup();
@@ -403,11 +420,20 @@ private:
                 }
                 // Where an Animator's animations and states are made.
                 if (type.name == "Animator") {
-                    if (ImGui::Button("Open Timeline")) editor.openPanel("Timeline");
+                    if (ImGui::Button("Open Animation")) editor.openPanel("Animation");
                     ui::tooltip("Its animations: create one, record and edit its keys");
                     ImGui::SameLine();
                     if (ImGui::Button("Open Animator")) editor.openPanel("Animator");
                     ui::tooltip("Its controller: states, transitions, parameters");
+                }
+                // A Timeline Player's timeline is made and changed in the Timeline window.
+                if (type.name == "TimelinePlayer") {
+                    const std::string& timeline = static_cast<TimelinePlayer*>(component)->timeline;
+                    if (ImGui::Button(timeline.empty() ? "Open Timeline" : "Edit in Timeline")) {
+                        if (!timeline.empty()) editor.selectedAsset = timeline;
+                        editor.openPanel("Timeline");
+                    }
+                    ui::tooltip("The Timeline window: its tracks, keys and marks. New there makes a timeline to choose here");
                 }
             }
             ImGui::PopID();
@@ -1011,7 +1037,7 @@ void registerBuiltinComponents(EditorContext& editor) {
         return changed;
     });
 
-    registry.addComponent<Light>(nullptr, "Light", [](EditorContext& context, Entity, Light& light) {
+    registry.addComponent<Light>(nullptr, "Light", [](EditorContext& context, Entity self, Light& light) {
         bool changed = false;
         int type = int(light.type);
         if (ui::combo("Type", type, {"Directional", "Point", "Spot", "Area"})) {
@@ -1047,7 +1073,28 @@ void registerBuiltinComponents(EditorContext& editor) {
             changed |= ui::dragVec2("Size", light.areaSize, 0.02f);
             ui::tooltip("The glowing rectangle, in meters: a window, a panel of light, a screen. It shines from its front (the way the entity faces)");
         }
-        if (light.type == LightType::Directional) changed |= ui::checkbox("Casts Shadows", light.castsShadows);
+        if (light.type != LightType::Area) changed |= ui::checkbox("Casts Shadows", light.castsShadows);
+        if (light.type == LightType::Point || light.type == LightType::Spot) {
+            ui::tooltip("What stands in its light casts a shadow, and so does the air it lights (Volumetric). A spot light's costs a shadow map, "
+                        "a point light's six: how many lights may cast them at once is the project's (Project Settings > Quality > Shadows)");
+        }
+        // Where the checkbox above does nothing, it says why.
+        if (light.castsShadows && light.type != LightType::Area) {
+            const GameQuality* quality = context.engine.quality ? &*context.engine.quality : nullptr;
+            Entity sun;
+            context.engine.scene.each<Light>([&](Entity entity, Light& other) {
+                if (!sun.isValid() && other.type == LightType::Directional) sun = entity;
+            });
+            const char* why = nullptr;
+            if (quality && !quality->shadows) why = "No shadows at the project's quality.";
+            else if (light.type == LightType::Directional && sun.isValid() && sun != self) why = "Only the first directional light, the sun, casts shadows: this one lights without.";
+            else if (light.type != LightType::Directional && quality && quality->shadowedLights <= 0) why = "No point or spot light casts shadows at the project's quality (Shadows > Lights).";
+            if (why) {
+                ImGui::PushTextWrapPos(0.0f);
+                ImGui::TextColored(ImVec4(0.95f, 0.72f, 0.35f, 1.0f), "%s", why);
+                ImGui::PopTextWrapPos();
+            }
+        }
         return changed;
     });
 
@@ -1183,6 +1230,15 @@ void registerBuiltinComponents(EditorContext& editor) {
         changed |= ui::checkbox("Rotates", body.rotates);
         ui::tooltip("Turns when hit off-center, rolls, tumbles. Off, it keeps the way it faces: what a character that walks wants");
         if (body.rotates) changed |= ui::dragFloat("Turning Resistance", body.angularDamping, 0.005f, 0.0f, 10.0f);
+        if (body.type == BodyType::Dynamic) {
+            changed |= ui::checkbox("Can Sleep", body.canSleep);
+            ui::tooltip("Left out of the physics while it lies still, until something touches it, pushes it or moves it: "
+                        "many resting bodies then cost next to nothing. Off only for one that must react to something that does not touch it");
+            if (body.isSleeping) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("asleep");
+            }
+        }
         return changed;
     });
 

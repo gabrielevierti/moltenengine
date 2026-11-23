@@ -42,7 +42,7 @@ struct Light {
     float range = 10.0f;                   // point and spot: no light beyond this distance
     float innerConeAngle = radians(20.0f); // spot: full brightness inside this half-angle
     float outerConeAngle = radians(30.0f); // spot: darkness outside this half-angle
-    bool castsShadows = false;             // honored for the first directional light (the sun)
+    bool castsShadows = false;             // the first directional light (the sun), and point and spot lights (as many as the quality allows)
     bool isEnabled = true;                 // off: it is there, and gives no light
     Vec2 areaSize{2.0f, 1.0f};             // area: the glowing rectangle, meters across (x) and up (y), facing its -Z
     /// Spot: a cookie, as in Unity: a picture in Assets the light shines through, spread across its

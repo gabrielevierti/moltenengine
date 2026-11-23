@@ -24,7 +24,6 @@ constexpr float kSnowRadius = 22.0f;            // snow falls slowly: a smaller 
 constexpr float kSnowAbove = 10.0f;
 constexpr float kFlakeSpeed = 1.5f;             // meters a second: a snowflake drifts down this fast
 constexpr float kFlakesPerSecond = 900.0f;      // round each viewer, in a heavy fall
-constexpr float kSteep = 0.6f;                  // a surface whose normal points up less than this is a wall: drops run down it
 
 // The particle systems, made the first time it rains or snows: the world's, not the scene's.
 Entity makeSystem(Scene& scene, const char* name, const ParticleEmitter& emitter) {
@@ -328,22 +327,9 @@ void updateWeather(World& world, float dt) {
                 droplet.sizeScale = random.range(0.7f, 1.2f);
                 splashes->particles.push_back(droplet);
             }
-            // On what is steep, the water gathers and runs down it: down along the surface, as gravity
-            // pulls it, and a little the way the wind pushes it along the surface.
-            if (normal.y < kSteep && normal.y > -0.2f && random.next() < 0.35f && int(runs->particles.size()) < runs->maxParticles) {
-                Vec3 downhill = Vec3{0, -1, 0} - normal * (-normal.y);
-                Vec3 pushed = Vec3{wind.x, 0, wind.z} - normal * simd::dot(Vec3{wind.x, 0, wind.z}, normal);
-                Vec3 goes = downhill * 9.8f + pushed * 0.15f;
-                float length = simd::length(goes);
-                if (simd::length(downhill) > 0.05f && length > 0.05f) {
-                    Particle run;
-                    run.position = at + normal * 0.004f;
-                    run.velocity = goes / length * random.range(0.35f, 0.8f);
-                    run.lifetime = random.range(0.5f, 1.3f);
-                    run.sizeScale = random.range(0.8f, 1.2f);
-                    runs->particles.push_back(run);
-                }
-            }
+            // (What lands on a thing and runs down it is the thing's own: drawn with it, in its axes,
+            // pushed by its weight and the air going by it; Forward.metal, wetten. A particle in the
+            // world could not stay on a car that drives off.)
         }
     }
     if (drops && rain > 0.0f && !viewers.empty()) {

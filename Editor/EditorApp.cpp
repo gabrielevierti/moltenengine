@@ -112,6 +112,8 @@ void EditorApp::start(Engine& engine) {
     registerConsolePanel(editor);
     registerProfilerPanel(editor);
     registerAnimationPanel(editor);
+    registerSequencePanel(editor);
+    registerShaderGraphPanel(editor);
     registerAnimatorPanel(editor);
     registerSourceControlPanel(editor);
     registerSceneWeightPanel(editor);
@@ -295,6 +297,10 @@ EditorApp::WorkStep EditorApp::sceneStep(const std::string& label, std::function
         if (!path->empty()) *ahead = readSceneAhead(*path, *path, *pathOf, progress.get());
     };
     step.progress = [progress] { return progress->fraction(); };
+    step.detail = [progress] {
+        int total = progress->total.load();
+        return total > 1 ? std::to_string(std::min(progress->done.load(), total)) + " of " + std::to_string(total) + " files" : std::string();
+    };
     step.run = [this, ahead, path, then] {
         EditorContext& editor = *context_;
         Assets& assets = editor.engine.assets();
@@ -368,6 +374,8 @@ void EditorApp::exportGameWithFeedback() {
 void EditorApp::startWork(Work work) {
     if (work_ || work.steps.empty()) return;
     work.started = ImGui::GetCurrentContext() ? ImGui::GetTime() : 0.0;
+    work.lastDone = work.started;
+    work.consoleFrom = context_->console.size();
     work_ = std::move(work);
 }
 
@@ -416,6 +424,10 @@ void EditorApp::runWork() {
         step.begin();
     }
     bool carriesOn = !step.run || step.run();
+    const double ended = ImGui::GetTime();
+    work.took.push_back(ended - work.lastDone);
+    work.lastDone = ended;
+    work.consoleAt.push_back(context_->console.size());
     work.next++;
     work.isPrepared = false;
     work.stepStarted = -1;              // the next one starts with the next frame
@@ -513,14 +525,79 @@ void EditorApp::drawWork() {
         drawList->AddText(font, 13.0f, ImVec2(at.x + width - extent.x, at.y), faded(190, 196, 206), percent);
     };
 
+    // The log under the bar: each step done and how long it took, the one under way, and what the
+    // console was told meanwhile (a project's warnings are seen as it opens, not found later).
+    auto drawLog = [&](ImVec2 at, float width, int most) {
+        struct Line {
+            const char* glyph;
+            ImU32 color;
+            std::string text, right;
+            bool spins = false, isDone = false;
+        };
+        std::vector<Line> lines;
+        const std::vector<ConsoleMessage>& console = context_->console;
+        auto told = [&](size_t from, size_t to) {
+            for (size_t i = std::min(from, console.size()); i < std::min(to, console.size()); i++) {
+                const ConsoleMessage& message = console[i];
+                if (message.level == ConsoleMessage::Level::Debug) continue;
+                bool isError = message.level == ConsoleMessage::Level::Error, isWarning = message.level == ConsoleMessage::Level::Warning;
+                lines.push_back({isError ? icon::CircleX : isWarning ? icon::TriangleAlert : icon::Info,
+                                 isError ? faded(240, 96, 88) : isWarning ? faded(236, 178, 72) : faded(118, 126, 140), message.text, ""});
+            }
+        };
+        size_t from = work.consoleFrom;
+        for (size_t i = 0; i < work.next && i < work.steps.size(); i++) {
+            char seconds[24];
+            std::snprintf(seconds, sizeof(seconds), "%.2f s", i < work.took.size() ? work.took[i] : 0.0);
+            lines.push_back({icon::Check, faded(255, 140, 60), work.steps[i].label, seconds, false, true});
+            size_t to = i < work.consoleAt.size() ? work.consoleAt[i] : console.size();
+            told(from, to);
+            from = to;
+        }
+        if (work.next < work.steps.size()) {
+            const WorkStep& step = work.steps[work.next];
+            lines.push_back({nullptr, faded(223, 227, 234), step.label, work.isPreparing && step.detail ? step.detail() : std::string(), true});
+            told(from, console.size());
+        }
+        // The latest lines, the oldest of them fading.
+        const size_t first = lines.size() > size_t(most) ? lines.size() - size_t(most) : 0;
+        ImFont* icons = ImGuiLayer::iconFont();
+        const float lineHeight = 21.0f, textSize = 13.0f;
+        for (size_t i = first; i < lines.size(); i++) {
+            const Line& line = lines[i];
+            const float y = at.y + float(i - first) * lineHeight;
+            const float fade = (first > 0 && i == first) ? 0.35f : (first > 0 && i == first + 1) ? 0.7f : 1.0f;
+            auto dim = [&](ImU32 color) { return (color & 0x00FFFFFFu) | (ImU32(float(color >> 24) * fade) << 24); };
+            const ImVec2 mark(at.x + 7, y + lineHeight * 0.5f - 1);
+            if (line.spins) {
+                // Under way: an arc that goes round.
+                const float a = float(std::fmod(now * 5.0, 6.2831853));
+                drawList->PathArcTo(mark, 5.5f, a, a + 4.4f, 18);
+                drawList->PathStroke(dim(faded(255, 150, 70)), 0, 1.7f);
+            } else if (icons && line.glyph) {
+                ImVec2 extent = icons->CalcTextSizeA(14.0f, FLT_MAX, 0, line.glyph);
+                drawList->AddText(icons, 14.0f, ImVec2(std::round(mark.x - extent.x * 0.5f), std::round(mark.y - extent.y * 0.5f)), dim(line.color), line.glyph);
+            }
+            const float rightWidth = line.right.empty() ? 0.0f : font->CalcTextSizeA(textSize, FLT_MAX, 0, line.right.c_str()).x;
+            const float textX = at.x + 24, room = width - 24 - (rightWidth > 0 ? rightWidth + 12 : 0);
+            const ImU32 ink = line.spins ? faded(223, 227, 234) : line.isDone ? faded(170, 177, 189) : line.color;
+            drawList->PushClipRect(ImVec2(textX, y), ImVec2(textX + room, y + lineHeight), true);
+            drawList->AddText(font, textSize, ImVec2(textX, y + (lineHeight - textSize) * 0.5f - 1), dim(ink), line.text.c_str());
+            drawList->PopClipRect();
+            if (rightWidth > 0) {
+                drawList->AddText(font, textSize, ImVec2(at.x + width - rightWidth, y + (lineHeight - textSize) * 0.5f - 1), dim(faded(110, 118, 132)), line.right.c_str());
+            }
+        }
+    };
+
     if (work.coversAll) {
         // Opening a project: the window is the editor's own until the project is there.
         drawList->AddRectFilled(min, max, faded(17, 18, 22));
-        const float width = std::min(440.0f, viewport->Size.x - 80.0f);
-        float top = center.y - 96;
+        const float width = std::min(460.0f, viewport->Size.x - 80.0f);
+        float top = center.y - 190;
         ImTextureID mark = pictureAt(findRootDirectory() + "/Assets/Branding/mark-hd.png");
         if (mark) {
-            const float markWidth = 150, markHeight = markWidth * 520.0f / 1126.0f;
+            const float markWidth = 150, markHeight = markWidth * 1040.0f / 2252.0f;     // the picture is 2252 x 1040
             drawList->AddImage(mark, ImVec2(center.x - markWidth * 0.5f, top), ImVec2(center.x + markWidth * 0.5f, top + markHeight), ImVec2(0, 0), ImVec2(1, 1),
                                faded(255, 255, 255));
             top += markHeight + 22;
@@ -530,6 +607,8 @@ void EditorApp::drawWork() {
         const ImVec2 bar(center.x - width * 0.5f, top + 46);
         drawBar(bar, width);
         drawWords(ImVec2(bar.x, bar.y + 18), width);
+        drawList->AddLine(ImVec2(bar.x, bar.y + 48), ImVec2(bar.x + width, bar.y + 48), faded(255, 255, 255, 0.06f));
+        drawLog(ImVec2(bar.x, bar.y + 58), width, 9);
     } else {
         // Anything else: a card over the editor, which stays in view behind it.
         drawList->AddRectFilled(min, max, faded(8, 9, 12, 0.45f));
@@ -992,10 +1071,10 @@ void EditorApp::draw(Engine& engine, Canvas& canvas) {
         if (Panel* manual = editor.registry.findPanel("Manual"); manual && manual->isOpen) {
             ImGui::SetNextWindowSize(manual->firstSize(), ImGuiCond_FirstUseEver);
             ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
-            if (ImGui::Begin(manual->title.c_str(), &manual->isOpen, manual->windowFlags() | ImGuiWindowFlags_NoDocking)) manual->draw(editor);
+            if (ImGui::Begin(ui::windowName(manual->title).c_str(), &manual->isOpen, manual->windowFlags() | ImGuiWindowFlags_NoDocking)) manual->draw(editor);
             ImGui::End();
             if (!editor.panelToFocus.empty()) {
-                ImGui::SetWindowFocus(editor.panelToFocus.c_str());
+                ImGui::SetWindowFocus(ui::windowId(editor.panelToFocus).c_str());
                 editor.panelToFocus.clear();
             }
         }
@@ -1164,14 +1243,14 @@ void EditorApp::drawSettingsWindow() {
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(ImVec2(780, 580), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Preferences", &showsSettings_, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoCollapse)) {
+    if (!ImGui::Begin(ui::windowName("Preferences").c_str(), &showsSettings_, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoCollapse)) {
         ImGui::End();
         return;
     }
     // A list of pages at the left, the page at the right: as the Mac's own settings are, and Unity's Preferences.
     static int page = 0;
     const char* pages[] = {"General", "Appearance", "Shortcuts"};
-    const char* icons[] = {"logic", "eye", "graph"};
+    const char* icons[] = {"settings", "palette", "keyboard"};
     const char* notes[] = {"How the editor itself behaves. It is the same for every project.", "The colors of the editor. The game's own are in its scenes.",
                            "Every command of the menus, and the keys that do it."};
     const int pageCount = 3;
@@ -1623,7 +1702,7 @@ std::vector<PaletteCommand> EditorApp::paletteCommands() {
                     editor.selectedAsset = path;
                     if (Panel* panel = editor.registry.findPanel("Explorer")) {
                         panel->isOpen = true;
-                        ImGui::SetWindowFocus("Explorer");
+                        ImGui::SetWindowFocus(ui::windowId("Explorer").c_str());
                     }
                 }
             });
@@ -1672,7 +1751,7 @@ void EditorApp::drawBuildWindow() {
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(ImVec2(620, std::min(460.0f, viewport->WorkSize.y - 60)), ImGuiCond_Appearing);
-    if (!ImGui::Begin("Build Settings", &showsBuild_, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoDocking)) {
+    if (!ImGui::Begin(ui::windowName("Build Settings").c_str(), &showsBuild_, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoDocking)) {
         ImGui::End();
         return;
     }
@@ -1990,7 +2069,8 @@ void EditorApp::applyPendingLayout() {
         return;
     }
     ImGui::ClearIniSettings();
-    ImGui::LoadIniSettingsFromMemory(settings->c_str(), settings->size());
+    const std::string withIds = ui::withWindowIds(*settings);         // a layout saved before the windows had icons
+    ImGui::LoadIniSettingsFromMemory(withIds.c_str(), withIds.size());
     layoutName_ = name;
 }
 
@@ -2027,24 +2107,25 @@ void EditorApp::buildDefaultLayout(ImGuiID dockSpace) {
         // Rendering as its tabs; the viewer of a chosen asset is its lower part); the explorer
         // and the console as tabs along the bottom; the hierarchy on the left; the scene and the
         // game as tabs of one big view in the middle. Input and Visual Script open when wanted.
-        inspector = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.22f, nullptr, &center);
+        inspector = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.24f, nullptr, &center);
         bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.27f, nullptr, &center);
         hierarchy = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.18f, nullptr, &center);
         scene = game = center;
     }
-    ImGui::DockBuilderDockWindow("Scene", scene);
-    ImGui::DockBuilderDockWindow("Game", game);
-    ImGui::DockBuilderDockWindow("Hierarchy", hierarchy);
-    ImGui::DockBuilderDockWindow("Inspector", inspector);
-    ImGui::DockBuilderDockWindow("Lighting", inspector);
-    ImGui::DockBuilderDockWindow("Environment", inspector);
-    ImGui::DockBuilderDockWindow("Rendering", inspector);
-    ImGui::DockBuilderDockWindow("Post Processing", inspector);
-    ImGui::DockBuilderDockWindow("Explorer", bottom);
-    ImGui::DockBuilderDockWindow("Console", console ? console : bottom);
-    ImGui::DockBuilderDockWindow("Visual Script", bottom);
-    ImGui::DockBuilderDockWindow("Timeline", bottom);
-    ImGui::DockBuilderDockWindow("Animator", bottom);
+    ImGui::DockBuilderDockWindow(ui::windowId("Scene").c_str(), scene);
+    ImGui::DockBuilderDockWindow(ui::windowId("Game").c_str(), game);
+    ImGui::DockBuilderDockWindow(ui::windowId("Hierarchy").c_str(), hierarchy);
+    ImGui::DockBuilderDockWindow(ui::windowId("Inspector").c_str(), inspector);
+    ImGui::DockBuilderDockWindow(ui::windowId("Lighting").c_str(), inspector);
+    ImGui::DockBuilderDockWindow(ui::windowId("Environment").c_str(), inspector);
+    ImGui::DockBuilderDockWindow(ui::windowId("Rendering").c_str(), inspector);
+    ImGui::DockBuilderDockWindow(ui::windowId("Post Processing").c_str(), inspector);
+    ImGui::DockBuilderDockWindow(ui::windowId("Explorer").c_str(), bottom);
+    ImGui::DockBuilderDockWindow(ui::windowId("Console").c_str(), console ? console : bottom);
+    ImGui::DockBuilderDockWindow(ui::windowId("Visual Script").c_str(), bottom);
+    ImGui::DockBuilderDockWindow(ui::windowId("Animation").c_str(), bottom);
+    ImGui::DockBuilderDockWindow(ui::windowId("Timeline").c_str(), bottom);
+    ImGui::DockBuilderDockWindow(ui::windowId("Animator").c_str(), bottom);
     ImGui::DockBuilderFinish(dockSpace);
 }
 
@@ -2058,9 +2139,9 @@ void EditorApp::drawDockSpace() {
     }
     // Of the tabs that share a place, the ones worked in most start in front.
     if (frontTabsIn_ > 0 && --frontTabsIn_ == 0) {
-        ImGui::SetWindowFocus("Explorer");
-        ImGui::SetWindowFocus("Inspector");
-        ImGui::SetWindowFocus("Hierarchy");
+        ImGui::SetWindowFocus(ui::windowId("Explorer").c_str());
+        ImGui::SetWindowFocus(ui::windowId("Inspector").c_str());
+        ImGui::SetWindowFocus(ui::windowId("Hierarchy").c_str());
         showsSceneTab_ = true;
     }
     ImGui::DockSpaceOverViewport(dockSpace, ImGui::GetMainViewport());
@@ -2069,14 +2150,14 @@ void EditorApp::drawDockSpace() {
     // Play brings the game to the front, Stop the scene.
     bool isPlaying = editor.scene.isPlaying();
     if (isPlaying != wasPlaying_) {
-        ImGui::SetWindowFocus(isPlaying ? "Game" : "Scene");
+        ImGui::SetWindowFocus(ui::windowId(isPlaying ? "Game" : "Scene").c_str());
         wasPlaying_ = isPlaying;
     }
     drawSceneView(editor);
     drawGameView(editor, splashSeconds_ >= Splash::kDuration);
     if (showsSceneTab_) {
         // Asked for after both exist, so that it is the scene that ends up in front.
-        ImGui::SetWindowFocus("Scene");
+        ImGui::SetWindowFocus(ui::windowId("Scene").c_str());
         showsSceneTab_ = false;
     }
 }
@@ -2090,16 +2171,19 @@ void EditorApp::drawPanels() {
         ImGui::SetNextWindowSize(panel->firstSize(), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
         // A panel new to a layout saved before it existed: a tab beside its neighbour, not a window in the middle.
-        if (!panel->firstBeside.empty() && !ImGui::FindWindowByName(panel->title.c_str()) && !ImGui::FindWindowSettingsByID(ImHashStr(panel->title.c_str()))) {
-            ImGuiWindow* beside = ImGui::FindWindowByName(panel->firstBeside.c_str());
+        if (!panel->firstBeside.empty() && !ImGui::FindWindowByName(ui::windowId(panel->title).c_str()) &&
+            !ImGui::FindWindowSettingsByID(ImHashStr(ui::windowId(panel->title).c_str()))) {
+            ImGuiWindow* beside = ImGui::FindWindowByName(ui::windowId(panel->firstBeside).c_str());
             if (beside && beside->DockId != 0) ImGui::SetNextWindowDockID(beside->DockId, ImGuiCond_Always);
         }
-        if (ImGui::Begin(panel->title.c_str(), &panel->isOpen, panel->windowFlags())) panel->draw(editor);
+        bool* closes = ui::isCompactTab(panel->title) ? nullptr : &panel->isOpen;
+        if (ImGui::Begin(ui::windowName(panel->title).c_str(), closes, panel->windowFlags())) panel->draw(editor);
+        ui::windowTabTip(panel->title);
         ImGui::End();
     }
     // A panel asked for (Open Animator...): in front, once it has been drawn.
     if (!editor.panelToFocus.empty()) {
-        if (ImGui::FindWindowByName(editor.panelToFocus.c_str())) ImGui::SetWindowFocus(editor.panelToFocus.c_str());
+        if (ImGui::FindWindowByName(ui::windowId(editor.panelToFocus).c_str())) ImGui::SetWindowFocus(ui::windowId(editor.panelToFocus).c_str());
         editor.panelToFocus.clear();
     }
     // Clicking an asset brings the Explorer (where its viewer is) to the front of its tabs, and
@@ -2107,7 +2191,7 @@ void EditorApp::drawPanels() {
     static std::string shownAsset;
     static size_t shownSelection = 0;
     auto bringForward = [](const char* name) {
-        ImGuiWindow* window = ImGui::FindWindowByName(name);
+        ImGuiWindow* window = ImGui::FindWindowByName(ui::windowId(name).c_str());
         if (window && window->DockNode && window->DockNode->TabBar) window->DockNode->TabBar->NextSelectedTabId = window->TabId;
     };
     const AssetInfo* asset = editor.selectedAsset.empty() ? nullptr : editor.assets.find(editor.selectedAsset);

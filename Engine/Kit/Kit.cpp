@@ -13,6 +13,7 @@
 #include "Kit/Ragdoll.hpp"
 #include "Kit/Rope.hpp"
 #include "Kit/Cloth.hpp"
+#include "Kit/LightProbeVolume.hpp"
 #include "Animation/Timeline.hpp"
 
 #include "Kit/Vehicles.hpp"
@@ -677,6 +678,7 @@ void registerKit() {
     linkRagdoll();
     linkRope();
     linkCloth();
+    linkLightProbes();
     linkTimeline();
     (void)script::typeNameFor("kit");
     (void)&sharedGltfModel;                 // and the Animator       // and what scripts made from visual scripts are written with         // names something in Vehicles.cpp, so that a program that links the kit gets the vehicles too
@@ -706,7 +708,7 @@ void registerKit() {
     registry.setCategory("Joint", "Physics");
     registry.setCategory("Animator", "Animation");
     registry.setCategory("TwoBoneIK", "Animation");
-    registry.setCategory("TimelinePlayer", "Hidden");
+    registry.setCategory("TimelinePlayer", "Animation");     // its .timeline is made in the Timeline window
     ComponentRegistry::setDisplayName("TimelinePlayer", "Timeline Player");
     ComponentRegistry::setDisplayName("TwoBoneIK", "Two Bone IK");
     registry.setCategory("Water", "Hidden");        // what scenes from before water was all in its material had: read, and dropped (Water/Water.hpp)

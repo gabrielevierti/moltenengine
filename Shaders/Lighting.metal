@@ -141,6 +141,39 @@ static float3 lightCookie(LightData light, float3 position, texture2d_array<floa
     return cookies.sample(linearSampler, uv, slice).rgb;
 }
 
+// How much of a point or spot light reaches `position` (0 to 1), from its shadow map in the atlas
+// (Renderer::chooseLightShadows). `normal` is the surface's own, without its normal map.
+static float lightShadow(LightData light, float3 position, float3 normal, constant LightShadowViews &views,
+                         depth2d<float> atlas, sampler shadowSampler) {
+    if (light.shadow < 0.5 || is_null_texture(atlas)) return 1.0;
+    uint which = uint(light.shadow - 0.5);
+    float3 fromLight = position - light.position;
+    float distance = length(fromLight);
+    if (light.type == MMLightPoint) {
+        float3 a = abs(fromLight);
+        if (a.x >= a.y && a.x >= a.z) which += fromLight.x > 0.0 ? 0u : 1u;
+        else if (a.y >= a.z) which += fromLight.y > 0.0 ? 2u : 3u;
+        else which += fromLight.z > 0.0 ? 4u : 5u;
+    }
+    // Lifted off the surface by about a texel of the map where it is (larger the farther from the light).
+    float3 lifted = position + normal * (light.shadowTexel * distance * 1.5);
+    float4 clip = views.viewProjection[which] * float4(lifted, 1.0);
+    if (clip.w <= 0.0) return 1.0;
+    float3 ndc = clip.xyz / clip.w;
+    if (ndc.z >= 1.0) return 1.0;
+    float4 tile = views.tile[which];
+    float2 texel = 1.0 / float2(atlas.get_width(), atlas.get_height());
+    float2 uv = tile.xy + (ndc.xy * float2(0.5, -0.5) + 0.5) * tile.zw;
+    float2 low = tile.xy + texel * 1.5, high = tile.xy + tile.zw - texel * 1.5;      // never a neighbour's square
+    float reference = ndc.z - 0.00002;
+    // Four looks a texel apart, each already the hardware's two by two: soft edges.
+    float lit = atlas.sample_compare(shadowSampler, clamp(uv + float2(-0.75, -0.75) * texel, low, high), reference);
+    lit += atlas.sample_compare(shadowSampler, clamp(uv + float2(0.75, -0.75) * texel, low, high), reference);
+    lit += atlas.sample_compare(shadowSampler, clamp(uv + float2(-0.75, 0.75) * texel, low, high), reference);
+    lit += atlas.sample_compare(shadowSampler, clamp(uv + float2(0.75, 0.75) * texel, low, high), reference);
+    return lit * 0.25;
+}
+
 // ---------------------------------------------------------------- sun shadows
 
 // How much sunlight reaches the point: 0 in full shadow, 1 fully lit.
@@ -260,7 +293,7 @@ static float sunVisibilityTraced(float3 worldPosition, float3 normal, float3 toS
     float first = 0.0;
     if (faces) {
         shadowRay.direction = normalize(toSun + (side * cos(turn) + up * sin(turn)) * (reach * diskRadius));
-        raytracing::intersection_result<raytracing::triangle_data, raytracing::instancing> hit = tracer.intersect(shadowRay, scene);
+        raytracing::intersection_result<raytracing::triangle_data, raytracing::instancing> hit = tracer.intersect(shadowRay, scene, MMRayMaskShadow);
         first = hit.type == raytracing::intersection_type::none ? 1.0 : 0.0;
     }
     // The same answer as the pixels beside it: no edge here, and the one ray was enough.
@@ -274,7 +307,7 @@ static float sunVisibilityTraced(float3 worldPosition, float3 normal, float3 toS
         float radius = sqrt((float(i) + 0.5) / count) * diskRadius;
         float angle = float(i) * 2.39996323 + turn;             // the golden angle
         shadowRay.direction = normalize(toSun + (side * cos(angle) + up * sin(angle)) * radius);
-        raytracing::intersection_result<raytracing::triangle_data, raytracing::instancing> more = tracer.intersect(shadowRay, scene);
+        raytracing::intersection_result<raytracing::triangle_data, raytracing::instancing> more = tracer.intersect(shadowRay, scene, MMRayMaskShadow);
         lit += more.type == raytracing::intersection_type::none ? 1.0 : 0.0;
     }
     return lit / count;
@@ -299,7 +332,7 @@ static float3 tracedSurfaceLight(float3 hitPoint, float3 backAlongRay, TracedSur
     sunRay.direction = toSun;
     sunRay.min_distance = 0.005;
     sunRay.max_distance = 1000.0;
-    raytracing::intersection_result<raytracing::triangle_data, raytracing::instancing> blocked = tracer.intersect(sunRay, scene);
+    raytracing::intersection_result<raytracing::triangle_data, raytracing::instancing> blocked = tracer.intersect(sunRay, scene, MMRayMaskShadow);
     float sun = blocked.type == raytracing::intersection_type::none ? max(dot(facing, toSun), 0.0) : 0.0;
     // What leaves a matte surface: its color times the light that falls on it, the sun's spread over the half-sphere.
     float3 light = irradianceMap.sample(linearSampler, facing).rgb * frame.environmentIntensity + frame.sunColor * (sun / kPi);
@@ -345,7 +378,7 @@ static float4 ambientTraced(float3 worldPosition, float3 normal, float viewDepth
         float angle = float(i) * 2.39996323 + turn;
         float3 direction = normalize(side * (cos(angle) * radius) + forward * (sin(angle) * radius) + normal * sqrt(max(1.0 - share, 0.0)));
         occlusionRay.direction = direction;
-        raytracing::intersection_result<raytracing::triangle_data, raytracing::instancing> hit = tracer.intersect(occlusionRay, scene);
+        raytracing::intersection_result<raytracing::triangle_data, raytracing::instancing> hit = tracer.intersect(occlusionRay, scene, MMRayMaskShadow);
         if (hit.type == raytracing::intersection_type::none) {
             open += 1.0;
             continue;
@@ -388,7 +421,7 @@ static float4 reflectionTraced(float3 worldPosition, float3 normal, float3 view,
     mirrorRay.direction = normalize(mirrored + off * spread);
     mirrorRay.min_distance = 0.002;
     mirrorRay.max_distance = 600.0;
-    raytracing::intersection_result<raytracing::triangle_data, raytracing::instancing> hit = tracer.intersect(mirrorRay, scene);
+    raytracing::intersection_result<raytracing::triangle_data, raytracing::instancing> hit = tracer.intersect(mirrorRay, scene, MMRayMaskSeen);
     if (hit.type == raytracing::intersection_type::none) {
         return float4(0.0);
     }
@@ -474,16 +507,67 @@ struct EnvironmentParts {
     float3 specularWeight;
 };
 
+// ---------------------------------------------------------------- baked light probes
+
+// The six sides of one probe read toward `normal`, each by the square of how much the normal
+// leans its way. The same sum as Rendering/LightProbes.cpp's.
+static float4 probeFacing(device const float4 *probes, uint probe, float3 normal) {
+    float3 n2 = normal * normal;
+    uint base = probe * 6u;
+    return probes[base + (normal.x >= 0.0 ? 0u : 1u)] * n2.x + probes[base + (normal.y >= 0.0 ? 2u : 3u)] * n2.y
+         + probes[base + (normal.z >= 0.0 ? 4u : 5u)] * n2.z;
+}
+
+// What the probes round a place say of the light that reaches it from the side `normal` faces:
+// rgb bounced to it, a the share of the sky seen. Outside every grid (0, 0, 0, 1): the sky
+// as it is. Blended between the eight probes of its cell, and out to that at a grid's edges.
+static float4 probeLight(float3 place, float3 normal, constant ProbeVolumes &volumes, device const float4 *probes) {
+    float4 open = float4(0.0, 0.0, 0.0, 1.0);
+    for (uint v = 0; v < min(volumes.count, (uint)MMMaxProbeVolumes); v++) {
+        ProbeVolume volume = volumes.volumes[v];
+        float3 low = place - volume.origin.xyz, high = volume.farCorner.xyz - place;
+        float inside = min(min(min(low.x, low.y), min(low.z, high.x)), min(high.y, high.z));
+        if (inside < 0.0) continue;
+        float weight = volume.farCorner.w > 0.0 ? smoothstep(0.0, 1.0, inside / volume.farCorner.w) : 1.0;
+        uint3 counts = uint3(volume.counts.xyz);
+        float3 cell = low / volume.origin.w;
+        uint3 last = max(counts, uint3(2)) - 2u;
+        uint3 first = uint3(clamp(floor(cell), float3(0.0), float3(last)));
+        float3 t = saturate(cell - float3(first));
+        float4 sum = float4(0.0);
+        for (uint corner = 0; corner < 8u; corner++) {
+            uint3 d = uint3(corner & 1u, (corner >> 1) & 1u, (corner >> 2) & 1u);
+            uint3 at = min(first + d, counts - 1u);
+            float3 w3 = select(1.0 - t, t, d != 0u);
+            uint probe = uint(volume.counts.w) + (at.z * counts.y + at.y) * counts.x + at.x;
+            sum += probeFacing(probes, probe, normal) * (w3.x * w3.y * w3.z);
+        }
+        return mix(open, sum, weight);
+    }
+    return open;
+}
+
 static EnvironmentParts environmentParts(Surface surface, constant FrameUniforms &frame,
                                          texturecube<float> irradianceMap, texturecube<float> prefilteredMap,
-                                         texture2d<float> brdfLUT, sampler linearSampler) {
+                                         texture2d<float> brdfLUT, sampler linearSampler,
+                                         constant ProbeVolumes &probeVolumes, device const float4 *probes) {
     float3 F = fresnelSchlickRoughness(surface.NdotV, surface.F0, surface.roughness);
-    float3 diffuse = (1.0 - F) * (1.0 - surface.metallic) * surface.albedo
-                   * irradianceMap.sample(linearSampler, surface.normal).rgb;
-
     float3 R = reflect(-surface.view, surface.normal);
+    // Where the scene has baked probes, they say how much of the sky reaches this surface and
+    // what is bounced to it: a room is lit by its window, not by the whole sky. Rays traced
+    // for the light around each pixel say the same more exactly, and then the probes are left out.
+    float4 around = float4(0.0, 0.0, 0.0, 1.0);
+    float skyMirrored = 1.0;
+    if (probeVolumes.count > 0 && frame.occlusionRayCount == 0 && frame.tracedAmbientReady == 0) {
+        float3 lifted = surface.position + surface.normal * 0.25;       // off the surface, toward the probes on its open side
+        around = probeLight(lifted, surface.normal, probeVolumes, probes);
+        skyMirrored = mix(probeLight(lifted, R, probeVolumes, probes).w, 1.0, surface.roughness * surface.roughness);
+    }
+    float3 diffuse = (1.0 - F) * (1.0 - surface.metallic) * surface.albedo
+                   * (irradianceMap.sample(linearSampler, surface.normal).rgb * around.w + around.rgb / max(frame.environmentIntensity, 0.001));
+
     float mip = surface.roughness * (frame.prefilteredMipCount - 1.0);
-    float3 prefiltered = prefilteredMap.sample(linearSampler, R, level(mip)).rgb;
+    float3 prefiltered = prefilteredMap.sample(linearSampler, R, level(mip)).rgb * skyMirrored;
     float2 brdf = brdfLUT.sample(linearSampler, float2(surface.NdotV, surface.roughness)).rg;
     float3 weight = F * brdf.x + brdf.y;
 
@@ -499,8 +583,9 @@ static EnvironmentParts environmentParts(Surface surface, constant FrameUniforms
 // Without the extras the two are simply added (with them, shadePixel weighs them itself).
 static float3 environmentLight(Surface surface, constant FrameUniforms &frame,
                                texturecube<float> irradianceMap, texturecube<float> prefilteredMap,
-                               texture2d<float> brdfLUT, sampler linearSampler) {
-    EnvironmentParts parts = environmentParts(surface, frame, irradianceMap, prefilteredMap, brdfLUT, linearSampler);
+                               texture2d<float> brdfLUT, sampler linearSampler,
+                               constant ProbeVolumes &probeVolumes, device const float4 *probes) {
+    EnvironmentParts parts = environmentParts(surface, frame, irradianceMap, prefilteredMap, brdfLUT, linearSampler, probeVolumes, probes);
     return parts.diffuse + parts.specular;
 }
 #endif

@@ -14,7 +14,7 @@
 //   Resolution      how many pixels are drawn before the picture is made the screen's size,
 //                   and whether fewer are drawn while the GPU cannot keep up
 //   Anti-Aliasing   how smooth the edges of things are
-//   Shadows         how far the sun's shadows reach, and how sharp they are
+//   Shadows         how far the shadows reach (a share of what each scene asks), how sharp they are
 //   Ray Tracing     on or off, and how well. On, all of the light is found with rays where
 //                   the GPU can: the sun's shadows, the light around things and what it
 //                   bounces, reflections; a higher level sends more rays. The project's
@@ -55,9 +55,11 @@ struct GameQuality {
     int antiAliasing = 2;               // multisampling: 1 off, 2 or 4
     // ---- Shadows
     bool shadows = true;
-    float shadowDistance = 150;         // the farthest from the camera the sun's shadows reach, in meters: a scene may ask for less
+    float shadowReach = 1.0f;           // how far the sun's shadows reach, as a share of how far each scene asks (Lighting > Shadows): 0.5 half as far
     int shadowResolution = 2048;        // the shadow map's edge
     int shadowCascades = 4;             // slices: more is sharper near and far
+    int lightShadowResolution = 512;    // point and spot lights that cast shadows: the edge of each one's map
+    int shadowedLights = 8;             // and how many at once, the nearest and brightest first
     // ---- Ray tracing: on or off, and how well, for every scene. On, all of the light is found
     // with rays: the sun's shadows, the light around things and what it bounces, reflections.
     // Where the GPU cannot trace rays, shadow maps (the Shadows group).

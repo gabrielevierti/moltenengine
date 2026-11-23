@@ -161,7 +161,8 @@ void Ragdoll::limp(World& world, Entity self, Vec3 push) {
     float totalLength = 0;
     for (const RagdollBone& bone : made) totalLength += simd::length(bone.to - bone.from);
     std::vector<Mat4> global = model.globalMatrices(heldPose);
-    const Mat4& entity = transform->world;
+    // A copy: making the parts adds transforms to the scene, which moves the one `transform` points at.
+    const Mat4 entity = transform->world;
     Vec3 scale{simd::length(xyz(entity.columns[0])), simd::length(xyz(entity.columns[1])), simd::length(xyz(entity.columns[2]))};
     float size = std::max({scale.x, scale.y, scale.z});
     std::string prefix = "Ragdoll " + std::to_string(self.index) + " ";
@@ -241,7 +242,7 @@ void Ragdoll::lateUpdate(World& world, Entity self, float) {
     GltfPose pose = heldPose;
     poseFromBodies(*animator->loaded, made, worlds, offsets, transform->world, pose);
     animator->pose = pose;
-    world.showMesh(self, animator->loaded->assembled(pose));
+    world.showPose(self, animator->loaded, pose);
 }
 
 }  // namespace molten::kit

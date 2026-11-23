@@ -33,6 +33,8 @@ void registerRenderingPanel(EditorContext& editor);
 void registerConsolePanel(EditorContext& editor);
 void registerProfilerPanel(EditorContext& editor);
 void registerAnimationPanel(EditorContext& editor);
+void registerSequencePanel(EditorContext& editor);
+void registerShaderGraphPanel(EditorContext& editor);
 void registerAnimatorPanel(EditorContext& editor);
 void registerSourceControlPanel(EditorContext& editor);
 void registerSceneWeightPanel(EditorContext& editor);

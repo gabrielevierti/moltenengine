@@ -52,6 +52,8 @@ std::string Project::toText() const {
 std::optional<Project> Project::fromText(const std::string& contents) {
     std::vector<std::vector<std::string>> lines = text::parseLines(contents);
     if (lines.empty() || lines[0][0] != "molten-project") return std::nullopt;
+    // Any version is read: a project only names things, and an older editor opening a newer
+    // project should still find its name and scenes (the rest it skips).
     Project project;
     for (size_t i = 1; i < lines.size(); i++) {
         const std::vector<std::string>& words = lines[i];

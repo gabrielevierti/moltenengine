@@ -22,7 +22,7 @@
 namespace molten::editor {
 
 /// The editor's version, and where its source is.
-inline constexpr const char* kVersion = "1.2";
+inline constexpr const char* kVersion = "1.3";
 inline constexpr const char* kRepository = "https://github.com/gabrielevierti/moltenengine";
 
 class EditorApp : public Game {
@@ -47,6 +47,8 @@ private:
         std::function<void()> begin, prepare;
         /// How far `prepare` is, 0 to 1, when it can say: the bar follows it.
         std::function<float()> progress;
+        /// What `prepare` is on, in a few words ("12 of 48 files"), when it can say: shown beside the step.
+        std::function<std::string()> detail;
         float seconds = 0.3f;               // about how long the step takes: its share of the bar
     };
     struct Work {
@@ -63,6 +65,12 @@ private:
         double fullAt = -1;                 // when the bar reached its end: the screen fades from then
         int calmFrames = 0;                 // frames at an even pace since the work ended: what is under the screen has settled
         float shown = 0;                    // the bar, 0 to 1: it only moves forward, and never in a jump
+        // The log on the screen: how long each step took, and what the console was told during it
+        // (the console's length when the work began and when each step ended).
+        std::vector<double> took;
+        double lastDone = -1;
+        size_t consoleFrom = 0;
+        std::vector<size_t> consoleAt;
     };
     std::optional<Work> work_;
     /// Shows the work's screen at once and does its steps over the next frames. Ignored while

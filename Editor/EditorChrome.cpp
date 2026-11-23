@@ -1,7 +1,7 @@
 // EditorChrome.cpp
 // What frames the editor's windows: the bar under the menus (what the scene is doing at the
-// left; Run, Hold and Frame and the layouts at the right) and the status bar along the
-// bottom (the last thing the console heard, and the numbers).
+// left; Run, Hold and Frame in the middle; the layouts at the right) and the status bar along
+// the bottom (the last thing the console heard, and the numbers).
 #include "EditorApp.hpp"
 
 #include "Panels/Widgets.hpp"
@@ -41,82 +41,79 @@ void EditorApp::drawPlayBar() {
     if (isOpen) {
         ImDrawList* drawList = ImGui::GetWindowDrawList();
         const bool isPlaying = scene.isPlaying(), isPaused = scene.isPaused();
-        // Molten's own controls: three labelled keys at the right, and what the scene is doing at the left.
-        const float keyHeight = 26;
-        enum class Picture { Run, Stop, Hold, Frame };
-        auto control = [&](const char* id, const char* label, Picture picture, bool isLit, bool isEnabled, ImU32 litColor, const std::string& tooltip) {
-            float width = 34 + ImGui::CalcTextSize(label).x + 12;
-            ImGui::BeginDisabled(!isEnabled);
-            ImVec2 min = ImGui::GetCursorScreenPos();
-            bool pressed = ImGui::InvisibleButton(id, ImVec2(width, keyHeight));
+        // Molten's own controls: Run, Hold and Frame as one control in the middle of the bar (where
+        // the eye looks for them), what the scene is doing at the left, the layouts at the right.
+        const float keyHeight = 28;
+        struct Key {
+            const char* id;
+            const char* label;
+            const char* glyph;
+            bool isLit, isEnabled;
+            ImU32 litColor;
+            std::string tooltip;
+            const char* command;
+        };
+        const Key keys[] = {
+            {"##play", isPlaying ? "Stop" : "Run", isPlaying ? icon::Square : icon::Play, isPlaying, true, IM_COL32(255, 122, 47, 255),
+             isPlaying ? "Stop: back to editing, the scene returns to how it was (" + editor.keysOf("play") + ")" : "Run the scene (" + editor.keysOf("play") + ")", "play"},
+            {"##pause", isPaused ? "Resume" : "Hold", isPaused ? icon::Play : icon::Pause, isPaused, isPlaying, IM_COL32(110, 180, 255, 255),
+             isPaused ? "Resume (" + editor.keysOf("pause") + ")" : "Hold: freeze the game where it is; change things, then resume (" + editor.keysOf("pause") + ")",
+             "pause"},
+            {"##step", "Frame", icon::StepForward, false, isPlaying, 0, "Advance one frame and hold (" + editor.keysOf("step") + ")", "step"},
+        };
+        auto keyWidth = [](const Key& key) { return 14 + 16 + 7 + ImGui::CalcTextSize(key.label).x + 14; };
+        float groupWidth = 0;
+        for (const Key& key : keys) groupWidth += keyWidth(key);
+        const float barTop = ImGui::GetWindowPos().y, keysTop = barTop + (height - keyHeight) * 0.5f;
+        float keyX = std::round(ImGui::GetWindowPos().x + (ImGui::GetWindowWidth() - groupWidth) * 0.5f);
+        // The group's ground, then each key on it; a hairline between two keys.
+        drawList->AddRectFilled(ImVec2(keyX, keysTop), ImVec2(keyX + groupWidth, keysTop + keyHeight), IM_COL32(36, 40, 48, 255), keyHeight * 0.5f);
+        drawList->AddRect(ImVec2(keyX, keysTop), ImVec2(keyX + groupWidth, keysTop + keyHeight), IM_COL32(255, 255, 255, 18), keyHeight * 0.5f);
+        ImFont* icons = ImGuiLayer::iconFont();
+        for (size_t i = 0; i < std::size(keys); i++) {
+            const Key& key = keys[i];
+            const float width = keyWidth(key);
+            ImGui::SetCursorScreenPos(ImVec2(keyX, keysTop));
+            ImGui::BeginDisabled(!key.isEnabled);
+            bool pressed = ImGui::InvisibleButton(key.id, ImVec2(width, keyHeight));
             bool isHovered = ImGui::IsItemHovered();
             ImGui::EndDisabled();
-            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort | ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", tooltip.c_str());
-            ImVec2 max(min.x + width, min.y + keyHeight), c(min.x + 18, (min.y + max.y) * 0.5f);
-            ImU32 ink = !isEnabled ? IM_COL32(96, 102, 114, 255) : isLit ? litColor : IM_COL32(223, 227, 234, 255);
-            drawList->AddRectFilled(min, max, isHovered ? IM_COL32(58, 64, 76, 255) : IM_COL32(40, 44, 52, 255), keyHeight * 0.5f);
-            if (isLit) drawList->AddRect(min, max, litColor, keyHeight * 0.5f, ImDrawFlags_None, 1.5f);
-            switch (picture) {
-                case Picture::Run:      // a spark: the forge is lit
-                    drawList->AddCircle(c, 7.0f, ink, 20, 1.6f);
-                    drawList->AddTriangleFilled(ImVec2(c.x - 2.5f, c.y - 4), ImVec2(c.x - 2.5f, c.y + 4), ImVec2(c.x + 4.5f, c.y), ink);
-                    break;
-                case Picture::Stop:
-                    drawList->AddCircle(c, 7.0f, ink, 20, 1.6f);
-                    drawList->AddRectFilled(ImVec2(c.x - 3, c.y - 3), ImVec2(c.x + 3, c.y + 3), ink, 1.0f);
-                    break;
-                case Picture::Hold:     // two bars of a held breath
-                    drawList->AddCircle(c, 7.0f, ink, 20, 1.6f);
-                    drawList->AddLine(ImVec2(c.x - 2.2f, c.y - 3.5f), ImVec2(c.x - 2.2f, c.y + 3.5f), ink, 1.8f);
-                    drawList->AddLine(ImVec2(c.x + 2.2f, c.y - 3.5f), ImVec2(c.x + 2.2f, c.y + 3.5f), ink, 1.8f);
-                    break;
-                case Picture::Frame:    // one frame of film, and an arrow past it
-                    drawList->AddRect(ImVec2(c.x - 7, c.y - 5), ImVec2(c.x + 1, c.y + 5), ink, 1.5f, ImDrawFlags_None, 1.5f);
-                    drawList->AddLine(ImVec2(c.x + 3, c.y), ImVec2(c.x + 8, c.y), ink, 1.6f);
-                    drawList->AddTriangleFilled(ImVec2(c.x + 6, c.y - 3), ImVec2(c.x + 6, c.y + 3), ImVec2(c.x + 9.5f, c.y), ink);
-                    break;
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort | ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", key.tooltip.c_str());
+            const ImVec2 min(keyX, keysTop), max(keyX + width, keysTop + keyHeight);
+            const ImDrawFlags corners = i == 0 ? ImDrawFlags_RoundCornersLeft : i + 1 == std::size(keys) ? ImDrawFlags_RoundCornersRight : ImDrawFlags_RoundCornersNone;
+            if (key.isLit) {
+                drawList->AddRectFilled(min, max, (key.litColor & 0x00FFFFFFu) | IM_COL32(0, 0, 0, 52), keyHeight * 0.5f, corners);
+            } else if (isHovered && key.isEnabled) {
+                drawList->AddRectFilled(min, max, IM_COL32(255, 255, 255, 16), keyHeight * 0.5f, corners);
             }
-            drawList->AddText(ImVec2(min.x + 32, c.y - ImGui::GetTextLineHeight() * 0.5f), ink, label);
-            return pressed;
-        };
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(6, 0));
-        // What the scene is doing, at the left.
-        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (keyHeight - ImGui::GetFrameHeight()) * 0.5f);
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextDisabled("%s", !isPlaying ? "Editing" : isPaused ? "Held: changes are kept until Stop" : "Running: what you change now is undone at Stop");
-        // The keys at the right end, beside the layout: their widths first, to know where they start.
+            if (i > 0) drawList->AddLine(ImVec2(min.x, min.y + 7), ImVec2(min.x, max.y - 7), IM_COL32(255, 255, 255, 22));
+            const ImU32 ink = !key.isEnabled ? IM_COL32(96, 102, 114, 255) : key.isLit ? key.litColor : IM_COL32(223, 227, 234, 255);
+            const float middle = (min.y + max.y) * 0.5f;
+            if (icons) {
+                ImVec2 extent = icons->CalcTextSizeA(16.0f, FLT_MAX, 0.0f, key.glyph);
+                drawList->AddText(icons, 16.0f, ImVec2(min.x + 14 + std::round((16 - extent.x) * 0.5f), std::round(middle - extent.y * 0.5f)), ink, key.glyph);
+            }
+            drawList->AddText(ImVec2(min.x + 14 + 16 + 7, std::round(middle - ImGui::GetTextLineHeight() * 0.5f)), ink, key.label);
+            if (pressed) editor.commands.run(key.command);
+            keyX += width;
+        }
+
+        // What the scene is doing, at the left: a dot in the color of its state, and the words.
+        const ImU32 stateColor = !isPlaying ? IM_COL32(110, 118, 132, 255) : isPaused ? IM_COL32(110, 180, 255, 255) : IM_COL32(255, 122, 47, 255);
+        const float textY = barTop + (height - ImGui::GetTextLineHeight()) * 0.5f;
+        drawList->AddCircleFilled(ImVec2(ImGui::GetWindowPos().x + 16, barTop + height * 0.5f), 4.0f, stateColor, 12);
+        const char* state = !isPlaying ? "Editing" : isPaused ? "Held: changes are kept until Stop" : "Running: what you change now is undone at Stop";
+        drawList->AddText(ImVec2(ImGui::GetWindowPos().x + 28, textY), ImGui::GetColorU32(ImGuiCol_TextDisabled), state);
         const float layoutWidth = 170;
-        auto keyWidth = [](const char* label) { return 34 + ImGui::CalcTextSize(label).x + 12; };
-        float keysWidth = keyWidth(isPlaying ? "Stop" : "Run") + keyWidth(isPaused ? "Resume" : "Hold") + keyWidth("Frame") + 12;
-        // Each key placed on its own, all at the same height in the middle of the bar.
-        const float barTop = ImGui::GetWindowPos().y, keysTop = barTop + (height - keyHeight) * 0.5f;
-        float keyX = ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - layoutWidth - keysWidth - 22;
-        auto placeKey = [&](const char* label) {
-            ImGui::SetCursorScreenPos(ImVec2(keyX, keysTop));
-            keyX += keyWidth(label) + 6;
-        };
-        placeKey(isPlaying ? "Stop" : "Run");
-        if (control("##play", isPlaying ? "Stop" : "Run", isPlaying ? Picture::Stop : Picture::Run, isPlaying, true, IM_COL32(255, 122, 47, 255),
-                    isPlaying ? "Stop: back to editing, the scene returns to how it was (" + editor.keysOf("play") + ")" : "Run the scene (" + editor.keysOf("play") + ")")) {
-            editor.commands.run("play");
-        }
-        placeKey(isPaused ? "Resume" : "Hold");
-        if (control("##pause", isPaused ? "Resume" : "Hold", Picture::Hold, isPaused, isPlaying, IM_COL32(120, 190, 255, 255),
-                    isPaused ? "Resume (" + editor.keysOf("pause") + ")"
-                             : "Hold: freeze the game where it is; change things, then resume (" + editor.keysOf("pause") + ")")) {
-            editor.commands.run("pause");
-        }
-        placeKey("Frame");
-        if (control("##step", "Frame", Picture::Frame, false, isPlaying, 0, "Advance one frame and hold (" + editor.keysOf("step") + ")")) editor.commands.run("step");
-        ImGui::PopStyleVar();
 
         // The layout of the windows, at the right end.
         ImGui::SetCursorScreenPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - layoutWidth - 10, barTop + (height - ImGui::GetFrameHeight()) * 0.5f));
         ImGui::SetNextItemWidth(layoutWidth);
-        if (ImGui::BeginCombo("##layout", ("Layout: " + layoutName_).c_str(), ImGuiComboFlags_HeightLarge)) {
+        if (ImGui::BeginCombo("##layout", (std::string(icon::LayoutDashboard) + "  " + layoutName_).c_str(), ImGuiComboFlags_HeightLarge)) {
             drawLayoutItems();
             ImGui::EndCombo();
         }
+        ui::tooltip("The layout of the windows: choose one, save this one, or go back to the default");
     }
     ImGui::End();
 }

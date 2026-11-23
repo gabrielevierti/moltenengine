@@ -124,7 +124,7 @@ TEST(a_storm_flashes_now_and_then_and_the_weather_is_kept_with_the_scene) {
     CHECK(back.weather.flash == 0.0f);
 }
 
-TEST(rain_driven_onto_a_wall_splashes_off_it_and_runs_down_it) {
+TEST(rain_driven_onto_a_wall_splashes_off_it) {
     RainyWorld rainy(1.0f, false);
     rainy.world.sceneSettings().wind = Vec3{8, 0, 0};           // blowing toward +x, onto the wall's face
     Entity wall = rainy.world.scene.create("Wall");
@@ -150,12 +150,8 @@ TEST(rain_driven_onto_a_wall_splashes_off_it_and_runs_down_it) {
         }
     }
     CHECK(offTheWall > 5);
-    // And some run down it, along its face.
-    CHECK(runs->particles.size() > 10);
-    for (const Particle& run : runs->particles) {
-        CHECK(run.velocity.y < 0.0f && std::abs(run.velocity.x) < 0.05f);
-        CHECK(std::abs(run.position.x - 5.5f) < 0.3f);
-    }
+    // What runs down it is the wall's own (drawn with it, Forward.metal): no particles left in the world.
+    CHECK(runs->particles.empty());
 }
 
 TEST(snow_drifts_down_slowly_and_lies_a_moment_where_it_lands) {

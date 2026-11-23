@@ -39,6 +39,9 @@ enum {
     MMBufferTracedSurfaces = 7,          // TracedSurface[], one for each instance of that scene: what a ray that hits it sees
     MMBufferShadowCopies = 8,            // ShadowCopy[], indexed by instance_id in the pass that draws the sun's shadow maps
     MMBufferWakes = 9,                   // WaterWakes: what floats, and the wakes behind it, for the water to draw
+    MMBufferLightShadows = 10,           // LightShadowViews: the point and spot lights' shadow maps, where each is in the atlas
+    MMBufferProbeVolumes = 11,           // ProbeVolumes: the grids of baked light probes (Rendering/LightProbes.hpp)
+    MMBufferProbes = 12,                 // float4[], six for each probe: what those grids hold
 };
 
 enum {
@@ -60,6 +63,7 @@ enum {
     MMTextureRainMap           = 15,  // depth2d: the scene round the camera seen from above, nearest first: under a roof it does not rain
     MMTextureSceneNormal       = 16,  // the normals of what is opaque (the prepass), in the view's axes: which way the bottom under water faces
     MMTextureLightCookies      = 17,  // texture2d_array: the spot lights' cookies, a slice each (LightData::cookie), MMCookieSize square
+    MMTextureLightShadows      = 18,  // depth2d: the point and spot lights' shadow maps, side by side (LightShadowViews)
 };
 
 enum {
@@ -72,9 +76,18 @@ enum {
     MMMaxLights   = 64,
     MMMaxCookies  = 16,      // different cookies in a scene at once; lights past these shine without theirs
     MMCookieSize  = 256,
+    MMMaxLightShadowViews = 48,  // shadow maps of point and spot lights in a picture: a spot light takes one, a point light six
     MMMaxCascades = 4,
     MMMaxWakes    = 8,
+    MMMaxProbeVolumes = 4,   // grids of baked light probes in a scene at once
     MMWakeTrail   = 16,
+};
+
+// Which rays see an instance of the ray tracing scene (its mask): every ray what is seen, and
+// the rays that look for shadows and for what hides the sky only what casts a shadow (MeshRenderer::castsShadows).
+enum {
+    MMRayMaskShadow = 1,
+    MMRayMaskSeen   = 2,
 };
 
 enum {
@@ -100,6 +113,10 @@ typedef struct {
     float farPlane;
     simd_float3 wind;                // meters per second: what sways grass and trees (materials with sway)
     float windGust;                  // 0 steady, 1 wild
+    simd_float4x4 previousViewProjection;   // the camera a frame ago: where each point was on the screen
+    simd_float2 jitter;              // how far the picture is nudged this frame, in pixels (temporal anti-aliasing)
+    float deltaTime;                 // seconds since the last frame: how fast things move (InstanceData::previousModel)
+    float pad0;
 } PassUniforms;
 
 // ---------------------------------------------------------------- per frame
@@ -187,6 +204,21 @@ typedef struct {
     simd_float4 snow;                // x how much snow has settled on what faces up and is out in it, 0 to 1 (WeatherSettings::snowSettles)
 } FrameUniforms;
 
+// The grids of baked light probes (Rendering/LightProbes.hpp). Each probe has six float4 in
+// MMBufferProbes, for +x, -x, +y, -y, +z, -z: rgb the light bounced to it from that side, a
+// the share of the sky seen that way.
+typedef struct {
+    simd_float4 origin;              // xyz the first probe; w the meters between probes
+    simd_float4 farCorner;           // xyz the last probe; w meters inside the edge over which it fades out
+    simd_float4 counts;              // xyz probes along each side; w where its first probe is in MMBufferProbes (in probes); whole numbers
+} ProbeVolume;
+
+typedef struct {
+    ProbeVolume volumes[MMMaxProbeVolumes];
+    uint32_t count;                  // 0: no probes, the sky lights everything as it is
+    float pad0, pad1, pad2;
+} ProbeVolumes;
+
 // The clouds are walked for one pixel in four each frame (in turn), and the rest kept from the
 // frames before, moved to where they are now seen (Clouds.metal, fragment_clouds_resolve).
 typedef struct {
@@ -241,7 +273,17 @@ typedef struct {
     simd_float3 right;               // the light's own x axis: which way a cookie's picture lies across its cone
     float cookie;                    // a spot light's cookie: 0 none, else 1 + its slice of MMTextureLightCookies
     float volumetric;                // how much it lights the air it passes through (the fog), 0 none: beams in the mist
+    float shadow;                    // point and spot: 0 no shadow, else 1 + its first view in LightShadowViews (a point light has six after it)
+    float shadowTexel;               // the size of a texel of its shadow map one meter from the light: how far a surface is lifted off its shadow
 } LightData;
+
+// The shadow maps of point and spot lights: each a square of the atlas (MMTextureLightShadows),
+// seen from the light (a spot light through its cone, a point light six times, along +x, -x,
+// +y, -y, +z, -z).
+typedef struct {
+    simd_float4x4 viewProjection[MMMaxLightShadowViews];
+    simd_float4 tile[MMMaxLightShadowViews];     // where in the atlas: x, y its corner, z, w its size, as fractions of the atlas
+} LightShadowViews;
 
 // ---------------------------------------------------------------- per draw
 
@@ -249,6 +291,7 @@ typedef struct {
     simd_float4x4 model;
     simd_float4x4 normalMatrix;      // inverse transpose of model
     simd_float4 tint;                // multiplies the material's base color
+    simd_float4x4 previousModel;     // where it was a frame ago: how fast each point of it moves (the rain on it, motion vectors). All zero: still
 } InstanceData;
 
 // The sun's shadow maps are drawn in one pass: each copy of a mesh says which of its

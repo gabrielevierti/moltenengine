@@ -101,11 +101,16 @@ public:
             if (ImGui::Button("Open in Animator")) editor.openPanel("Animator");
             ImGui::Spacing();
         } else if (asset->type == AssetType::Animation) {
-            if (ImGui::Button("Open in Timeline")) editor.openPanel("Timeline");
+            if (ImGui::Button("Open in Animation")) editor.openPanel("Animation");
             ui::tooltip("It shows the animations of the entity chosen in the scene: choose the one it was made for");
             ImGui::Spacing();
         } else if (asset->type == AssetType::Timeline) {
             if (ImGui::Button("Open in Timeline")) editor.openPanel("Timeline");
+            ImGui::Spacing();
+        } else if (asset->type == AssetType::Effect || asset->type == AssetType::Prefab) {
+            // In front of the camera; dragging it into the Scene view puts it where it is let go.
+            if (ImGui::Button("Add to Scene")) placeAsset(editor, asset->path, inFrontOfCamera(editor));
+            ui::tooltip("Or drag it into the Scene view or onto a row of the Hierarchy");
             ImGui::Spacing();
         }
         drawDependencies(editor, *asset);

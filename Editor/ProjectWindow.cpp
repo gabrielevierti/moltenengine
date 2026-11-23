@@ -662,9 +662,10 @@ void ProjectWindow::drawSidebar(Result& result, const std::vector<std::string>& 
     std::string under = std::string("Version ") + version;
     ImTextureID logo = picture && !logoPath.empty() ? picture(logoPath) : ImTextureID(0);
     if (logo) {
-        float width = ImGui::GetContentRegionAvail().x + 12, height = width * 268.0f / 1200.0f;
+        // Assets/Branding/logo.png is 2400 x 536, its words starting 1010 across: the version goes under them.
+        float width = ImGui::GetContentRegionAvail().x + 12, height = width * 536.0f / 2400.0f;
         drawList->AddImage(logo, ImVec2(at.x - 8, at.y - 6), ImVec2(at.x - 8 + width, at.y - 6 + height));
-        drawList->AddText(ImGui::GetFont(), 12.0f, ImVec2(at.x + width * 0.407f - 8, at.y + height - 4), kDim, under.c_str());
+        drawList->AddText(ImGui::GetFont(), 12.0f, ImVec2(at.x + width * (1010.0f / 2400.0f) - 8, at.y + height - 4), kDim, under.c_str());
         ImGui::Dummy(ImVec2(0, height + 10));
     } else {
         drawMark(drawList, at, 40);

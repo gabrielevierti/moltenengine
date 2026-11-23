@@ -83,6 +83,12 @@ Two things to know:
 
 The first scene of the game is the project's First Scene (Edit > Project Settings); the first scene you save becomes it.
 
+## Reference
+
+Every class and function `MoltenMetal.hpp` gives a game is in [API.md](API.md), made from the
+headers' comments by `Tools/make_api_docs.py`. What a game uses from there keeps building across
+1.x releases.
+
 ## What is not there yet
 
 - Entity and asset references as fields.

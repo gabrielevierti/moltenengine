@@ -33,6 +33,8 @@ namespace molten {
 class Canvas;
 class Engine;
 class Mesh;
+struct GltfModel;
+struct GltfPose;
 struct NamedMaterial;
 struct RenderSettings;
 struct WeatherSettings;
@@ -335,6 +337,9 @@ public:
     bool ears(Mat4& world) { return listener(world); }
     /// Where a file of the project's Assets is on disk.
     virtual std::string assetPath(const std::string& name) const { return assetRoot + "/" + name; }
+    /// Counts the times a scene's `.lighting` file was written anew (Lighting > Bake Light Probes):
+    /// the Engine reads it again when this changes, as it does when the scene names another.
+    int bakedLightingRevision = 0;
     /// How scene files find meshes. Without a GPU there are none: entities keep their
     /// colliders and their code, and are simply not drawn.
     virtual std::shared_ptr<Mesh> loadMesh(const std::string& name) { return nullptr; }
@@ -351,6 +356,9 @@ public:
     /// Gives an entity that draws a mesh one of its own, made of these triangles: what an
     /// animated model shows each frame. A World that draws nothing does nothing.
     virtual void showMesh(Entity entity, const MeshData& data) {}
+    /// Shows a model with bones in a pose (an Animator, a ragdoll): an engine poses it on the GPU
+    /// (Rendering/Skinning.hpp); this one, as showMesh(model->assembled(pose)) does.
+    virtual void showPose(Entity entity, const std::shared_ptr<const GltfModel>& model, const GltfPose& pose);
     /// Reads the triangles of every mesh collider that does not have them yet (or whose
     /// entity has changed size). Called before each step of the physics.
     void prepareMeshColliders();

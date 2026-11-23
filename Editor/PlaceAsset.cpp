@@ -9,6 +9,7 @@
 #include "Assets/Gltf.hpp"
 #include "Core/TextFile.hpp"
 #include "Animation/Animator.hpp"
+#include "Rendering/Particles.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -287,6 +288,21 @@ Entity placeAsset(EditorContext& editor, const std::string& path, Vec3 position,
         made = editor.scene.instantiatePrefab(path, position);
         if (!made.isValid()) editor.notify("Cannot read " + path, ConsoleMessage::Level::Error);
         else if (editor.engine.scene.isAlive(parent)) editor.scene.reparent(made, parent);
+    }
+    if (asset->type == AssetType::Effect) {
+        // A particle effect: a particle system made as the file says, named after it.
+        ParticleEmitter emitter;
+        std::optional<std::string> text = text::readFile(editor.assets.absolutePath(path));
+        if (!text || !readEffect(*text, emitter)) {
+            editor.notify("Cannot read the effect " + path, ConsoleMessage::Level::Error);
+            return Entity{};
+        }
+        Scene& scene = editor.engine.scene;
+        made = editor.scene.create(Primitive::ParticleEmitter, parent);
+        if (ParticleEmitter* placed = scene.get<ParticleEmitter>(made)) *placed = emitter;
+        if (Name* name = scene.get<Name>(made)) name->value = fs::path(path).stem().string();
+        if (Transform* transform = scene.get<Transform>(made); transform && !scene.isAlive(parent)) transform->position = position;
+        editor.scene.markChanged();
     }
     return made;
 }

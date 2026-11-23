@@ -10,6 +10,7 @@
 #include "Kit/Layout.hpp"
 #include "Kit/Terrain.hpp"
 #include "Kit/Foliage.hpp"
+#include "Kit/LightProbeVolume.hpp"
 #include "Kit/Cloth.hpp"
 #include "Panels/Widgets.hpp"
 
@@ -66,12 +67,10 @@ public:
             ImVec2 at = ImGui::GetCursorScreenPos();
             float side = ImGui::GetFrameHeight();
             if (ImGui::Button("##kind", ImVec2(side, side))) ImGui::OpenPopup("##kinds");
-            ImDrawList* draw = ImGui::GetWindowDrawList();
-            ImU32 color = ImGui::GetColorU32(ImGuiCol_Text);
-            // A funnel.
-            ImVec2 funnel[3] = {ImVec2(at.x + side * 0.22f, at.y + side * 0.28f), ImVec2(at.x + side * 0.78f, at.y + side * 0.28f), ImVec2(at.x + side * 0.5f, at.y + side * 0.6f)};
-            draw->AddConvexPolyFilled(funnel, 3, color);
-            draw->AddLine(ImVec2(at.x + side * 0.5f, at.y + side * 0.55f), ImVec2(at.x + side * 0.5f, at.y + side * 0.76f), color, 2.0f);
+            // A funnel, lit while only one kind is shown.
+            const bool isOneKind = filter_.rfind("c:", 0) == 0 || filter_.rfind("is:", 0) == 0;
+            ImU32 color = ImGui::GetColorU32(isOneKind ? ImGuiCol_CheckMark : ImGuiCol_Text);
+            ui::drawIcon(ImGui::GetWindowDrawList(), ImVec2(at.x + side * 0.5f, at.y + side * 0.5f), 15.0f, "list-filter", color, false);
             ui::tooltip("Only one kind of thing");
             if (ImGui::BeginPopup("##kinds")) {
                 const char* kinds[][3] = {{"Everything", "", "axes"}, {"Lights", "c:Light", "light"}, {"Cameras", "c:Camera", "camera"}, {"Meshes", "c:MeshRenderer", "cube"},
@@ -263,60 +262,25 @@ private:
         return Kind::Empty;
     }
 
-    /// A small drawing that says what an entity is, centered on `c`.
+    /// The icon that says what an entity is, centered on `c`.
     static void drawIcon(ImDrawList* drawList, ImVec2 c, Kind kind, float alpha) {
-        auto color = [alpha](int r, int g, int b) { return IM_COL32(r, g, b, int(255 * alpha)); };
+        const char* glyph = icon::CircleDashed;
+        ImU32 color = IM_COL32(128, 136, 150, 255);
         switch (kind) {
-            case Kind::Mesh: {
-                ImU32 line = color(130, 170, 235);
-                const ImVec2 top(c.x, c.y - 6.5f), middle(c.x, c.y - 0.5f), bottom(c.x, c.y + 6.5f);
-                const ImVec2 leftTop(c.x - 5.5f, c.y - 3.5f), rightTop(c.x + 5.5f, c.y - 3.5f), leftBottom(c.x - 5.5f, c.y + 3.5f), rightBottom(c.x + 5.5f, c.y + 3.5f);
-                drawList->AddQuadFilled(top, rightTop, middle, leftTop, color(130, 170, 235));
-                drawList->AddQuadFilled(leftTop, middle, bottom, leftBottom, color(88, 122, 184));
-                drawList->AddQuadFilled(middle, rightTop, rightBottom, bottom, color(62, 90, 142));
-                (void)line;
-                break;
-            }
-            case Kind::Sun: {
-                ImU32 yellow = color(250, 205, 90);
-                drawList->AddCircleFilled(c, 3.2f, yellow, 16);
-                for (int i = 0; i < 8; i++) {
-                    float angle = float(i) * 0.7854f;
-                    ImVec2 direction(std::cos(angle), std::sin(angle));
-                    drawList->AddLine(ImVec2(c.x + direction.x * 5.0f, c.y + direction.y * 5.0f), ImVec2(c.x + direction.x * 7.0f, c.y + direction.y * 7.0f), yellow, 1.4f);
-                }
-                break;
-            }
-            case Kind::Light: {
-                ImU32 yellow = color(250, 205, 90);
-                drawList->AddCircleFilled(ImVec2(c.x, c.y - 1.5f), 4.6f, yellow, 20);
-                drawList->AddRectFilled(ImVec2(c.x - 2.2f, c.y + 3.2f), ImVec2(c.x + 2.2f, c.y + 6.5f), color(170, 150, 110), 1.0f);
-                break;
-            }
-            case Kind::Camera: {
-                ImU32 green = color(140, 210, 160);
-                drawList->AddRectFilled(ImVec2(c.x - 7, c.y - 4), ImVec2(c.x + 2.5f, c.y + 4), green, 1.5f);
-                drawList->AddTriangleFilled(ImVec2(c.x + 2.5f, c.y), ImVec2(c.x + 7, c.y - 4), ImVec2(c.x + 7, c.y + 4), green);
-                break;
-            }
-            case Kind::Particles: {
-                ImU32 orange = color(255, 150, 80);
-                const float dots[4][3] = {{-3.5f, 3.0f, 2.6f}, {2.5f, 0.5f, 2.1f}, {-1.0f, -3.5f, 1.6f}, {4.5f, -4.5f, 1.1f}};
-                for (const auto& dot : dots) drawList->AddCircleFilled(ImVec2(c.x + dot[0], c.y + dot[1]), dot[2], orange, 12);
-                break;
-            }
-            case Kind::Code: {
-                ImU32 teal = color(110, 200, 210);
-                const ImVec2 left[3] = {ImVec2(c.x - 2.5f, c.y - 4.5f), ImVec2(c.x - 6.5f, c.y), ImVec2(c.x - 2.5f, c.y + 4.5f)};
-                const ImVec2 right[3] = {ImVec2(c.x + 2.5f, c.y - 4.5f), ImVec2(c.x + 6.5f, c.y), ImVec2(c.x + 2.5f, c.y + 4.5f)};
-                drawList->AddPolyline(left, 3, teal, ImDrawFlags_None, 1.6f);
-                drawList->AddPolyline(right, 3, teal, ImDrawFlags_None, 1.6f);
-                break;
-            }
-            case Kind::Empty:
-                drawList->AddCircle(c, 4.5f, color(128, 136, 150), 16, 1.4f);
-                break;
+            case Kind::Mesh: glyph = icon::Box, color = IM_COL32(120, 165, 235, 255); break;
+            case Kind::Sun: glyph = icon::Sun, color = IM_COL32(250, 205, 90, 255); break;
+            case Kind::Light: glyph = icon::Lightbulb, color = IM_COL32(250, 205, 90, 255); break;
+            case Kind::Camera: glyph = icon::Video, color = IM_COL32(140, 210, 160, 255); break;
+            case Kind::Particles: glyph = icon::Sparkles, color = IM_COL32(255, 150, 80, 255); break;
+            case Kind::Code: glyph = icon::Braces, color = IM_COL32(110, 200, 210, 255); break;
+            case Kind::Empty: break;
         }
+        color = (color & 0x00FFFFFFu) | (ImU32(255 * alpha) << IM_COL32_A_SHIFT);
+        ImFont* font = ImGuiLayer::iconFont();
+        if (!font) return;
+        const float size = 15.0f;
+        ImVec2 extent = font->CalcTextSizeA(size, FLT_MAX, 0.0f, glyph);
+        drawList->AddText(font, size, ImVec2(std::round(c.x - extent.x * 0.5f), std::round(c.y - extent.y * 0.5f)), color, glyph);
     }
 
     static void drawArrow(ImDrawList* drawList, ImVec2 c, bool isOpen, ImU32 color) {
@@ -360,7 +324,7 @@ private:
         if (!payload) return;
         std::string path(static_cast<const char*>(payload->Data));
         const AssetInfo* asset = editor.assets.find(path);
-        if (asset && (asset->type == AssetType::Prefab || asset->type == AssetType::Mesh)) placeAsset(editor, path, inFrontOfCamera(editor), parent);
+        if (asset && (asset->type == AssetType::Prefab || asset->type == AssetType::Mesh || asset->type == AssetType::Effect)) placeAsset(editor, path, inFrontOfCamera(editor), parent);
     }
 
     void drawNode(EditorContext& editor, Entity entity, int depth) {
@@ -460,8 +424,8 @@ private:
                             scene.markChanged();
                         }
                     }
-                } else if (asset && (asset->type == AssetType::Mesh || asset->type == AssetType::Prefab)) {
-                    // A model or a prefab onto a row: into the scene in front of the camera, under this.
+                } else if (asset && (asset->type == AssetType::Mesh || asset->type == AssetType::Prefab || asset->type == AssetType::Effect)) {
+                    // A model, a prefab or an effect onto a row: into the scene in front of the camera, under this.
                     isBetween = false;
                     if (ImGui::AcceptDragDropPayload(ui::kAssetPayload, ImGuiDragDropFlags_AcceptNoDrawDefaultRect)) {
                         if (placeAsset(editor, path, inFrontOfCamera(editor), entity).isValid()) open_.insert(entity.index);
@@ -551,12 +515,7 @@ private:
             ui::tooltip(!own->isActive ? "Switched off. Click to switch it on." : "Click to switch it off: not drawn, no collisions, no code.");
             const bool isOff = !own->isActive;
             ImU32 color = isOff ? IM_COL32(120, 128, 142, 255) : IM_COL32(190, 198, 210, 255);
-            const ImVec2 lid[5] = {ImVec2(eye.x - 7, eye.y), ImVec2(eye.x - 3.5f, eye.y - 3.5f), ImVec2(eye.x, eye.y - 4.5f), ImVec2(eye.x + 3.5f, eye.y - 3.5f), ImVec2(eye.x + 7, eye.y)};
-            const ImVec2 under[5] = {ImVec2(eye.x - 7, eye.y), ImVec2(eye.x - 3.5f, eye.y + 3.5f), ImVec2(eye.x, eye.y + 4.5f), ImVec2(eye.x + 3.5f, eye.y + 3.5f), ImVec2(eye.x + 7, eye.y)};
-            drawList->AddPolyline(lid, 5, color, ImDrawFlags_None, 1.3f);
-            drawList->AddPolyline(under, 5, color, ImDrawFlags_None, 1.3f);
-            if (isOff) drawList->AddLine(ImVec2(eye.x - 6, eye.y + 5), ImVec2(eye.x + 6, eye.y - 5), color, 1.5f);
-            else drawList->AddCircleFilled(eye, 2.0f, color, 10);
+            ui::drawIcon(drawList, eye, 15.0f, isOff ? "eye-off" : "eye", color, false);
             right -= 24;
             ImGui::SetCursorScreenPos(ImVec2(min.x, max.y));
             ImGui::Dummy(ImVec2(0, 0));
@@ -778,6 +737,17 @@ void registerCreateEntries(EditorContext& editor) {
         context.scene.markChanged();
         return made;
     });
+    // A box of baked light probes, to put round a room or a building (Lighting > Baked Light bakes it).
+    editor.registry.addCreateEntry(nullptr, "Light/Light Probe Volume", [](EditorContext& context) {
+        Entity made = context.scene.create(Primitive::Empty);
+        Scene& scene = context.engine.scene;
+        scene.add(made, kit::LightProbeVolume{});
+        if (Transform* transform = scene.get<Transform>(made)) transform->position.y += kit::LightProbeVolume{}.size.y * 0.5f;
+        if (Name* name = scene.get<Name>(made)) name->value = "Light Probe Volume";
+        scene.updateTransforms();
+        context.scene.markChanged();
+        return made;
+    });
     add("Camera", Primitive::Camera);
     // Copies of a model painted on the ground: put the model in its Mesh Renderer, then paint.
     editor.registry.addCreateEntry(nullptr, "3D Object/Foliage", [](EditorContext& context) {
@@ -808,7 +778,7 @@ void registerCreateEntries(EditorContext& editor) {
             context.scene.markChanged();
             context.scene.select(entity);
             // It is in the Game view that it is seen and put in its place.
-            ImGui::SetWindowFocus("Game");
+            ImGui::SetWindowFocus(ui::windowId("Game").c_str());
             return entity;
         });
     };

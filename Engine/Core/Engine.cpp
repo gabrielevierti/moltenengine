@@ -1,4 +1,6 @@
 #include "Core/Engine.hpp"
+#include "Rendering/Skinning.hpp"
+#include "Assets/Gltf.hpp"
 #include "Core/TextFile.hpp"
 #include "Platform/DeviceState.hpp"
 
@@ -253,6 +255,7 @@ void Engine::simulate(Game& game, double realDelta) {
     renderer_->settings.weather.strikePlace = weatherNow.strikePlace;
     renderer_->settings.weather.bolt = weatherNow.bolt;
     renderer_->settings.weather.snowCover = weatherNow.snowCover;
+    updateBakedLighting();
     // What floats, and its wake: the nearest few to where it is seen from.
     {
         gpu::WaterWakes& out = renderer_->waterWakes;
@@ -405,12 +408,60 @@ void Engine::showMesh(Entity entity, const MeshData& data) {
     MeshRenderer* renderer = scene.get<MeshRenderer>(entity);
     if (!renderer || data.indices.empty()) return;
     // The first time, a mesh of the entity's own; after that the same one with its vertices moved.
-    if (!renderer->mesh || !renderer->mesh->isDynamic || !renderer->mesh->update(data)) {
-        auto mesh = std::make_shared<Mesh>(device_, data);
+    if (!renderer->mesh || !renderer->mesh->isDynamic || renderer->mesh->skin || !renderer->mesh->update(data)) {
+        auto mesh = std::make_shared<Mesh>(device_, data, true);
         mesh->name = renderer->mesh ? renderer->mesh->name : std::string();     // so that the scene still names the file it came from
         mesh->isDynamic = true;
         renderer->mesh = mesh;
     }
+    // Its shape for the rays follows it (a flag in a traced shadow flaps with the flag).
+    renderer_->meshMoved(renderer->mesh);
+}
+
+void Engine::showPose(Entity entity, const std::shared_ptr<const GltfModel>& model, const GltfPose& pose) {
+    MeshRenderer* renderer = scene.get<MeshRenderer>(entity);
+    if (!renderer || !model) return;
+    if (!renderer_->canSkin()) {
+        showMesh(entity, model->assembled(pose));
+        return;
+    }
+    // The model's vertices and bones on the GPU: once per model, shared by every entity showing it.
+    std::shared_ptr<const SkinSource> source;
+    for (auto it = skinSources_.begin(); it != skinSources_.end();) {
+        std::shared_ptr<const GltfModel> held = it->first.lock();
+        if (!held) {
+            it = skinSources_.erase(it);
+            continue;
+        }
+        if (held == model) source = it->second;
+        ++it;
+    }
+    if (!source) {
+        std::shared_ptr<SkinSource> made = SkinSource::build(*model);
+        if (made->vertexCount == 0 || !made->upload(device_)) {
+            showMesh(entity, model->assembled(pose));
+            return;
+        }
+        source = made;
+        skinSources_.push_back({model, source});
+    }
+    // A mesh of the entity's own, whose vertices the GPU moves: made from the model as it was made.
+    if (!renderer->mesh || renderer->mesh->skin != source) {
+        MeshData rest = model->assembled(model->restPose());
+        if (rest.indices.empty() || rest.positions.size() != source->vertexCount) {
+            showMesh(entity, model->assembled(pose));
+            return;
+        }
+        auto mesh = std::make_shared<Mesh>(device_, rest, true);
+        mesh->name = renderer->mesh ? renderer->mesh->name : std::string();
+        mesh->isDynamic = true;
+        mesh->skin = source;
+        renderer->mesh = mesh;
+    }
+    std::vector<Mat4> palette;
+    source->palette(*model, pose, palette);
+    renderer->mesh->setBounds(source->bounds(palette));
+    renderer_->skin(renderer->mesh, source, std::move(palette));
 }
 
 std::shared_ptr<Material> Engine::loadMaterial(const std::string& name) {
@@ -447,6 +498,23 @@ std::function<std::string(const std::string&)> Engine::assetPathFinder() const {
 
 std::shared_ptr<Font> Engine::loadFont(const std::string& name) {
     return assets_->font(name);
+}
+
+/// The scene's baked light probes, read when it names another file, or the same one baked again.
+void Engine::updateBakedLighting() {
+    const std::string& wanted = renderer_->settings.bakedLighting;
+    if (wanted == lightingName_ && bakedLightingRevision == lightingRevision_) return;
+    lightingName_ = wanted;
+    lightingRevision_ = bakedLightingRevision;
+    BakedLighting baked;
+    if (!wanted.empty()) {
+        std::string why;
+        std::optional<std::string> text = text::readFile(assetPath(wanted));
+        std::optional<BakedLighting> read = text ? BakedLighting::fromText(*text, &why) : std::nullopt;
+        if (read) baked = std::move(*read);
+        else logWarning("the scene's baked light %s: %s", wanted.c_str(), text ? why.c_str() : "the file is not there (bake it again: Lighting > Bake Light Probes)");
+    }
+    renderer_->setLightProbes(baked);
 }
 
 /// A scene says how it wants to be rendered: sky, fog, shadows, exposure.

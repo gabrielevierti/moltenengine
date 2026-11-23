@@ -24,7 +24,9 @@
 #include "Rendering/DebugDraw.hpp"
 #include "Rendering/Environment.hpp"
 #include "Rendering/FrameAllocator.hpp"
+#include "Rendering/Skinning.hpp"
 #include "Rendering/GpuTimer.hpp"
+#include "Rendering/LightProbes.hpp"
 #include "Rendering/Material.hpp"
 #include "Rendering/SurfaceShader.hpp"
 #include "Scene/Scene.hpp"
@@ -38,6 +40,7 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 namespace molten {
@@ -155,6 +158,11 @@ struct RenderSettings {
 
     bool shadowsEnabled = true;
     CascadeSettings cascades;
+    /// Point and spot lights' shadows (Light::castsShadows): the edge of each one's map in texels
+    /// (a point light has six), and how many lights may cast them at once, the nearest and
+    /// brightest first (Project Settings > Quality > Shadows).
+    int lightShadowResolution = 512;
+    int shadowedLights = 8;
     float shadowBias = 0.0001f;                 // in shadow-map depth, on top of the normal offset
     float shadowNormalOffset = 2.0f;            // in shadow-map texels; 2 covers the 3 x 3 filter
 
@@ -234,6 +242,9 @@ struct RenderSettings {
     // blue from square to square. Assets/Grading/Neutral 32.png changes nothing: paint over a
     // copy of it, or make one in a photo editor from a screenshot.
     std::string colorGrading;
+    /// The scene's baked light probes: a `.lighting` file in Assets (Lighting > Bake Light Probes
+    /// writes it beside the scene), or empty for none. The Engine reads it (Rendering/LightProbes.hpp).
+    std::string bakedLighting;
     float colorGradingAmount = 1.0f;
     /// Exposure that adapts, as an eye does: brighter in a tunnel, darker in the sun.
     bool autoExposure = false;
@@ -366,6 +377,7 @@ struct RenderStats {
     int culledObjects = 0;
     int lights = 0;
     int shadowCasters = 0;      // things whose shadow reaches the view: drawn into at least one cascade
+    int shadowedLights = 0;     // point and spot lights casting shadows in the picture (their maps drawn)
 
     /// Everything the GPU was asked to draw.
     int total() const { return drawCalls + shadowDraws + depthDraws + passes + overlayDraws; }
@@ -403,9 +415,25 @@ public:
     /// What floats on water and the wakes behind it, this frame (Kit/Wakes.hpp): the world's, set by the Engine.
     gpu::WaterWakes waterWakes{};
     RenderStats stats;                          // of the last frame: every picture drawn in it, together
+    /// The scene's baked light probes (Rendering/LightProbes.hpp), on the GPU from the next frame;
+    /// none (an empty BakedLighting) for the sky's light as it is everywhere. The first
+    /// MMMaxProbeVolumes grids are used.
+    void setLightProbes(const BakedLighting& baked);
+    size_t lightProbeCount() const { return lightProbeCount_; }
     /// What each pass of the last frames cost the GPU, in milliseconds (averaged), in the order they
     /// ran; nothing where the GPU cannot time its passes. The Profiler shows them.
     std::vector<GpuTimer::Pass> gpuPasses() const { return gpuTimer_ ? gpuTimer_->passes() : std::vector<GpuTimer::Pass>{}; }
+
+    // ---- meshes that move: skinned on the GPU, and refitted for ray tracing
+    /// Whether models with bones can be posed on the GPU (skin()): false until the kernel is
+    /// found, or once it was not; then they are posed on the processor as before.
+    bool canSkin() const { return canSkin_ && shaders_.isValid(); }
+    /// Poses `mesh` (made from `source`) by `palette` on the GPU, at the start of the next frame,
+    /// before anything is drawn.
+    void skin(const std::shared_ptr<Mesh>& mesh, const std::shared_ptr<const SkinSource>& source, std::vector<Mat4> palette);
+    /// A mesh whose vertices changed this frame (by the processor: Mesh::update): its ray-tracing
+    /// structure is refitted to them before the frame's rays are traced.
+    void meshMoved(const std::shared_ptr<Mesh>& mesh);
     /// What one of `views` took in the last frame (an editor shows the scene and the game side
     /// by side: each has its own numbers). Nothing for a view that was not drawn.
     RenderStats statsOfView(size_t index) const { return index < viewStats_.size() ? viewStats_[index] : RenderStats{}; }
@@ -500,6 +528,7 @@ private:
         AABB bounds;                            // in world space
         float distanceSquared = 0;              // from the camera
         bool castsShadows = true;
+        Mat4 previousWorld{};                   // where it was a frame ago (all zero: it was not drawn then)
     };
 
     /// One instanced draw call: `count` copies of a mesh with one material.
@@ -526,6 +555,12 @@ private:
     /// The cookies the lights of this picture ask for, in the array the shaders read: made again only
     /// when they are not the ones it holds.
     void updateCookies(MTL::CommandBuffer* commandBuffer);
+    /// Which point and spot lights cast shadows in this picture (those that asked, whose light reaches
+    /// what is seen, the nearest and brightest first, as many as the quality allows), and where each
+    /// view of each is in the atlas: written into `lights` (LightData::shadow) and lightShadowViews_.
+    void chooseLightShadows(gpu::LightData* lights, int count, const View& view);
+    /// Their shadow maps: what casts a shadow and is in each light's view, drawn into its square.
+    void renderLightShadows(MTL::CommandBuffer* commandBuffer, const std::vector<DrawItem>& items);
     /// The light the volumetric lights give the air, over the whole picture (fragment_lights_in_air).
     void drawLightsInAir(MTL::RenderCommandEncoder* encoder);
     std::vector<Batch> makeBatches(std::vector<const DrawItem*>& items, bool sortByState);
@@ -640,6 +675,16 @@ private:
     dispatch_semaphore_t frameSemaphore_;
     std::atomic<float> lastGpuMilliseconds_{0};
     std::unique_ptr<GpuTimer> gpuTimer_;            // what each pass costs the GPU, where it can say
+    struct SkinJob {
+        std::shared_ptr<Mesh> mesh;
+        std::shared_ptr<const SkinSource> source;
+        std::vector<Mat4> palette;
+    };
+    std::vector<SkinJob> skinJobs_;                 // to pose at the start of the next frame
+    std::vector<std::shared_ptr<Mesh>> movedMeshes_;    // to refit then
+    bool canSkin_ = true;
+    void poseSkinnedMeshes(MTL::CommandBuffer* commandBuffer);
+    void refitMovedMeshes(MTL::CommandBuffer* commandBuffer);
     /// A pass's encoder, its time taken by the GPU timer under `name`, which is also its label.
     MTL::RenderCommandEncoder* encoderFor(MTL::CommandBuffer* commandBuffer, MTL::RenderPassDescriptor* pass, const char* name);
     float dynamicScale_ = 1.0f;
@@ -692,6 +737,16 @@ private:
     bool tracedAmbientDrawn_ = false;               // the light around things is in tracedLightDrawn_ (and not only the surfaces, for the sun)
     Vec2 cloudDrift_{0, 0};             // how far the wind has carried the clouds, in their units of 2.4 km
     double cloudDriftTime_ = -1;
+    // Where each thing drawn was the frame before (by its entity, and its copy for MeshInstances):
+    // how fast it moves, for the rain on it and for motion vectors. Kept for two frames.
+    struct Motion {
+        Mat4 last, now;
+        uint64_t frame = 0;
+    };
+    mutable std::unordered_map<uint64_t, Motion> motion_;
+    Mat4 previousPlace(uint64_t key, const Mat4& now) const;
+    double lastFrameTime_ = -1.0;
+    float frameDelta_ = 0.0f;                       // seconds between the last two frames
     mutable Vec3 sunAtNoon_{0, 0, 0};               // the sun's light before the air takes any of it: what the fog's color is for
     // Spot lights' cookies (Light::cookie): the pictures asked for by the lights of this picture, a
     // slice each, and the array they were last put in, with what it was made of (a picture read
@@ -716,6 +771,14 @@ private:
     NS::SharedPtr<MTL::Texture> cloudShape_, cloudDetail_;      // the two blocks of noise, on the GPU
     std::vector<NS::SharedPtr<MTL::Texture>> bloom_;
     NS::SharedPtr<MTL::Texture> shadowMap_;
+    // Point and spot lights' shadow maps, side by side in one depth texture (chooseLightShadows).
+    NS::SharedPtr<MTL::Texture> lightShadowAtlas_;
+    gpu::LightShadowViews lightShadowViews_{};
+    gpu::ProbeVolumes probeVolumes_{};
+    NS::SharedPtr<MTL::Buffer> probes_;             // six float4 a probe; one probe's worth of nothing when there are none
+    size_t lightProbeCount_ = 0;
+    int lightShadowViewCount_ = 0;
+    int lightShadowTile_ = 0;                       // the edge of each square, in texels
     int shadowMapSize_ = 0, shadowMapSlices_ = 0;
     NS::SharedPtr<MTL::Texture> rainMap_;           // the scene from above, while it rains (renderRainMap)
     bool rainMapDrawn_ = false;                     // for the picture being drawn

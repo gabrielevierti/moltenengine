@@ -38,14 +38,12 @@ static float cloudNoise(float2 p) {
 }
 
 // How much flat cloud there is at a place `p` of the layer (its own units: about a kilometer), and
-// below what it is clear sky (`threshold`). Read in the wind's frame, drawn out along it; bent,
-// so that the noise's pattern does not show; and, the fewer the clouds, the more they gather in
-// groups between clear stretches instead of standing evenly over the sky.
+// below what it is clear sky (`threshold`). Bent, so that the noise's pattern does not show; and,
+// the fewer the clouds, the more they gather in groups between clear stretches instead of standing
+// evenly over the sky. (The wind only carries them: their shapes are fixed to the sky, so that a
+// change of wind moves them on from where they are instead of reshaping the whole sky.)
 static float flatCloudAt(float2 p, constant FrameUniforms &frame, thread float &threshold) {
-    float speed = length(frame.cloudWind);
-    float2 along = speed > 0.1 ? frame.cloudWind / speed : float2(1.0, 0.0);
-    float stretch = 1.0 + min(speed, 30.0) * 0.033;
-    float2 q = float2(dot(p, along) / stretch, dot(p, float2(-along.y, along.x)));
+    float2 q = p;
     q += (float2(cloudValueNoise(q * 0.31 + 3.1), cloudValueNoise(q * 0.31 + 8.7)) - 0.5) * 1.1;
     float group = cloudValueNoise(q * 0.17 + float2(21.0, 5.0));
     float coverage = frame.cloudCoverage;
@@ -404,7 +402,7 @@ fragment float4 fragment_sky(SkyOut in [[stage_in]],
 // reaches), what the air scatters toward the eye of that light, added to the picture. A light is
 // walked only where its sphere is crossed, in steps spread as its light falls off (as many for each
 // angle seen from the light: "equiangular"), so that the glow right by a lamp is not missed; a spot
-// light's cone and cookie are looked up at each. The air is thicker where the fog is (and low,
+// light's cone, cookie and shadow are looked up at each. The air is thicker where the fog is (and low,
 // if the fog lies low), and what is farther is dimmed by the fog in front of it. Scattered forward
 // more than back, as by haze: brightest looking toward the light.
 // (Drawn over the whole picture, nearer than anything: z is 0.)
@@ -459,7 +457,10 @@ fragment float4 fragment_lights_in_air(SkyOut in [[stage_in]],
                                        constant LightData *lights [[buffer(MMBufferLights)]],
                                        depth2d<float> sceneDepth [[texture(MMTextureSceneDepth)]],
                                        texture2d_array<float> cookies [[texture(MMTextureLightCookies)]],
-                                       sampler linearSampler [[sampler(MMSamplerLinearClamp)]]) {
+                                       constant LightShadowViews &lightShadows [[buffer(MMBufferLightShadows)]],
+                                       depth2d<float> lightShadowAtlas [[texture(MMTextureLightShadows)]],
+                                       sampler linearSampler [[sampler(MMSamplerLinearClamp)]],
+                                       sampler shadowSampler [[sampler(MMSamplerShadow)]]) {
     if (hasSea(frame) && frame.cameraUnderwater > 0.0) return float4(0.0);       // in the water there is no air to light
     float3 eye = pass.cameraPosition;
     float3 d = normalize(in.direction);
@@ -515,6 +516,8 @@ fragment float4 fragment_lights_in_air(SkyOut in [[stage_in]],
             float thick = frame.fogHeightFalloff > 0.00001 ? exp(clamp(-frame.fogHeightFalloff * at.y, -40.0, 40.0)) : 1.0;
             float3 seen = float3(lit * phase * thick * exp(-frame.fogDensity * thick * t));
             if (light.cookie > 0.5) seen *= lightCookie(light, at, cookies, linearSampler, 1.0);
+            // What stands in its way shades the air behind it too: beams through a window, the dark behind a pillar.
+            if (light.shadow > 0.5) seen *= lightShadow(light, at, float3(0.0), lightShadows, lightShadowAtlas, shadowSampler);
             sum += seen;
         }
         total += light.color * light.volumetric * sum * ((a1 - a0) / (h * float(steps)));

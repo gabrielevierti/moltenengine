@@ -5,8 +5,10 @@
 
 #include "API/EditorAPI.hpp"
 #include "ImGuiLayer.hpp"
+#include "Icons.hpp"
 
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <misc/cpp/imgui_stdlib.h>
 
 #include <algorithm>
@@ -33,8 +35,21 @@ inline void label(const char* text) {
     ImGui::AlignTextToFramePadding();
     // As in ImGui, what follows "##" tells two rows with the same label apart and is not shown.
     const char* end = std::strstr(text, "##");
-    ImGui::TextUnformatted(text, end);
-    ImGui::SameLine(std::max(110.0f, ImGui::GetContentRegionAvail().x * 0.36f));
+    const float column = std::max(110.0f, ImGui::GetContentRegionAvail().x * 0.38f);
+    // From where the label starts (inside a folded section it is indented) to the control's column.
+    const float room = column - ImGui::GetCursorPosX() - ImGui::GetStyle().ItemSpacing.x;
+    if (ImGui::CalcTextSize(text, end).x <= room) {
+        ImGui::TextUnformatted(text, end);
+    } else {
+        // Too long for its column: cut with an ellipsis rather than under the control, and said
+        // whole when the pointer rests on it.
+        ImVec2 at = ImGui::GetCursorScreenPos();
+        const float height = ImGui::GetTextLineHeight();
+        ImGui::Dummy(ImVec2(room, height));
+        ImGui::RenderTextEllipsis(ImGui::GetWindowDrawList(), at, ImVec2(at.x + room, at.y + height), at.x + room, text, end, nullptr);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%.*s", int(end ? end - text : std::strlen(text)), text);
+    }
+    ImGui::SameLine(column);
     ImGui::SetNextItemWidth(-FLT_MIN);
 }
 
@@ -226,20 +241,38 @@ inline bool section(const char* name) {
 /// The kind of icon a component gets, from its name (the built-in ones) or its category.
 inline std::string iconKindOf(const std::string& name, const std::string& category = {}) {
     auto has = [&](const char* word) { return name.find(word) != std::string::npos; };
+    // The built-in ones, each its own; anything else by its category. A name names a Lucide icon
+    // (Icons.hpp) or one of iconLookOf's kinds, which also give it its color.
     if (name == "Transform") return "axes";
     if (has("Mesh Renderer") || has("MeshRenderer")) return "cube";
+    if (has("LOD")) return "layers";
     if (has("Light") && !has("Lights")) return "light";
+    if (has("Reflection") || has("Probe")) return "aperture";
     if (has("Camera")) return "camera";
     if (has("Collider")) return "collider";
-    if (has("Rigid") || has("Joint") || has("Buoyancy")) return "physics";
+    if (has("Cloth")) return "flag";
+    if (has("Buoyancy")) return "anchor";
+    if (has("Rigid") || has("Joint") || has("Force")) return "physics";
     if (has("Particle") || has("Explosion") || has("Flicker")) return "spark";
-    if (has("Audio") || has("Sound")) return "audio";
+    if (has("Trail")) return "wind";
+    if (has("Audio") || has("Sound") || has("Music")) return "audio";
     if (has("Animator") || has("Animation") || has("IK")) return "anim";
-    if (has("Character") || has("Ragdoll")) return "person";
-    if (has("Vehicle") || has("Wheel") || has("Motor") || has("Boat")) return "wheel";
+    if (has("Character") || has("Ragdoll") || has("Player")) return "person";
+    if (has("Boat") || has("Ship") || has("Sail")) return "sailboat";
+    if (has("Plane") || has("Aircraft") || has("Flight")) return "plane";
+    if (has("Vehicle") || has("Wheel") || has("Motor") || has("Car")) return "car";
     if (has("Spline") || has("Road") || has("Path")) return "spline";
+    if (has("Terrain")) return "mountain";
+    if (has("Foliage") || has("Tree") || has("Grass")) return "trees";
+    if (has("Water") || has("Sea") || has("Ocean")) return "waves";
+    if (has("Weather") || has("Wind")) return "cloud-sun";
     if (has("Visual Script") || has("VisualScript")) return "graph";
-    if (category == "UI" || has("UI") || has("Hud") || has("Touch")) return "ui";
+    if (has("Network")) return "wifi";
+    if (has("Weapon") || has("Health") || has("Damage")) return "target";
+    if (has("Pickup") || has("Inventory")) return "package";
+    if (has("Trigger")) return "square-dashed";
+    if (has("Text") || has("Label")) return "type";
+    if (category == "UI" || has("UI") || has("Hud") || has("Touch") || has("Button")) return "ui";
     if (category == "Environment") return "leaf";
     if (category == "Logic") return "logic";
     if (category == "Effects") return "spark";
@@ -247,96 +280,144 @@ inline std::string iconKindOf(const std::string& name, const std::string& catego
     if (category == "Physics") return "physics";
     if (category == "Audio") return "audio";
     if (category == "Animation") return "anim";
-    if (category == "Vehicles") return "wheel";
+    if (category == "Vehicles") return "car";
     return "code";                      // a game's own script
 }
 
-/// Draws a small line icon of a kind (see iconKindOf), centred at `c`, `s` points across.
-inline void drawIcon(ImDrawList* d, ImVec2 c, float s, const std::string& kind, ImU32 color) {
-    float r = s * 0.5f, t = std::max(1.2f, s / 11.0f);
-    auto P = [&](float x, float y) { return ImVec2(c.x + x * r, c.y + y * r); };
-    if (kind == "axes") {
-        d->AddLine(P(-0.7f, 0.7f), P(0.8f, 0.7f), IM_COL32(230, 90, 80, 255), t);
-        d->AddLine(P(-0.7f, 0.7f), P(-0.7f, -0.85f), IM_COL32(120, 210, 110, 255), t);
-        d->AddLine(P(-0.7f, 0.7f), P(0.2f, -0.1f), IM_COL32(90, 150, 255, 255), t);
-    } else if (kind == "cube") {
-        ImVec2 top[4] = {P(0, -0.9f), P(0.85f, -0.45f), P(0, 0), P(-0.85f, -0.45f)};
-        d->AddPolyline(top, 4, color, ImDrawFlags_Closed, t);
-        d->AddLine(P(-0.85f, -0.45f), P(-0.85f, 0.45f), color, t);
-        d->AddLine(P(0.85f, -0.45f), P(0.85f, 0.45f), color, t);
-        d->AddLine(P(0, 0), P(0, 0.9f), color, t);
-        d->AddLine(P(-0.85f, 0.45f), P(0, 0.9f), color, t);
-        d->AddLine(P(0.85f, 0.45f), P(0, 0.9f), color, t);
-    } else if (kind == "light") {
-        d->AddCircle(P(0, -0.15f), r * 0.5f, IM_COL32(255, 210, 90, 255), 12, t);
-        d->AddLine(P(-0.25f, 0.55f), P(0.25f, 0.55f), color, t);
-        d->AddLine(P(-0.18f, 0.8f), P(0.18f, 0.8f), color, t);
-    } else if (kind == "camera") {
-        d->AddRect(P(-0.9f, -0.45f), P(0.35f, 0.55f), color, 1.5f, 0, t);
-        ImVec2 lens[3] = {P(0.35f, 0.05f), P(0.9f, -0.4f), P(0.9f, 0.5f)};
-        d->AddPolyline(lens, 3, color, ImDrawFlags_Closed, t);
-    } else if (kind == "collider") {
-        d->AddRect(P(-0.8f, -0.8f), P(0.8f, 0.8f), IM_COL32(120, 220, 120, 255), 0.0f, 0, t);
-        d->AddLine(P(-0.8f, -0.8f), P(0.8f, 0.8f), IM_COL32(120, 220, 120, 140), t * 0.8f);
-    } else if (kind == "physics") {
-        d->AddCircle(P(0, 0.1f), r * 0.75f, color, 14, t);
-        d->AddLine(P(0, -0.65f), P(0, -1.0f), color, t);
-        d->AddLine(P(-0.35f, -0.95f), P(0.35f, -0.95f), color, t);
-    } else if (kind == "spark") {
-        for (int i = 0; i < 4; i++) {
-            float a = float(i) * 0.785398f;
-            d->AddLine(P(std::cos(a) * 0.9f, std::sin(a) * 0.9f), P(-std::cos(a) * 0.9f, -std::sin(a) * 0.9f), IM_COL32(255, 170, 70, 255), t);
-        }
-    } else if (kind == "audio") {
-        ImVec2 cone[4] = {P(-0.9f, -0.3f), P(-0.4f, -0.3f), P(0.15f, -0.8f), P(0.15f, 0.8f)};
-        d->AddPolyline(cone, 4, color, 0, t);
-        d->AddLine(P(0.15f, 0.8f), P(-0.4f, 0.3f), color, t);
-        d->AddLine(P(-0.4f, 0.3f), P(-0.9f, 0.3f), color, t);
-        d->AddLine(P(-0.9f, 0.3f), P(-0.9f, -0.3f), color, t);
-        d->PathArcTo(P(0.15f, 0), r * 0.55f, -0.9f, 0.9f, 8);
-        d->PathStroke(color, 0, t);
-    } else if (kind == "anim") {
-        ImVec2 dia[4] = {P(0, -0.85f), P(0.85f, 0), P(0, 0.85f), P(-0.85f, 0)};
-        d->AddConvexPolyFilled(dia, 4, IM_COL32(255, 175, 90, 255));
-    } else if (kind == "person") {
-        d->AddCircle(P(0, -0.55f), r * 0.32f, color, 10, t);
-        d->PathArcTo(P(0, 0.9f), r * 0.75f, 3.4f, 6.02f, 10);
-        d->PathStroke(color, 0, t);
-    } else if (kind == "wheel") {
-        d->AddCircle(c, r * 0.85f, color, 14, t);
-        d->AddCircle(c, r * 0.3f, color, 8, t);
-    } else if (kind == "spline") {
-        d->AddBezierCubic(P(-0.9f, 0.7f), P(-0.3f, -1.3f), P(0.3f, 1.3f), P(0.9f, -0.7f), color, t);
-    } else if (kind == "graph") {
-        d->AddRect(P(-0.95f, -0.75f), P(-0.25f, -0.15f), color, 1.0f, 0, t);
-        d->AddRect(P(0.25f, 0.15f), P(0.95f, 0.75f), color, 1.0f, 0, t);
-        d->AddBezierCubic(P(-0.25f, -0.45f), P(0.1f, -0.45f), P(-0.1f, 0.45f), P(0.25f, 0.45f), IM_COL32(255, 140, 60, 255), t);
-    } else if (kind == "ui") {
-        d->AddRect(P(-0.9f, -0.7f), P(0.9f, 0.7f), color, 2.0f, 0, t);
-        d->AddLine(P(-0.55f, -0.2f), P(0.55f, -0.2f), color, t);
-        d->AddLine(P(-0.55f, 0.2f), P(0.15f, 0.2f), color, t);
-    } else if (kind == "leaf") {
-        d->PathArcTo(P(0.5f, 0.5f), r * 1.2f, 3.4f, 4.9f, 10);
-        d->PathArcTo(P(-0.5f, -0.5f), r * 1.2f, 0.25f, 1.75f, 10);
-        d->PathStroke(IM_COL32(120, 210, 120, 255), ImDrawFlags_Closed, t);
-    } else if (kind == "logic") {
-        d->AddLine(P(-0.9f, 0), P(-0.2f, 0), color, t);
-        d->AddLine(P(-0.2f, 0), P(0.6f, -0.65f), color, t);
-        d->AddLine(P(-0.2f, 0), P(0.6f, 0.65f), color, t);
-        d->AddCircleFilled(P(0.65f, -0.65f), r * 0.18f, color);
-        d->AddCircleFilled(P(0.65f, 0.65f), r * 0.18f, color);
-    } else if (kind == "eye") {
-        d->PathArcTo(P(0, 0.9f), r * 1.25f, 3.85f, 5.57f, 10);
-        d->PathArcTo(P(0, -0.9f), r * 1.25f, 0.71f, 2.43f, 10);
-        d->PathStroke(color, ImDrawFlags_Closed, t);
-        d->AddCircleFilled(c, r * 0.25f, color);
-    } else if (kind == "material") {
-        d->AddCircleFilled(c, r * 0.85f, IM_COL32(90, 140, 190, 255), 16);
-        d->AddCircleFilled(P(-0.3f, -0.3f), r * 0.28f, IM_COL32(220, 235, 255, 200), 10);
-    } else {
-        // Code: { }
-        d->AddText(ImVec2(c.x - r * 0.95f, c.y - ImGui::GetFontSize() * 0.5f), IM_COL32(110, 200, 210, 255), "{}");
+/// The icon that stands for a kind of thing (iconKindOf's words, or any Lucide name: "folder"),
+/// and the color it is drawn in when it has one of its own (0: the color it is given).
+struct IconLook {
+    const char* glyph = nullptr;
+    ImU32 tint = 0;
+};
+inline IconLook iconLookOf(const std::string& kind) {
+    struct Entry {
+        const char* kind;
+        const char* glyph;
+        ImU32 tint;
+    };
+    static const Entry kinds[] = {
+        {"axes", icon::Move3d, 0},
+        {"cube", icon::Box, IM_COL32(110, 160, 235, 255)},
+        {"light", icon::Lightbulb, IM_COL32(255, 205, 90, 255)},
+        {"sun", icon::Sun, IM_COL32(255, 205, 90, 255)},
+        {"camera", icon::Video, IM_COL32(120, 205, 140, 255)},
+        {"collider", icon::SquareDashed, IM_COL32(120, 215, 130, 255)},
+        {"physics", icon::Atom, 0},
+        {"spark", icon::Sparkles, IM_COL32(255, 160, 70, 255)},
+        {"audio", icon::Volume2, 0},
+        {"anim", icon::Clapperboard, IM_COL32(255, 170, 90, 255)},
+        {"person", icon::PersonStanding, 0},
+        {"wheel", icon::Car, 0},
+        {"spline", icon::Spline, 0},
+        {"graph", icon::Workflow, IM_COL32(255, 140, 60, 255)},
+        {"ui", icon::LayoutTemplate, 0},
+        {"leaf", icon::Sprout, IM_COL32(120, 205, 120, 255)},
+        {"logic", icon::GitBranch, 0},
+        {"eye", icon::Eye, 0},
+        {"material", icon::Palette, IM_COL32(110, 165, 225, 255)},
+        {"code", icon::Braces, IM_COL32(110, 200, 210, 255)},
+        {"move", icon::Move, 0},
+        {"rotate", icon::Rotate3d, 0},
+        {"scale", icon::Scaling, 0},
+        {"all", icon::Move3d, 0},
+        {"magnet", icon::Magnet, 0},
+        {"grid", icon::Grid3x3, 0},
+        {"folder", icon::Folder, IM_COL32(230, 180, 90, 255)},
+    };
+    for (const Entry& entry : kinds) {
+        if (kind == entry.kind) return {entry.glyph, entry.tint};
     }
+    if (const char* glyph = icon::named(kind)) return {glyph, 0};
+    return {icon::Braces, IM_COL32(110, 200, 210, 255)};      // a game's own script
+}
+
+/// Draws an icon (see iconLookOf), centred at `c`, `s` points across: in its own color if it has
+/// one, else in `color`. Pass `ownColor` false to always draw it in `color`.
+inline void drawIcon(ImDrawList* d, ImVec2 c, float s, const std::string& kind, ImU32 color, bool ownColor = true) {
+    IconLook look = iconLookOf(kind);
+    ImFont* font = ImGuiLayer::iconFont();
+    if (!font || !look.glyph) return;
+    ImU32 ink = ownColor && look.tint ? look.tint : color;
+    // Keep the color's own transparency (a faded row fades its icon too).
+    if (ownColor && look.tint) ink = (ink & 0x00FFFFFFu) | (color & 0xFF000000u);
+    ImVec2 size = font->CalcTextSizeA(s, FLT_MAX, 0.0f, look.glyph);
+    d->AddText(font, s, ImVec2(std::round(c.x - size.x * 0.5f), std::round(c.y - size.y * 0.5f)), ink, look.glyph);
+}
+
+// ---- the editor's windows: an icon on each tab, the same window whatever its tab shows
+
+/// The icon on the tab of a window of the editor, by its title; nullptr for none.
+inline const char* windowIcon(const std::string& title) {
+    static const std::pair<const char*, const char*> icons[] = {
+        {"Scene", icon::Box},          {"Game", icon::Gamepad2},        {"Hierarchy", icon::ListTree},
+        {"Inspector", icon::SlidersHorizontal}, {"Explorer", icon::FolderTree}, {"Console", icon::TerminalSquare},
+        {"Lighting", icon::Lightbulb},  {"Environment", icon::CloudSun}, {"Rendering", icon::Aperture},
+        {"Post Processing", icon::WandSparkles}, {"Animation", icon::Film}, {"Timeline", icon::GanttChart}, {"Animator", icon::Clapperboard},
+        {"Visual Script", icon::Workflow}, {"Shader Graph", icon::Blocks}, {"Profiler", icon::Activity}, {"Source Control", icon::GitBranch},
+        {"Scene Weight", icon::Weight},   {"Manual", icon::BookOpen},      {"Project Settings", icon::Settings},
+        {"Input", icon::Gamepad2},      {"Preferences", icon::Settings2}, {"Build Settings", icon::Hammer},
+    };
+    for (const auto& entry : icons) {
+        if (title == entry.first) return entry.second;
+    }
+    return nullptr;
+}
+
+/// What ImGui knows an editor window by: its title alone ("###Hierarchy"), whatever its tab shows.
+/// Look a window up, dock it or focus it by this.
+inline std::string windowId(const std::string& title) {
+    return "###" + title;
+}
+
+/// What a window's tab shows: its icon and its title. Known by windowId(title), so what it shows
+/// may change. In a row of tabs too narrow for every title, the tabs behind show their icon alone
+/// (windowTabTip puts the title over them) and the one in front keeps its title.
+/// Whether a window's tab shows its icon alone: it is behind others in a row too narrow for all
+/// their titles. (Such a tab has no close button either: the one in front has, and the tab's menu.)
+inline bool isCompactTab(const std::string& title) {
+    if (!windowIcon(title)) return false;
+    ImGuiWindow* window = ImGui::FindWindowByName(windowId(title).c_str());
+    ImGuiDockNode* node = window ? window->DockNode : nullptr;
+    return node && node->TabBar && node->Windows.Size > 1 && node->TabBar->SelectedTabId != window->TabId &&
+           node->Size.x / float(node->Windows.Size) < 120.0f;
+}
+
+inline std::string windowName(const std::string& title) {
+    const char* glyph = windowIcon(title);
+    const std::string id = windowId(title);
+    if (!glyph) return title + id;
+    if (isCompactTab(title)) return std::string(glyph) + id;
+    return std::string(glyph) + "  " + title + id;
+}
+
+/// Between a window's Begin and End: its title over its tab while the mouse rests there (a tab
+/// that shows its icon alone says what it is).
+inline void windowTabTip(const std::string& title) {
+    ImGuiContext& g = *ImGui::GetCurrentContext();
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    if (window->DockIsActive && window->TabId != 0 && g.HoveredId == window->TabId && g.HoveredIdTimer > 0.45f) ImGui::SetTooltip("%s", title.c_str());
+}
+
+/// Saved window settings (imgui.ini, a saved layout) from before the windows had icons: each
+/// "[Window][Hierarchy]" made "[Window][###Hierarchy]", the name the window has now, so that it
+/// keeps its place. Windows whose names have "##" in them already are left as they are.
+inline std::string withWindowIds(std::string ini) {
+    const std::string tag = "[Window][";
+    for (size_t at = ini.find(tag); at != std::string::npos; at = ini.find(tag, at + tag.size())) {
+        size_t start = at + tag.size(), end = ini.find(']', start);
+        if (end == std::string::npos) break;
+        std::string name = ini.substr(start, end - start);
+        // Only the editor's own windows: not ImGui's (its dock space's host, its Debug window).
+        if (name.empty() || name.find("##") != std::string::npos || name.rfind("WindowOverViewport", 0) == 0 || name.rfind("Debug", 0) == 0) continue;
+        ini.insert(start, "###");
+    }
+    return ini;
+}
+
+/// Text with an icon before it, for a label or a menu: "<icon>  Lighting".
+inline std::string withIcon(const char* glyph, const char* text) {
+    return std::string(glyph) + "  " + text;
 }
 
 /// A row of a list with an icon before its words (a page of settings, a kind of thing to show): the

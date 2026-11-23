@@ -1,5 +1,5 @@
 // AnimationPanel.cpp
-// The Timeline window, as in Unity's Animation window: the animations of the chosen entity (each
+// The Animation window, as in Unity's: the animations of the chosen entity (each
 // made for it, and for nothing else), their tracks (a property of it, or of an entity under it,
 // along time) and their keys. Press Record: where things are is kept at the playhead; click
 // another time and change things in the Inspector or move them in the view: each change is a key
@@ -34,8 +34,8 @@ const ImU32 kEventColor = IM_COL32(120, 200, 255, 255);
 class AnimationPanel final : public Panel {
 public:
     AnimationPanel() {
-        title = "Timeline";
-        isOpen = false;                 // Window > Timeline, or Open Timeline on an Animator
+        title = "Animation";
+        isOpen = false;                 // Window > Animation, or Open Animation on an Animator
     }
 
     void draw(EditorContext& editor) override {

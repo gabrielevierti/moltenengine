@@ -1,9 +1,11 @@
 // SurfaceShader.cpp
 #include "Rendering/SurfaceShader.hpp"
+#include "Rendering/ShaderGraph.hpp"
 
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
+#include <optional>
 #include <sstream>
 
 namespace molten {
@@ -210,6 +212,21 @@ void SurfaceShaderSet::read(size_t index) {
     }
     std::stringstream text;
     text << file.rdbuf();
+    if (std::filesystem::path(name).extension() == ".shadergraph") {
+        // Drawn, not written: the code is made from the graph (ShaderGraph.hpp).
+        std::string error;
+        std::optional<script::Graph> graph = script::Graph::fromText(text.str());
+        std::string code;
+        if (graph) {
+            graph->library = &shaderNodes();
+            code = shaderTextFromGraph(*graph, name, &error);
+        } else {
+            error = "not a shader graph";
+        }
+        shaders_[index] = SurfaceShader::parse(name, code.empty() ? "Surface surface(Surface s, Input in, Props props) { return s; }\n" : code);
+        if (!error.empty()) shaders_[index].error = error;
+        return;
+    }
     shaders_[index] = SurfaceShader::parse(name, text.str());
 }
 

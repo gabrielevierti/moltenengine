@@ -81,7 +81,7 @@ public:
             ImGui::SameLine();
             ImGui::TextDisabled("  on %s", editor.scene.nameOf(owner).c_str());
             ImGui::SameLine();
-            if (ImGui::SmallButton("Open Timeline")) editor.openPanel("Timeline");
+            if (ImGui::SmallButton("Open Animation")) editor.openPanel("Animation");
             ui::tooltip("Its animations, to key");
         }
 
@@ -630,7 +630,7 @@ private:
                 animator->animations += (animator->animations.empty() ? "" : ", ") + path;
                 editor.scene.markChanged();
                 make("Procedural", path, false);
-                editor.notify("Turned by \"amount\": animator->setFloat(\"amount\", v). Change what it moves in the Timeline (right click its track)");
+                editor.notify("Turned by \"amount\": animator->setFloat(\"amount\", v). Change what it moves in the Animation window (right click its track)");
             }
         }
         ui::tooltip("An animation that moves by itself as a parameter says: turned, moved or scaled as the game sets a number");
