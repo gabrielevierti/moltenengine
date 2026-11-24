@@ -6,12 +6,6 @@ when a game needs it.
 
 `[x]` done · `[~]` started, works, not finished · `[ ]` to do
 
----
-
-## Already there
-
-The base the rest builds on. Each `[~]` says what it still lacks.
-
 **Core**
 - [x] Entities and components, with fields the editor reads (reflection: `MOLTEN_FIELD`)
 - [x] Scenes saved as text and read back; prefabs
@@ -66,8 +60,6 @@ The base the rest builds on. Each `[~]` says what it still lacks.
 
 ---
 
-## 1.1 — Everything works with everything
-
 - [x] The launcher: the logo poured in, the projects on the left, the chosen one shown and asked about before it opens; loading screens for opening a project, a scene, building the code and exporting
 - [x] The editor is an application with its icon (build/Molten Metal Engine.app); the engine finds its own files from the build folder
 - [x] The Explorer: several chosen at once, Delete to the Trash, Cut and Paste and Move To, dragging many; scenes, prefabs and materials follow a file that moves
@@ -77,9 +69,6 @@ The base the rest builds on. Each `[~]` says what it still lacks.
 - [x] Particle systems made of modules as in Unity; no presets to start from; local or world space; a smooth line behind a moving emitter; buoyancy, curl noise, soft and lit particles
 - [x] The night lit by the moon; heaped clouds lit gold at sunset; lens dirt
 - [x] The interface's basic pieces only, and a Toggle
-
-## 1.2 — A game from the first minute
-
 - [x] The launcher again: the projects on the left, the chosen one's scenes, files and numbers on the right, a progress bar that fills smoothly
 - [x] Six templates to start from, none with code of its own: a car, a plane, a boat, a figure seen from behind (walking, running and jumping, animated), a rifle seen from the eyes, and the garden for several players
 - [x] Each template made by the tests and played by them to its end, without a screen
@@ -90,9 +79,6 @@ The base the rest builds on. Each `[~]` says what it still lacks.
 - [x] Clouds with depth, marched; water seen through; ray traced light at about a ray a pixel
 - [x] Quality in seven groups and four levels, which a scene's own settings cannot exceed; dynamic resolution that works
 - [x] Draw calls counted by kind (the scene's own, its shadows, depth, full-screen passes), and fewer of them: the sun's shadow cascades in one pass, and no shadow pass where nothing casts one
-
-## 1.3 — Light, weather, cloth, and an editor that says what it does
-
 - [x] Shadows for point and spot lights: the nearest and brightest of them, in one atlas, as many as the quality allows
 - [x] Spot light cookies (a picture the light shines through) and lights seen in the air: beams in fog and dust
 - [x] Rain that runs down what it falls on, pulled by its weight, pushed by the wind and by the object's own speed; beads on paint, soaking into stone; snow that settles
@@ -110,12 +96,8 @@ The base the rest builds on. Each `[~]` says what it still lacks.
 - [x] Light Probe Volumes: light baked into probes round a room or a building (how much sky each place sees, and what the walls throw back), so that indoors is as dark as its windows make it
 - [x] Stable formats: every file says its version, a reader skips what is newer within one, and a newer version is refused with a message (Docs/FileFormats.md); an API reference made from the headers (Docs/API.md, Tools/make_api_docs.py)
 - [x] The logo and the icon drawn again as vectors (Tools/make_branding.py), sharp at any size
-
-## Phase 1 — Fast, and shippable
-
 What the Driving game needs now: it runs at 30–40 fps in the editor with 1000 draw calls, and it cannot yet
 reach the App Store.
-
 - [x] **CPU profiler**: time per part of the frame and per kind of component, five seconds of history, a frame held to
       look at (Window > Profiler); the slowest parts in the F1 overlay of a running game
 - [~] **GPU profiler**: the GPU's time per frame and per render pass (Metal counters, Profiler > Frame) — [ ] draw calls and triangles per pass
@@ -134,11 +116,6 @@ reach the App Store.
 - [x] **Game controllers**: on the Mac through GLFW, on iPhone and iPad through the Game Controller framework, mapped to the
       same input actions as keys and touch
 - [x] **Thermal state and Low Power Mode**: `world.deviceHeat()`, `world.isSavingBattery()`; hot, the scene is drawn smaller by itself
-
-## Phase 2 — Games with characters
-
-The next game after Driving: someone who walks, runs and jumps.
-
 - [x] **Character controller**: a capsule moved, not pushed: slides along walls, climbs steps (their edges hold it as
       it goes up), stands on slopes it can walk and slides off steeper ones, shoves bodies that move
 - [x] **Character mover and orbit camera**: walk and run where the input says, seen from the camera; jump, with a moment's
@@ -167,9 +144,6 @@ The next game after Driving: someone who walks, runs and jumps.
       (Unpack Prefab makes it the scene's own); a variant is its base with some values changed (Create Variant).
       [x] A copy's own changes: a part changed in the Inspector or moved in the Scene view keeps it, saved with the copy
       [ ] Overrides on a placed copy, edited in the Inspector
-
-## Phase 3 — How it looks
-
 - [~] [x] **Light probes** (1.3: Light Probe Volumes, baked on the processor: the sky each place sees and the light bounced to it) — [ ] **reflection probes**: what shiny things mirror indoors, for scenes and devices without ray tracing
 - [~] **Baked lighting** for static scenes: [x] into probes (1.3) — [ ] into lightmaps, for sharp baked shadows
 - [ ] **Clustered lights**: many point and spot lights at once
@@ -181,9 +155,6 @@ The next game after Driving: someone who walks, runs and jumps.
 - [ ] **Ray tracing denoiser**; shadows of point and spot lights traced
 - [x] **Shader Graph** (1.3): shaders drawn as nodes (`.shadergraph`, Window > Shader Graph), made into surface shaders by the engine, beside the hand-written ones
 - [x] **Water**: refraction and depth colour, shores
-
-## Phase 4 — Working in the editor
-
 - [x] **Search everywhere and a command palette** (Cmd+K): actions, windows, Create, entities (with where they are), assets, plugins' menu items
 - [x] **Asset dependencies**: what uses what, shown in the Viewer; unused assets found
 - [x] **Hot reload of every asset**: textures, models, sounds, materials as they change on disk, in the editor (shaders already were)
@@ -200,11 +171,6 @@ The next game after Driving: someone who walks, runs and jumps.
 - [ ] Scenes written to merge well (parents by name, not by number)
 - [ ] **Frame debugger**: the passes of one frame, each one's result, step by step
 - [x] **Keyboard shortcut editor**, editor themes (Edit > Preferences)
-
-## Phase 6 — Making games faster
-
-What every game would otherwise write for itself, in the order they are done.
-
 - [x] **Messages between scripts**: `world.send("doorOpened")`, heard by components (onMessage), by code that listens, by visual scripts (On Message, Send Message)
 - [x] **Waiting**: `world.after`, `every`, `when`, and coroutines (`co_await world.seconds(2)`); Wait and Wait Until nodes
 - [x] **Triggers and actions without code**: When / Then (Add Component > Logic): when something enters, a message, a value, a click, every few seconds; then up to four things
@@ -229,11 +195,6 @@ What every game would otherwise write for itself, in the order they are done.
 - [x] **Depth of field** and **motion blur** of the camera
 - [x] **Grass and trees moved by the wind**: a material's Sway, with the scene's wind
 - [x] **A sky from the air itself**, with **stars** at night
-
-The five above are drawn by the GPU: written and built, to be seen on the Mac.
-
-## Phase 5 — Apple, further
-
 - [ ] **Game Center**: achievements, leaderboards (best laps), friends
 - [ ] **iCloud saves**
 - [ ] **Haptics** on iPhone and controllers
@@ -241,9 +202,6 @@ The five above are drawn by the GPU: written and built, to be seen on the Mac.
 - [ ] **Indirect command buffers and GPU-driven culling**, when scenes are large enough to need them
 - [ ] **visionOS**: the game in a window, then immersive
 - [ ] **Spatial audio** through PHASE: real 3D sound, occlusion, reverb from the room
-
-## Later, when a game needs it
-
 - [ ] Audio buses, effects, reverb zones, ducking, adaptive music
 - [~] [x] Ragdolls, [x] cloth (1.3), [x] ropes with links — [ ] soft bodies, destruction
 - [ ] Continuous collision detection (fast bullets)
@@ -253,12 +211,3 @@ The five above are drawn by the GPU: written and built, to be seen on the Mac.
 - [ ] Compressed textures (ASTC), streamed audio, asset bundles
 - [ ] A 2D engine: sprites, atlases, tilemaps, 2D physics and lights — almost an engine of its own; only for a 2D game
 - [ ] Modding support
-
-## Not planned
-
-These go against what Molten is, or are a company and not an engine.
-
-- Windows, Linux, Android, WebGPU — Molten is Apple only, and that is its reason to exist
-- C#, .NET, managed scripting — games are written in C++ and visual scripts
-- Asset and plugin marketplaces, creator revenue, review systems, forums, developer portal
-- Motion matching, crowd simulation, virtual texturing — AAA tools, for a team and an open world

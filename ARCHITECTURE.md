@@ -2,7 +2,8 @@
 
 This is the map. It says what each part does and why it is built that way; the source files say how, and their comments are written to be read. Names are given as `Folder/File`: the files are `Engine/Folder/File.hpp` and `.cpp`. The editor has its own section at the end.
 
-The renderer described here is the one Molten starts from. [ROADMAP.md](ROADMAP.md) says what replaces it and in which order.
+The renderer described here is the one Molten starts from. 
+[ROADMAP.md](ROADMAP.md) says what replaces it and in which order.
 
 ## Conventions
 
