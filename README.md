@@ -31,10 +31,11 @@
 You write games with C++ components or visual scripts, build scenes in a full editor, and ship to Mac, iPhone and iPad. No Windows, no Linux, no compatibility layers: just Apple hardware and Metal.
 
 ![The Molten Engine editor: Hierarchy, Game and Scene views side by side, the Inspector showing the car's Vehicle Body, the Explorer along the bottom](screen.png)
+(model source: https://sketchfab.com/3d-models/boat-assets-8e1d6d3c8e0849219a41d33b131ca432)
 
 > [!NOTE]
 
-> **Version 1.3, early development.** Everything described here is implemented and available today. Upcoming work and known limitations are in [ROADMAP.md](ROADMAP.md).
+> **Version 1.3, is still in early development.** Everything described here is implemented and available today. Upcoming work and known limitations are in [ROADMAP.md](ROADMAP.md).
 
 <picture>
 
